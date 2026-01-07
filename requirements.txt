@@ -1,0 +1,39 @@
+# -------------------------
+# Core framework
+# -------------------------
+Django>=6.0,<6.1
+djangorestframework>=3.15,<3.16
+django-environ>=0.11,<0.12
+
+# -------------------------
+# Database (PostgreSQL / TimescaleDB)
+# -------------------------
+psycopg[binary]>=3.2,<3.3
+
+# -------------------------
+# MQTT worker (device ingest)
+# -------------------------
+paho-mqtt>=2.1,<2.2
+
+# -------------------------
+# API utilities
+# -------------------------
+django-cors-headers>=4.6,<4.7
+django-filter>=24.3,<25.0
+
+# -------------------------
+# Data processing (optional but recommended)
+# -------------------------
+pandas>=2.2,<2.3
+numpy>=2.1,<2.2
+
+# -------------------------
+# Production server (optional; dev can use runserver)
+# -------------------------
+gunicorn>=23.0,<24.0
+uvicorn>=0.32,<0.33
+
+# -------------------------
+# Migrations / schema management (recommended)
+# -------------------------
+django-stubs>=5.1,<6.0  ; platform_system != "Windows"  # optional typing helpers

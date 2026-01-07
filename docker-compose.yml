@@ -1,0 +1,15 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: compostlab_tsdb
+    environment:
+      POSTGRES_DB: compostlab
+      POSTGRES_USER: compostlab
+      POSTGRES_PASSWORD: compostlab
+    ports:
+      - "5432:5432"
+    volumes:
+      - tsdb_data:/var/lib/postgresql/data
+
+volumes:
+  tsdb_data:
