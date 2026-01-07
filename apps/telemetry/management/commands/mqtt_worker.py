@@ -43,8 +43,8 @@ class Command(BaseCommand):
         # =============================
         host = os.getenv("MQTT_HOST", "118.25.108.254")
         port = int(os.getenv("MQTT_PORT", "1883"))
-        user = os.getenv("MQTT_USER", "admin")
-        pwd = os.getenv("MQTT_PASS", "L05b03j..")
+        user = os.getenv("MQTT_USER", "")
+        pwd = os.getenv("MQTT_PASS", "")
 
         # ✅ 默认只订阅 V2 协议的 telemetry topic
         # 规范格式：compostlab/v2/{device_code}/telemetry
