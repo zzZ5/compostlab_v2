@@ -18,18 +18,11 @@ services:
     container_name: compostlab_backend
     env_file:
       - .env.backend
-    environment:
-      # 若未在 .env.backend 中配置，可在此覆盖/补充
-      # DATABASE_URL 示例：postgres://compostlab:compostlab@db:5432/compostlab
-      # - DATABASE_URL=postgres://compostlab:compostlab@db:5432/compostlab
-      # DEBUG 在生产建议为 False
-      # - DEBUG=False
-      # ALLOWED_HOSTS 示例：你的域名或服务器 IP
-      # - ALLOWED_HOSTS=your.domain.com,127.0.0.1
+    environment: {}
     depends_on:
       - db
     ports:
-      - "8000:8000"
+      - "8001:8000"
 
   frontend:
     build:
@@ -40,8 +33,8 @@ services:
       - ./frontend/.env.production
     environment:
       # 默认前端调用后端的 /api/v2（通过 NEXT_PUBLIC_API_BASE）
-      # 这里直接指向 backend 容器，避免必须先上 Nginx
-      - NEXT_PUBLIC_API_BASE=http://backend:8000/api/v2
+      # 这里使用宿主机端口映射（例如本机访问时使用 localhost:8001）
+      NEXT_PUBLIC_API_BASE: http://localhost:8001/api/v2
     depends_on:
       - backend
     ports:
