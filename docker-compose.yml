@@ -11,5 +11,41 @@ services:
     volumes:
       - tsdb_data:/var/lib/postgresql/data
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: compostlab_backend
+    env_file:
+      - .env.backend
+    environment:
+      # 若未在 .env.backend 中配置，可在此覆盖/补充
+      # DATABASE_URL 示例：postgres://compostlab:compostlab@db:5432/compostlab
+      # - DATABASE_URL=postgres://compostlab:compostlab@db:5432/compostlab
+      # DEBUG 在生产建议为 False
+      # - DEBUG=False
+      # ALLOWED_HOSTS 示例：你的域名或服务器 IP
+      # - ALLOWED_HOSTS=your.domain.com,127.0.0.1
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: compostlab_frontend
+    env_file:
+      - ./frontend/.env.production
+    environment:
+      # 默认前端调用后端的 /api/v2（通过 NEXT_PUBLIC_API_BASE）
+      # 这里直接指向 backend 容器，避免必须先上 Nginx
+      - NEXT_PUBLIC_API_BASE=http://backend:8000/api/v2
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
 volumes:
   tsdb_data:

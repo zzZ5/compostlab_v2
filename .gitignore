@@ -1,21 +1,54 @@
-# Python
+#########################
+# Python / Django
+#########################
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# 本地虚拟环境
 .env
 .venv/
 venv/
 
-# Django
+# 本地 SQLite（如果曾经用过）
 db.sqlite3
+
+# Django 运行时文件（按需调整，如果你有持久化/media，请在服务器挂卷而不是进仓库）
 media/
 staticfiles/
+
+# 注意：如果你已经有正式迁移文件，不要忽略整个 migrations 目录，
+# 可以把这一行删掉，改为仅忽略 __pycache__ 和临时迁移。
 migrations/
 
-# IDE
+#########################
+# Node / Next.js (frontend)
+#########################
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# 前端环境变量
+frontend/.env.local
+frontend/.env.development
+frontend/.env.production
+
+#########################
+# 后端环境变量
+#########################
+.env.backend
+
+#########################
+# IDE / Editor
+#########################
 .vscode/
 .idea/
+*.code-workspace
 
-# OS
+#########################
+# OS / 杂项
+#########################
 .DS_Store
+Thumbs.db
+
