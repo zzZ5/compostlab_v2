@@ -10,7 +10,7 @@ CPOLAR_DIR="/usr/local/etc/cpolar"
 CPOLAR_CONF="$CPOLAR_DIR/cpolar.yml"
 
 # 检查是否已登录
-if [ ! -f "$CPOLAR_DIR/user.yml" ]; then
+if [ ! -f "$CPOLAR_DIR/cpolar.yml" ]; then
     echo "请先登录 cpolar: cpolar authtoken <your-token>"
     exit 1
 fi
