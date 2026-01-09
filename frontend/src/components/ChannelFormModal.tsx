@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import { Modal, Form, Input, Switch } from "antd";
-import { KeyValueEditor } from "@/components/KeyValueEditor";
+import KeyValueEditor from "@/components/KeyValueEditor";
 import { emptyObjectToUndefined, kvPairsToObject, objectToKVPairs } from "@/lib/kv";
 
 export type ChannelFormValues = {
