@@ -5,15 +5,19 @@ set -e
 
 echo "=== 配置 CPolar HTTPS 隧道 ==="
 
+# CPolar 配置文件路径
+CPOLAR_DIR="/usr/local/etc/cpolar"
+CPOLAR_CONF="$CPOLAR_DIR/cpolar.yml"
+
 # 检查是否已登录
-if [ ! -f ~/.cpolar/user.yml ]; then
+if [ ! -f "$CPOLAR_DIR/user.yml" ]; then
     echo "请先登录 cpolar: cpolar authtoken <your-token>"
     exit 1
 fi
 
 # 创建支持 HTTPS 的配置文件
-cat > ~/.cpolar/cpolar.yml << EOF
-authtoken: $(grep authtoken ~/.cpolar/user.yml | cut -d: -f2 | tr -d ' ')
+sudo tee "$CPOLAR_CONF" > /dev/null << EOF
+authtoken: $(grep authtoken "$CPOLAR_DIR/user.yml" | cut -d: -f2 | tr -d ' ')
 
 tunnels:
   # 后端 API 隧道（HTTPS）
@@ -35,10 +39,10 @@ tunnels:
     cpolar_https: true
 EOF
 
-echo "CPolar 配置文件已更新，已启用 HTTPS"
+echo "CPolar 配置文件已更新: $CPOLAR_CONF"
 echo ""
 echo "配置内容："
-cat ~/.cpolar/cpolar.yml
+sudo cat "$CPOLAR_CONF"
 echo ""
 echo "重启 CPolar 隧道..."
 
@@ -51,7 +55,7 @@ sleep 3
 
 echo ""
 echo "=== 隧道状态 ==="
-cpolar status | grep -E "URL|tcp|https"
+cpolar status
 
 echo ""
 echo "=== 访问地址 ==="
