@@ -141,3 +141,13 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_HEADERS = list(default_headers) + ["authorization"]
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+# 添加以下配置
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "https://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://127.0.0.1:3000",
+    "http://compostlab-v2.cpolar.cn",
+    "https://compostlab-v2.cpolar.cn",
+]
