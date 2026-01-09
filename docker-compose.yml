@@ -24,6 +24,21 @@ services:
     ports:
       - "8001:8000"
 
+  mqtt_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: compostlab_mqtt_worker
+    env_file:
+      - .env.backend
+    environment:
+      MQTT_HOST: 118.25.108.254
+      MQTT_PORT: 1883
+    depends_on:
+      - backend
+    command: python manage.py mqtt_worker
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

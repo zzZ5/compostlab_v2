@@ -25,12 +25,16 @@ show_help() {
 选项:
   build       - 重新构建前端（使用 HTTPS）
   restart     - 重启 Docker 服务
+  restart-mqtt- 重启 MQTT Worker
   status      - 查看服务状态
+  logs-mqtt   - 查看 MQTT Worker 日志
   help        - 显示此帮助信息
 
 示例:
   ./deploy.sh build        # 重建前端
   ./deploy.sh restart      # 重启服务
+  ./deploy.sh restart-mqtt # 重启 MQTT Worker
+  ./deploy.sh logs-mqtt    # 查看 MQTT 日志
 
 注意: CPolar 隧道请在网页控制台配置
 EOF
@@ -156,6 +160,25 @@ show_status() {
     echo ""
 }
 
+# 重启 MQTT Worker
+restart_mqtt() {
+    echo -e "${YELLOW}重启 MQTT Worker...${NC}"
+    docker compose restart mqtt_worker
+    sleep 5
+    echo -e "${GREEN}MQTT Worker 已重启${NC}"
+    echo ""
+
+    # 显示状态
+    show_status
+}
+
+# 查看 MQTT Worker 日志
+logs_mqtt() {
+    echo -e "${YELLOW}MQTT Worker 日志（最近 50 行）：${NC}"
+    echo ""
+    docker compose logs --tail=50 mqtt_worker
+}
+
 # 主函数
 main() {
     cd "$SCRIPT_DIR" || exit 1
@@ -167,8 +190,14 @@ main() {
         restart)
             restart_services
             ;;
+        restart-mqtt)
+            restart_mqtt
+            ;;
         status)
             show_status
+            ;;
+        logs-mqtt)
+            logs_mqtt
             ;;
         help|--help|-h)
             show_help
