@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# 重新构建前端脚本
+# 重新构建前端脚本（使用 HTTPS）
 set -e
 
-echo "=== 重新构建前端 ==="
+echo "=== 重新构建前端（使用 HTTPS）=== "
 
 echo "1. 检查前端环境变量..."
 if [ ! -f frontend/.env.production ]; then
@@ -20,7 +20,7 @@ docker compose stop frontend
 docker compose rm -f frontend
 
 echo ""
-echo "3. 重新构建前端镜像（使用新的环境变量）..."
+echo "3. 重新构建前端镜像（使用 HTTPS 地址）..."
 docker compose build --no-cache frontend
 
 echo ""
@@ -39,6 +39,6 @@ echo ""
 echo "=== 重新构建完成！==="
 echo ""
 echo "访问地址："
-echo "  前端: http://compostlab-v2.cpolar.cn"
-echo "  后端: http://compostlab-backend-v2.cpolar.cn/api/v2"
-echo "  Admin: http://compostlab-backend-v2.cpolar.cn/admin"
+echo "  前端: https://compostlab-v2.cpolar.cn"
+echo "  后端: https://compostlab-backend-v2.cpolar.cn/api/v2"
+echo "  Admin: https://compostlab-backend-v2.cpolar.cn/admin"

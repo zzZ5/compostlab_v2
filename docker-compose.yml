@@ -29,12 +29,12 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_BASE: http://compostlab-backend-v2.cpolar.cn/api/v2
+        NEXT_PUBLIC_API_BASE: https://compostlab-backend-v2.cpolar.cn/api/v2
     container_name: compostlab_frontend
     env_file:
       - ./frontend/.env.production
     environment:
-      NEXT_PUBLIC_API_BASE: http://compostlab-backend-v2.cpolar.cn/api/v2
+      NEXT_PUBLIC_API_BASE: https://compostlab-backend-v2.cpolar.cn/api/v2
     depends_on:
       - backend
     ports:
