@@ -26,7 +26,7 @@ fi
 # 3. 创建 cpolar 配置目录
 mkdir -p ~/.cpolar
 
-# 4. 创建配置文件
+# 4. 创建配置文件（使用固定域名）
 cat > ~/.cpolar/cpolar.yml << EOF
 authtoken: $(grep authtoken ~/.cpolar/user.yml | cut -d: -f2 | tr -d ' ')
 
@@ -36,17 +36,19 @@ tunnels:
     proto: http
     addr: 8001
     region: cn
-    subdomain: compostlab-backend  # 自定义子域名（如果账号支持）
+    subdomain: compostlab-backend-v2
     
   # 前端隧道
   frontend:
     proto: http
     addr: 3000
     region: cn
-    subdomain: compostlab-frontend
+    subdomain: compostlab-v2
 EOF
 
 echo "CPolar 配置文件已创建"
+echo "后端域名: compostlab-backend-v2.cpolar.cn"
+echo "前端域名: compostlab-v2.cpolar.cn"
 
 # 5. 停止现有服务
 echo "停止现有服务..."
@@ -75,8 +77,7 @@ echo "CPolar 隧道地址："
 sleep 3
 cpolar status | grep -E "URL|tcp"
 echo ""
-echo "下一步："
-echo "1. 记录后端的 CPolar 地址（类似 http://xxx.cpolar.cn）"
-echo "2. 修改 frontend/.env.production 中的 NEXT_PUBLIC_API_BASE"
-echo "3. 重新构建并启动前端："
-echo "   docker compose up -d --build frontend"
+echo "访问地址："
+echo "  前端: http://compostlab-v2.cpolar.cn"
+echo "  后端: http://compostlab-backend-v2.cpolar.cn/api/v2"
+echo "  Admin: http://compostlab-backend-v2.cpolar.cn/admin"
