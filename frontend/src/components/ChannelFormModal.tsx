@@ -12,6 +12,7 @@ export type ChannelFormValues = {
 	display_name?: string;
 	is_active?: boolean;
 	meta?: Record<string, any>;
+	__metaPairs?: any; // 内部使用，用于 KeyValueEditor
 };
 
 type Props = {
