@@ -20,7 +20,6 @@ staticfiles/
 
 # 注意：如果你已经有正式迁移文件，不要忽略整个 migrations 目录，
 # 可以把这一行删掉，改为仅忽略 __pycache__ 和临时迁移。
-migrations/
 
 #########################
 # Node / Next.js (frontend)
