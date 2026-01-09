@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { Button, Card, Form, Input, Typography, message } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setBasicAuth, clearBasicAuth } from "@/lib/auth";
@@ -7,7 +8,7 @@ import { api } from "@/lib/api";
 
 const { Title, Text } = Typography;
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next") || "/";
@@ -50,5 +51,13 @@ export default function LoginPage() {
         </Form>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }
