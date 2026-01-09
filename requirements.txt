@@ -20,6 +20,7 @@ paho-mqtt>=2.1,<2.2
 # -------------------------
 django-cors-headers>=4.6,<4.7
 django-filter>=24.3,<25.0
+whitenoise>=6.8,<7.0
 
 # -------------------------
 # Data processing (optional but recommended)
