@@ -138,6 +138,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://127.0.0.1:3000",
     "http://compostlab-v2.cpolar.cn",
     "https://compostlab-v2.cpolar.cn",
+    "http://compostlab-backend-v2.cpolar.cn",
+    "https://compostlab-backend-v2.cpolar.cn",
 ]
 CORS_ALLOW_HEADERS = list(default_headers) + ["authorization"]
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -150,4 +152,6 @@ CSRF_TRUSTED_ORIGINS = [
     "https://127.0.0.1:3000",
     "http://compostlab-v2.cpolar.cn",
     "https://compostlab-v2.cpolar.cn",
+    "http://compostlab-backend-v2.cpolar.cn",
+    "https://compostlab-backend-v2.cpolar.cn",
 ]
