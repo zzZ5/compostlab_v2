@@ -85,14 +85,25 @@ rebuild_frontend() {
     cat frontend/.env.production
     echo ""
 
+    # 确保是 HTTPS
+    if ! grep -q "https://" frontend/.env.production; then
+        echo -e "${RED}错误: 环境变量不是 HTTPS！${NC}"
+        echo "请手动编辑 frontend/.env.production 确保是 https://"
+        exit 1
+    fi
+
     # 停止并删除前端容器
     echo "停止前端容器..."
     docker compose stop frontend
     docker compose rm -f frontend
 
-    # 重新构建前端
-    echo "重新构建前端镜像..."
-    docker compose build --no-cache frontend
+    # 清理构建缓存（重要！）
+    echo "清理 Docker 构建缓存..."
+    docker system prune -f
+
+    # 重新构建前端（强制无缓存）
+    echo "重新构建前端镜像（无缓存）..."
+    docker compose build --no-cache --pull frontend
 
     # 启动前端
     echo "启动前端服务..."
@@ -106,6 +117,15 @@ rebuild_frontend() {
     echo "=== 前端环境变量 ==="
     docker compose exec frontend env | grep NEXT_PUBLIC_API_BASE
     echo ""
+
+    # 检查是否是 HTTPS
+    if docker compose exec frontend env | grep -q "https://"; then
+        echo -e "${GREEN}✓ HTTPS 配置正确${NC}"
+    else
+        echo -e "${RED}✗ 仍然是 HTTP！${NC}"
+        echo "请检查 docker-compose.yml 中的 build.args"
+        exit 1
+    fi
 
     echo -e "${GREEN}前端重新构建完成${NC}"
     echo ""
