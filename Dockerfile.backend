@@ -1,14 +1,15 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100
 
 WORKDIR /app
 
-# 配置pip使用国内镜像源
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 配置pip使用官方PyPI源（更稳定，更新及时）
+RUN pip config set global.index-url https://pypi.org/simple
 
 # 安装系统依赖（主要用于 psycopg 等）
 RUN apt-get update && apt-get install -y \
@@ -18,13 +19,18 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     gcc \
     tzdata \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-# 升级pip并安装依赖
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements.txt
+# 分步升级和安装依赖，提高稳定性
+RUN pip install --upgrade pip setuptools wheel || pip install --upgrade pip setuptools wheel --default-timeout=100
+
+# 尝试安装依赖，如果失败则重试
+RUN pip install -r requirements.txt || \
+    (echo "First attempt failed, retrying..." && \
+     pip install -r requirements.txt --default-timeout=200 --retries 3)
 
 COPY . .
 
