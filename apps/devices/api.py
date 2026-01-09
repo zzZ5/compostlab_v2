@@ -504,6 +504,7 @@ class ChannelByCodeView(BasicAuthMixin, View):
         except Device.DoesNotExist:
             return _json_404("Device not found.")
 
+        # ✅ code 统一转大写（与前端和 ingest 服务保持一致）
         code = (code or "").strip().upper()
         if not code:
             return _json_400("code is required.")
@@ -541,6 +542,7 @@ class ChannelCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 
         body = self.json_body(request)
 
+        # ✅ code 统一转大写（与前端和 ingest 服务保持一致）
         code = (body.get("code") or "").strip().upper()
         if not code:
             return _json_400("code is required.")
@@ -592,6 +594,7 @@ class ChannelUpsertView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
         except Device.DoesNotExist:
             return _json_404("Device not found.")
 
+        # ✅ code 统一转大写（与前端和 ingest 服务保持一致）
         code = (code or "").strip().upper()
         if not code:
             return _json_400("code is required.")
@@ -655,6 +658,7 @@ class ChannelUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
         except Channel.DoesNotExist:
             return _json_404("Channel not found.")
 
+        # ✅ code 统一转大写（与前端和 ingest 服务保持一致）
         if "code" in body:
             code = (body.get("code") or "").strip().upper()
             if not code:

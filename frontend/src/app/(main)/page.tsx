@@ -9,7 +9,7 @@ import { useDevicesTree } from "@/features/devices/queries";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
-import { MetricKey, metricLabel, normalizeMetric } from "@/lib/metrics";
+import { MetricKey, metricLabel, normalizeMetric, getChannelDisplayName } from "@/lib/metrics";
 import { pickFeaturedChannels } from "@/lib/channelGroups";
 
 const { Text } = Typography;
@@ -253,10 +253,11 @@ export default function DashboardPage() {
 										const isO2 = mk === "o2";
 										const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
 										const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
+										const displayName = getChannelDisplayName(ch);
 										return (
 											<div key={ch.code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
 												<Text type="secondary" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-													{ch.display_name || ch.code}
+													{displayName}
 												</Text>
 												<Space size={6}>
 													<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>

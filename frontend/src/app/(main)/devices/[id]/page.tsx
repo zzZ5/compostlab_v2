@@ -42,7 +42,7 @@ import { useSendDeviceCommand } from "@/features/devices/mutations";
 import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
 import { emptyObjectToUndefined } from "@/lib/kv";
 import { channelByMetric } from "@/lib/channel";
-import { MetricKey, metricLabel, normalizeMetric } from "@/lib/metrics";
+import { MetricKey, metricLabel, normalizeMetric, getChannelDisplayName } from "@/lib/metrics";
 import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey } from "@/lib/channelGroups";
 
 import type { Channel } from "@/types/api";
@@ -379,7 +379,8 @@ export default function DeviceDetailPage() {
 		try {
 			const v = await channelForm.validateFields();
 			const body: any = {
-				code: String(v.code || "").trim(),
+				// code 统一转大写（与后端 normalizeCode 逻辑保持一致）
+				code: String(v.code || "").trim().toUpperCase(),
 				name: (v.name || "").trim() || null,
 				display_name: (v.display_name || "").trim() || null,
 				metric: (v.metric || "").trim() || null,
@@ -498,14 +499,17 @@ export default function DeviceDetailPage() {
 			title: "Code",
 			dataIndex: "code",
 			key: "code",
-			render: (v: string, r: Channel) => (
-				<Space orientation="vertical" size={0}>
-					<Text strong>{v}</Text>
-					<Text type="secondary" style={{ fontSize: 12 }}>
-						{r.display_name || r.name || "-"}
-					</Text>
-				</Space>
-			),
+			render: (v: string, r: Channel) => {
+				const displayName = getChannelDisplayName(r);
+				return (
+					<Space orientation="vertical" size={0}>
+						<Text strong>{v}</Text>
+						<Text type="secondary" style={{ fontSize: 12 }}>
+							{displayName}
+						</Text>
+					</Space>
+				);
+			},
 		},
 		{
 			title: "Metric",
@@ -677,7 +681,7 @@ export default function DeviceDetailPage() {
 																			whiteSpace: "nowrap",
 																		}}
 																	>
-																		{ch.display_name || ch.code}
+																		{getChannelDisplayName(ch)}
 																	</Text>
 																	<span style={{ fontWeight: 700 }}>
 																		{v !== undefined && v !== null ? v : "-"}{" "}

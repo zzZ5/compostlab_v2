@@ -156,9 +156,9 @@ class Point:
 def _normalize_code(s: Any) -> str:
     """
     Normalize channel code to str.
-    过滤 None，去除前后空白。
+    过滤 None，去除前后空白，转大写（避免大小写导致的重复 channel）。
     """
-    return str(s or "").strip()
+    return str(s or "").strip().upper()
 
 
 def _extract_points_v2(payload: dict) -> List[Point]:
