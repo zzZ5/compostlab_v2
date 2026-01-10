@@ -49,7 +49,7 @@ export default function UsersPage() {
         message.success("用户更新成功");
       } else {
         // 创建用户
-        await api.post("/users/create", values);
+        const res = await api.post("/users/create", values);
         message.success("用户创建成功");
       }
       setModalOpen(false);

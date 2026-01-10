@@ -31,14 +31,34 @@ class LoginView(View):
             body = json.loads(request.body.decode("utf-8"))
         except Exception:
             return JsonResponse({"detail": "Invalid JSON body."}, status=400)
-        
+
         username = body.get("username", "").strip()
         password = body.get("password", "")
-        
+
         if not username or not password:
             return JsonResponse({"detail": "Username and password required."}, status=400)
-        
-        user = authenticate(username=username, password=password)
+
+        # 支持多种登录方式：用户名、邮箱、手机号
+        user = None
+        try:
+            # 1. 先尝试用户名登录
+            user = authenticate(username=username, password=password)
+        except:
+            pass
+
+        # 2. 如果用户名登录失败，尝试用邮箱或手机号查找用户
+        if not user:
+            try:
+                profile_user = User.objects.filter(
+                    Q(email__iexact=username) | Q(profile__phone__iexact=username)
+                ).first()
+
+                if profile_user:
+                    # 用找到的用户名重新认证
+                    user = authenticate(username=profile_user.username, password=password)
+            except:
+                pass
+
         if not user:
             log_audit(
                 None,

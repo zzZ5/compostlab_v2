@@ -136,18 +136,18 @@ export default function DashboardPage() {
 
   return (
     <Page
-      title="Dashboard"
+      title="仪表盘"
       extra={
         <Space wrap>
           <Input.Search
             placeholder="搜索设备（name / code）"
             allowClear
-            style={{ width: isMobile ? 220 : 320 }}
+            style={{ width: isMobile ? "100%" : 320 }}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
           <Select
-            style={{ width: 150 }}
+            style={{ width: isMobile ? "100%" : 150 }}
             value={statusFilter}
             onChange={setStatusFilter}
             options={[
@@ -159,7 +159,7 @@ export default function DashboardPage() {
             ]}
           />
           <Select
-            style={{ width: 180 }}
+            style={{ width: isMobile ? "100%" : 180 }}
             value={alertFilter}
             onChange={setAlertFilter}
             options={[
@@ -174,29 +174,29 @@ export default function DashboardPage() {
       }
     >
       {/* KPI */}
-      <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
-          <Card>
+          <Card style={{ borderRadius: 6 }}>
             <Text type="secondary">设备总数</Text>
-            <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi.total}</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>{kpi.total}</div>
           </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card>
+          <Card style={{ borderRadius: 6 }}>
             <Text type="secondary">Online</Text>
-            <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi.online}</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>{kpi.online}</div>
           </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card>
+          <Card style={{ borderRadius: 6 }}>
             <Text type="secondary">危险告警</Text>
-            <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi.danger}</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>{kpi.danger}</div>
           </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card>
+          <Card style={{ borderRadius: 6 }}>
             <Text type="secondary">当前展示</Text>
-            <div style={{ fontSize: 26, fontWeight: 700 }}>{filtered.length}</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>{filtered.length}</div>
           </Card>
         </Col>
       </Row>
@@ -229,67 +229,69 @@ export default function DashboardPage() {
           return (
             <Col key={d.device_id} xs={24} md={12} lg={8}>
               <Link href={`/devices/${d.device_id}`} style={{ display: "block" }}>
-                <Card hoverable>
+                <Card hoverable style={{ borderRadius: 6, height: "100%" }}>
                   {/* header */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {d.name || d.code}
-                      </div>
-                      <Space size={6} wrap style={{ marginTop: 8 }}>
-                        <Tag color={st.color}>{st.text}</Tag>
-                        <Tag color="blue">{d.code}</Tag>
-                        <Tag color={ovTagColor}>{ovText}</Tag>
-                      </Space>
+                  <div style={{ marginBottom: 12 }}>
+                    <div
+                      style={{
+                        fontSize: 16,
+                        fontWeight: 600,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {d.name || d.code}
                     </div>
-
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "rgba(0,0,0,.45)" }}>Last seen</div>
-                      <div style={{ fontSize: 12 }}>{d.last_seen_at || "-"}</div>
-                    </div>
+                    <Space size={4} wrap>
+                      <Tag color={st.color}>{st.text}</Tag>
+                      <Tag color="blue">{d.code}</Tag>
+                      <Tag color={ovTagColor}>{ovText}</Tag>
+                    </Space>
                   </div>
 
                   {/* metrics chips */}
-                  <div style={{ marginTop: 10 }}>
+                  <div style={{ marginBottom: 8 }}>
                     {ms.length ? ms.map((m) => <Tag key={m}>{metricLabel(m)}</Tag>) : <Tag>未分类</Tag>}
                   </div>
 
-							{/* values (dynamic) */}
-							<div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-								{featured.length ? (
-									featured.map((ch: any) => {
-										const mk = normalizeMetric(ch.metric) as MetricKey;
-										const v = latestNumber(ch);
-										const isTemp = mk === "temperature";
-										const isO2 = mk === "o2";
-										const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-										const qualityInfo = getQualityInfo(ch);
-										const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
-										const displayName = getChannelDisplayName(ch);
-										return (
-											<div key={ch.code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-												<Text type="secondary" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-													{displayName}
-												</Text>
-												<Space size={6}>
-													<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
-													<Tag color={qualityInfo.color} style={{ fontSize: 11 }}>{qualityInfo.quality}</Tag>
-													{a ? (
-														<Tooltip title={a.tip}>
-															<span style={{ color: "rgba(0,0,0,.45)" }}>ⓘ</span>
-														</Tooltip>
-													) : null}
-												</Space>
-											</div>
-										);
-									})
-								) : (
-									<div style={{ display: "flex", justifyContent: "space-between" }}>
-										<Text type="secondary">暂无通道数据</Text>
-										<Tag>-</Tag>
-									</div>
-								)}
-							</div>
+                  {/* values (dynamic) */}
+                  <div style={{ marginTop: 8 }}>
+                    {featured.length ? (
+                      featured.map((ch: any) => {
+                        const mk = normalizeMetric(ch.metric) as MetricKey;
+                        const v = latestNumber(ch);
+                        const isTemp = mk === "temperature";
+                        const isO2 = mk === "o2";
+                        const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
+                        const qualityInfo = getQualityInfo(ch);
+                        const tag = ch?.latest
+                          ? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
+                          : "-";
+                        const displayName = getChannelDisplayName(ch);
+                        return (
+                          <div
+                            key={ch.code}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              padding: "4px 0",
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 13 }}>
+                              {displayName}
+                            </Text>
+                            <Space size={4}>
+                              <Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
+                              <Tag color={qualityInfo.color} style={{ fontSize: 11 }}>
+                                {qualityInfo.quality}
+                              </Tag>
+                            </Space>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <Text type="secondary">暂无通道数据</Text>
+                    )}
+                  </div>
                 </Card>
               </Link>
             </Col>

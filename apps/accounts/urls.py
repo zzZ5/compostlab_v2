@@ -14,8 +14,8 @@ urlpatterns = [
     
     # 用户管理（管理员）
     path("users", api.UserListView.as_view(), name="user_list"),
-    path("users/<int:user_id>", api.UserDetailView.as_view(), name="user_detail"),
     path("users/create", api.UserCreateView.as_view(), name="user_create"),
+    path("users/<int:user_id>", api.UserDetailView.as_view(), name="user_detail"),
     path("users/<int:user_id>/update", api.UserUpdateView.as_view(), name="user_update"),
     path("users/<int:user_id>/toggle-active", api.UserToggleActiveView.as_view(), name="user_toggle_active"),
     

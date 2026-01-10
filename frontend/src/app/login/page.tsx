@@ -22,51 +22,72 @@ function LoginForm() {
         display: "grid",
         placeItems: "center",
         padding: 24,
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        background: "#f5f5f5",
       }}
     >
-      <Card style={{ width: 440, maxWidth: "100%", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+      <Card
+        style={{
+          width: 400,
+          maxWidth: "100%",
+          borderRadius: 8,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+          border: "1px solid #e8e8e8",
+        }}
+      >
         <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <div style={{ fontSize: 48, marginBottom: 8 }}>🧪</div>
-          <Title level={3} style={{ marginTop: 0, marginBottom: 4 }}>
+          <Title level={3} style={{ marginBottom: 8, fontWeight: 600 }}>
             CompostLab
           </Title>
           <Text type="secondary">实验室数据管理系统</Text>
         </div>
 
-        <Form
-          layout="vertical"
-          onFinish={async (v) => {
-            try {
-              const res = await api.post<LoginResp>("/auth/login", {
-                username: v.username,
-                password: v.password,
-              });
-              
-              const { access, refresh, user } = res.data;
-              
-              // 保存 token 和用户信息
-              setTokens(access, refresh);
-              setUser(user);
-              
-              message.success(`欢迎回来，${user.real_name || user.username}！`);
-              router.replace(next);
-            } catch (err: any) {
-              const errMsg = err?.response?.data?.detail || "登录失败";
-              message.error(errMsg);
-              clearTokens();
-            }
-          }}
-        >
-          <Form.Item label="用户名" name="username" rules={[{ required: true, message: "请输入用户名" }]}>
-            <Input autoFocus prefix={<UserOutlined />} placeholder="请输入用户名" size="large" />
+        <Form layout="vertical" onFinish={async (v) => {
+          try {
+            const res = await api.post<LoginResp>("/auth/login", {
+              username: v.username,
+              password: v.password,
+            });
+
+            const { access, refresh, user } = res.data;
+
+            // 保存 token 和用户信息
+            setTokens(access, refresh);
+            setUser(user);
+
+            message.success(`欢迎回来，${user.real_name || user.username}！`);
+            router.replace(next);
+          } catch (err: any) {
+            const errMsg = err?.response?.data?.detail || "登录失败";
+            message.error(errMsg);
+            clearTokens();
+          }
+        }}>
+          <Form.Item
+            label="用户名/邮箱/手机号"
+            name="username"
+            rules={[{ required: true, message: "请输入用户名" }]}
+          >
+            <Input
+              autoFocus
+              prefix={<UserOutlined />}
+              placeholder="请输入用户名/邮箱/手机号"
+              size="large"
+            />
           </Form.Item>
 
-          <Form.Item label="密码" name="password" rules={[{ required: true, message: "请输入密码" }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder="请输入密码" size="large" />
+          <Form.Item
+            label="密码"
+            name="password"
+            rules={[{ required: true, message: "请输入密码" }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder="请输入密码"
+              size="large"
+            />
           </Form.Item>
 
-          <Button type="primary" htmlType="submit" block size="large" style={{ marginTop: 8 }}>
+          <Button type="primary" htmlType="submit" block size="large">
             登录
           </Button>
         </Form>

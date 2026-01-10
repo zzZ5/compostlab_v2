@@ -229,13 +229,13 @@ export default function RunsPage() {
 
 	return (
 		<Page
-			title="Runs"
+			title="运行批次"
 			extra={
 				<Space wrap>
 					<Input.Search
 						placeholder="搜索 run（name）"
 						allowClear
-						style={{ width: isMobile ? 220 : 320 }}
+						style={{ width: isMobile ? "100%" : 320 }}
 						value={q}
 						onChange={(e) => setQ(e.target.value)}
 					/>
@@ -255,54 +255,32 @@ export default function RunsPage() {
 				<Row gutter={[12, 12]}>
 					{data.map((r: any) => (
 						<Col xs={24} key={r.run_id}>
-							<Card
-								hoverable
-								onClick={() => router.push(`/runs/${r.run_id}`)}
-							>
-								<div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-									<div style={{ minWidth: 0 }}>
-										<div
-											style={{
-												fontSize: 16,
-												fontWeight: 700,
-												overflow: "hidden",
-												textOverflow: "ellipsis",
-												whiteSpace: "nowrap",
-											}}
-										>
-											{r.name || `Run #${r.run_id}`}
-										</div>
-										<Space size={6} wrap style={{ marginTop: 8 }}>
-											<Tag color="blue">ID {r.run_id}</Tag>
-										</Space>
+							<Card hoverable onClick={() => router.push(`/runs/${r.run_id}`)}>
+								<div style={{ marginBottom: 8 }}>
+									<div
+										style={{
+											fontSize: 16,
+											fontWeight: 600,
+											marginBottom: 6,
+										}}
+									>
+										{r.name || `Run #${r.run_id}`}
 									</div>
-
-									<div style={{ textAlign: "right" }}>
-										<div style={{ fontSize: 12, color: "rgba(0,0,0,.45)" }}>Updated</div>
-										<div style={{ fontSize: 12 }}>{r.updated_at || "-"}</div>
-									</div>
+									<Space size={4} wrap>
+										<Tag color="blue">ID {r.run_id}</Tag>
+									</Space>
 								</div>
 
-								<div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-									<Text style={{ fontSize: 12 }}>
-										状态：{getRunStatus(r)}（{getRunDuration(r)}）
-									</Text>
-									<Text style={{ fontSize: 12 }}>start: {r.start_at || "-"}</Text>
-									<Text style={{ fontSize: 12 }}>end: {r.end_at || "-"}</Text>
-									<Text style={{ fontSize: 12 }}>created: {r.created_at || "-"}</Text>
-									<Text type="secondary" style={{ fontSize: 12 }}>
-										{r.note || "-"}
-									</Text>
-									<Text style={{ fontSize: 12 }}>
-										配方：{getRecipeSummary(r.recipe)}
-									</Text>
-									<Text style={{ fontSize: 12 }}>
-										设置：{getSettingsSummary(r.settings)}
-									</Text>
+								<div style={{ marginTop: 8, fontSize: 13 }}>
+									<div>状态：{getRunStatus(r)}（{getRunDuration(r)}）</div>
+									<div style={{ marginTop: 4 }}>start: {r.start_at || "-"}</div>
+									<div>end: {r.end_at || "-"}</div>
+									<div>created: {r.created_at || "-"}</div>
+									<Text type="secondary">{r.note || "-"}</Text>
 								</div>
 
 								{manage && (
-									<div style={{ marginTop: 12 }}>
+									<div style={{ marginTop: 10 }}>
 										<Space>
 											<Button
 												size="small"

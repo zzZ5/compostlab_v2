@@ -318,18 +318,18 @@ export default function DevicesPage() {
 
 	return (
 		<Page
-			title="Devices"
+			title="设备管理"
 			extra={
 				<Space wrap>
 					<Input.Search
 						placeholder="搜索设备（name / code）"
 						allowClear
-						style={{ width: isMobile ? 220 : 320 }}
+						style={{ width: isMobile ? "100%" : 320 }}
 						value={q}
 						onChange={(e) => setQ(e.target.value)}
 					/>
 					<Select
-						style={{ width: 150 }}
+						style={{ width: isMobile ? "100%" : 150 }}
 						value={statusFilter}
 						onChange={setStatusFilter}
 						options={[
@@ -341,7 +341,7 @@ export default function DevicesPage() {
 						]}
 					/>
 					<Select
-						style={{ width: 160 }}
+						style={{ width: isMobile ? "100%" : 160 }}
 						value={alertFilter}
 						onChange={setAlertFilter}
 						options={[
@@ -386,82 +386,77 @@ export default function DevicesPage() {
 						return (
 							<Col xs={24} key={d.device_id}>
 								<Card hoverable onClick={() => router.push(`/devices/${d.device_id}`)}>
-									<div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-										<div style={{ minWidth: 0 }}>
-											<div
-												style={{
-													fontSize: 16,
-													fontWeight: 700,
-													overflow: "hidden",
-													textOverflow: "ellipsis",
-													whiteSpace: "nowrap",
-												}}
-											>
-												{d.name || d.code}
-											</div>
-
-											<Space size={6} wrap style={{ marginTop: 8 }}>
-												<Tag color={st.color}>{st.text}</Tag>
-												<Tag color="blue">{d.code}</Tag>
-												<Tag color={ovTagColor}>{ovText}</Tag>
-											</Space>
-
-											{manage && (
-												<div style={{ marginTop: 12 }}>
-													<Space>
-														<Button
-															size="small"
-															onClick={(e) => {
-																e.stopPropagation();
-																openEdit(d);
-															}}
-														>
-															编辑
-														</Button>
-														<Button
-															size="small"
-															danger
-															onClick={(e) => {
-																e.stopPropagation();
-																confirmDelete(d);
-															}}
-														>
-															删除
-														</Button>
-													</Space>
-												</div>
-											)}
+									<div style={{ marginBottom: 8 }}>
+										<div
+											style={{
+												fontSize: 16,
+												fontWeight: 600,
+												marginBottom: 6,
+											}}
+										>
+											{d.name || d.code}
 										</div>
-
-										<div style={{ textAlign: "right" }}>
-											<div style={{ fontSize: 12, color: "rgba(0,0,0,.45)" }}>Last seen</div>
-											<div style={{ fontSize: 12 }}>{d.last_seen_at || "-"}</div>
-										</div>
+										<Space size={4} wrap>
+											<Tag color={st.color}>{st.text}</Tag>
+											<Tag color="blue">{d.code}</Tag>
+											<Tag color={ovTagColor}>{ovText}</Tag>
+										</Space>
 									</div>
 
-									<div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-										{featured.length ? (
-											featured.map((ch: any) => {
+									{featured.length > 0 && (
+										<div style={{ marginTop: 8 }}>
+											{featured.map((ch: any) => {
 												const mk = normalizeMetric(ch.metric) as MetricKey;
 												const v = latestNumber(ch);
 												const isTemp = mk === "temperature";
 												const isO2 = mk === "o2";
 												const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-												const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
+												const tag = ch?.latest
+													? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
+													: "-";
 												return (
-													<div key={ch.code} style={{ display: "flex", justifyContent: "space-between" }}>
+													<div
+														key={ch.code}
+														style={{
+															display: "flex",
+															justifyContent: "space-between",
+															padding: "3px 0",
+															fontSize: 13,
+														}}
+													>
 														<Text type="secondary">{ch.display_name || ch.code}</Text>
 														<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
 													</div>
 												);
-											})
-										) : (
-											<div style={{ display: "flex", justifyContent: "space-between" }}>
-												<Text type="secondary">暂无通道数据</Text>
-												<Tag>-</Tag>
-											</div>
-										)}
-									</div>
+											})}
+										</div>
+									)}
+
+									{manage && (
+										<div style={{ marginTop: 10 }}>
+											<Space>
+												<Button
+													size="small"
+													onClick={(e) => {
+														e.stopPropagation();
+														openEdit(d);
+													}}
+												>
+													编辑
+												</Button>
+												<Button
+													size="small"
+													danger
+													onClick={(e) => {
+														e.stopPropagation();
+														confirmDelete(d);
+													}}
+												>
+													删除
+												</Button>
+											</Space>
+										</div>
+									)}
 								</Card>
 							</Col>
 						);

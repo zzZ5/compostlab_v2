@@ -22,7 +22,7 @@ export default function Page({ title, extra, children }: PageProps) {
           marginBottom: 16,
         }}
       >
-        <Typography.Title level={3} style={{ margin: 0 }}>
+        <Typography.Title level={3} style={{ margin: 0, fontWeight: 600 }}>
           {title}
         </Typography.Title>
         {extra && <Space wrap>{extra}</Space>}

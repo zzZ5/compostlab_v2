@@ -296,14 +296,14 @@ export default function TelemetryExplorePage() {
             <Spin />
           </div>
         ) : (
-          <div style={{ height: 420 }}>
-				<ReactECharts
-					key={`${deviceIds.join(",")}-${channelCodes.join(",")}-${bucket}-${from || ""}-${to || ""}`}
-					option={chartOption}
-					notMerge
-					lazyUpdate
-					style={{ height: "100%", width: "100%" }}
-				/>
+          <div style={{ height: isMobile ? 350 : 420 }}>
+            <ReactECharts
+              key={`${deviceIds.join(",")}-${channelCodes.join(",")}-${bucket}-${from || ""}-${to || ""}`}
+              option={chartOption}
+              notMerge
+              lazyUpdate
+              style={{ height: "100%", width: "100%" }}
+            />
           </div>
         )}
       </Card>

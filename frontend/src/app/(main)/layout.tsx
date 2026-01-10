@@ -102,17 +102,16 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         }}
         breakpoint="md"
         collapsedWidth={isMobile ? 0 : 80}
-        style={{ borderRight: "1px solid rgba(0,0,0,0.06)" }}
+        style={{ borderRight: "1px solid #e8e8e8" }}
       >
         <div
           style={{
             height: 56,
             display: "flex",
             alignItems: "center",
-            padding: "0 16px",
-            fontWeight: 700,
+            padding: "0 20px",
+            fontWeight: 600,
             fontSize: 18,
-            letterSpacing: 0.2,
             color: "#fff",
           }}
         >
@@ -144,8 +143,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <Header
           style={{
             background: "#fff",
-            borderBottom: "1px solid rgba(0,0,0,0.06)",
-            padding: "0 24px",
+            borderBottom: "1px solid #e8e8e8",
+            padding: isMobile ? "0 16px" : "0 24px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -157,25 +156,34 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={onToggleCollapsed}
-            style={{ fontSize: 16 }}
           />
 
           <Space size="middle">
             {currentUser && (
               <>
-                <Space size="small">
-                  <Text type="secondary" style={{ fontSize: 13 }}>
-                    {currentUser.real_name || currentUser.username}
-                  </Text>
-                  {currentUser.role && (
-                    <Tag color={currentUser.role === "admin" ? "red" : currentUser.role === "operator" ? "blue" : "default"}>
-                      {currentUser.role_display || currentUser.role}
-                    </Tag>
-                  )}
-                </Space>
+                {!isMobile && (
+                  <Space size="small">
+                    <Text type="secondary" style={{ fontSize: 13 }}>
+                      {currentUser.real_name || currentUser.username}
+                    </Text>
+                    {currentUser.role && (
+                      <Tag
+                        color={
+                          currentUser.role === "admin"
+                            ? "red"
+                            : currentUser.role === "operator"
+                            ? "blue"
+                            : "default"
+                        }
+                      >
+                        {currentUser.role_display || currentUser.role}
+                      </Tag>
+                    )}
+                  </Space>
+                )}
               </>
             )}
-            
+
             <Dropdown
               menu={{
                 items: [
@@ -201,15 +209,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               }}
               trigger={["click"]}
             >
-              <Avatar
-                icon={<UserOutlined />}
-                style={{ cursor: "pointer", backgroundColor: "#1890ff" }}
-              />
+              <Avatar icon={<UserOutlined />} style={{ cursor: "pointer" }} />
             </Dropdown>
           </Space>
         </Header>
 
-        <Content style={{ padding: 24 }}>
+        <Content style={{ padding: isMobile ? 16 : 24 }}>
           <div style={{ maxWidth: 1400, margin: "0 auto" }}>{children}</div>
         </Content>
       </Layout>
