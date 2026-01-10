@@ -7,6 +7,7 @@ import { InfoCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons
 
 import Page from "@/components/Page";
 import { useDevicesTree } from "@/features/devices/queries";
+import { useRuns } from "@/features/runs/queries";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
@@ -35,15 +36,15 @@ function latestNumber(ch: any): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
-function getQualityInfo(ch: any): { quality: string; color: string } {
-	if (!ch?.latest) return { quality: "无数据", color: "default" };
+function getQualityInfo(ch: any): { quality: string; color: string; isBad: boolean } {
+	if (!ch?.latest) return { quality: "无数据", color: "default", isBad: true };
 	const q = ch.latest.quality || ch.latest.quality_flag || "OK";
 	const qUpper = String(q).toUpperCase();
-	if (qUpper === "OK") return { quality: "OK", color: "green" };
-	if (qUpper === "WARN" || qUpper === "WARNING") return { quality: "WARN", color: "orange" };
-	if (qUpper === "BAD" || qUpper === "ERROR") return { quality: "BAD", color: "red" };
-	if (qUpper === "ERR") return { quality: "ERR", color: "red" };
-	return { quality: qUpper, color: "default" };
+	if (qUpper === "OK") return { quality: "OK", color: "green", isBad: false };
+	if (qUpper === "WARN" || qUpper === "WARNING") return { quality: "WARN", color: "orange", isBad: true };
+	if (qUpper === "BAD" || qUpper === "ERROR") return { quality: "BAD", color: "red", isBad: true };
+	if (qUpper === "ERR") return { quality: "ERR", color: "red", isBad: true };
+	return { quality: qUpper, color: "default", isBad: false };
 }
 
 function maxLatest(chs: any[]): number | null {
@@ -72,16 +73,32 @@ export default function DashboardPage() {
 
   const devicesQ = useDevicesTree(true);
   const devices = devicesQ.data || [];
+  const runsQ = useRuns();
+  const runs = runsQ.data || [];
 
   // filters
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [alertFilter, setAlertFilter] = useState<string>("all");
+  const [runFilter, setRunFilter] = useState<string | undefined>(undefined);
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
 
     return devices.filter((d) => {
+      // run filter
+      if (runFilter !== undefined && runFilter !== "") {
+        // 找到该 run 下的所有窗口
+        const run = runs.find((r: any) => String(r.id) === runFilter);
+        if (run) {
+          // 检查设备是否在该 run 的任何窗口中
+          const deviceInRun = (run.windows || []).some((w: any) =>
+            (w.devices || []).some((dev: any) => dev.device_id === d.device_id)
+          );
+          if (!deviceInRun) return false;
+        }
+      }
+
       // status filter
       const state = getOnlineState(d.last_seen_at);
       if (statusFilter !== "all" && state !== statusFilter) return false;
@@ -89,8 +106,13 @@ export default function DashboardPage() {
       // alerts (O2 + Temp) —— 不再假设每台设备一定有且仅有一个温度/氧气
       const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
       const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
-      const tempV = maxLatest(tempChs); // 多路温度：取最大值更保守
-      const o2V = minLatest(o2Chs); // 多路氧气：取最小值更保守
+
+      // 过滤掉数据质量差的通道
+      const validTempChs = tempChs.filter((ch: any) => !getQualityInfo(ch).isBad);
+      const validO2Chs = o2Chs.filter((ch: any) => !getQualityInfo(ch).isBad);
+
+      const tempV = maxLatest(validTempChs.length > 0 ? validTempChs : tempChs); // 多路温度：取最大值更保守
+      const o2V = minLatest(validO2Chs.length > 0 ? validO2Chs : o2Chs); // 多路氧气：取最小值更保守
 
       const tA = evalTemp(tempV);
       const oA = evalO2(o2V);
@@ -103,7 +125,7 @@ export default function DashboardPage() {
       const hay = `${d.name || ""} ${d.code || ""}`.toLowerCase();
       return hay.includes(qq);
     });
-  }, [devices, q, statusFilter, alertFilter]);
+  }, [devices, q, statusFilter, alertFilter, runFilter, runs]);
 
   // KPI
   const kpi = useMemo(() => {
@@ -171,6 +193,20 @@ export default function DashboardPage() {
               { value: "none", label: "仅无数据" },
             ]}
           />
+          <Select
+            style={{ width: isMobile ? "100%" : 200 }}
+            value={runFilter}
+            onChange={setRunFilter}
+            placeholder="按批次筛选设备"
+            allowClear
+            options={[
+              { value: "", label: "全部批次" },
+              ...runs.map((r: any) => ({
+                value: String(r.id),
+                label: `${r.name} (${r.group || "N/A"})`,
+              })),
+            ]}
+          />
         </Space>
       }
     >
@@ -207,11 +243,22 @@ export default function DashboardPage() {
         {filtered.map((d) => {
           const st = onlineTag(getOnlineState(d.last_seen_at));
 
-			// 多路指标（如多点温度）支持：告警用“最保守”的 maxTemp / minO2
+			// 多路指标（如多点温度）支持：告警用"最保守"的 maxTemp / minO2
 			const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
 			const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
-			const maxTemp = maxLatest(tempChs);
-			const minO2 = minLatest(o2Chs);
+
+			// 过滤掉数据质量差的通道
+			const validTempChs = tempChs.filter((ch: any) => {
+				const q = getQualityInfo(ch);
+				return !q.isBad;
+			});
+			const validO2Chs = o2Chs.filter((ch: any) => {
+				const q = getQualityInfo(ch);
+				return !q.isBad;
+			});
+
+			const maxTemp = maxLatest(validTempChs.length > 0 ? validTempChs : tempChs);
+			const minO2 = minLatest(validO2Chs.length > 0 ? validO2Chs : o2Chs);
 
 			const tA = evalTemp(maxTemp);
 			const oA = evalO2(minO2);
@@ -286,7 +333,7 @@ export default function DashboardPage() {
                               <Tag color={qualityInfo.color} style={{ fontSize: 11 }}>
                                 {qualityInfo.quality}
                               </Tag>
-                              {a && a.sev !== "ok" && a.sev !== "none" && (
+                              {a && a.sev !== "ok" && a.sev !== "none" && !qualityInfo.isBad && (
                                 <Tooltip title={a.tip}>
                                   {a.sev === "danger" ? (
                                     <ExclamationCircleOutlined

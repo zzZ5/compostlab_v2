@@ -13,11 +13,14 @@ import {
   Select,
   message,
   Popconfirm,
+  Grid,
 } from "antd";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Page from "@/components/Page";
 import { api } from "@/lib/api";
 import type { User } from "@/types/api";
+
+const { useBreakpoint } = Grid;
 
 const roleOptions = [
   { value: "readonly", label: "只读用户" },
@@ -26,6 +29,8 @@ const roleOptions = [
 ];
 
 export default function UsersPage() {
+  const screens = useBreakpoint();
+  const isMobile = !screens.md;
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -99,37 +104,42 @@ export default function UsersPage() {
           dataSource={users}
           rowKey="id"
           pagination={{ pageSize: 20 }}
+          scroll={{ x: isMobile ? 800 : undefined }}
           columns={[
-            { title: "ID", dataIndex: "id", width: 80 },
+            { title: "ID", dataIndex: "id", width: 80, responsive: ["lg"] },
             { title: "用户名", dataIndex: "username", width: 150 },
             {
               title: "真实姓名",
               dataIndex: "real_name",
               width: 120,
+              responsive: ["sm"],
               render: (v) => v || "-",
             },
             {
               title: "角色",
               dataIndex: "role_display",
               width: 120,
+              responsive: ["sm"],
               render: (v, r) => {
                 const colors: any = { readonly: "default", operator: "blue", admin: "red" };
                 return <Tag color={colors[r.role]}>{v}</Tag>;
               },
             },
-            { title: "部门", dataIndex: "department", width: 150, render: (v) => v || "-" },
-            { title: "邮箱", dataIndex: "email", width: 200, render: (v) => v || "-" },
+            { title: "部门", dataIndex: "department", width: 150, responsive: ["md"], render: (v) => v || "-" },
+            { title: "邮箱", dataIndex: "email", width: 200, responsive: ["md"], render: (v) => v || "-" },
             {
               title: "状态",
               dataIndex: "is_active",
               width: 100,
+              responsive: ["sm"],
               render: (v) => (v ? <Tag color="success">启用</Tag> : <Tag>禁用</Tag>),
             },
             {
               title: "操作",
               width: 200,
+              fixed: isMobile ? "right" : undefined,
               render: (_, record) => (
-                <Space size="small">
+                <Space size="small" wrap>
                   <Button size="small" onClick={() => openEditModal(record)}>
                     编辑
                   </Button>
