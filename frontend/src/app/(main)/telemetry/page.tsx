@@ -100,25 +100,6 @@ export default function TelemetryExplorePage() {
     });
   }, [selectedDevices]);
 
-  const deviceOptions: Opt[] = useMemo(() => {
-    const list = devices
-      .filter((d) => {
-        if (!kw.trim()) return true;
-        const k = kw.trim().toLowerCase();
-        return (
-          String(d.device_id).includes(k) ||
-          (d.code || "").toLowerCase().includes(k) ||
-          (d.name || "").toLowerCase().includes(k)
-        );
-      })
-      .slice()
-      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    return list.map((d) => ({
-      value: d.device_id,
-      label: `${d.name || "Device"} (#${d.device_id})`,
-    }));
-  }, [devices, kw]);
-
   const from = range?.[0] ? fmt(range[0]) : null;
   const to = range?.[1] ? fmt(range[1]) : null;
 
