@@ -63,7 +63,7 @@ def _match_run(device: Device, ts: datetime):
     start_at <= ts < end_at；若 end_at 为空表示进行中
     """
     window = (
-        RunWindow.objects.filter(device=device)
+        RunWindow.objects.filter(devices=device)
         .filter(start_at__lte=ts)
         .filter(Q(end_at__gt=ts) | Q(end_at__isnull=True))
         .order_by("-start_at")
