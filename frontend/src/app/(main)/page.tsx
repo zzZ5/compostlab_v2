@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, Col, Grid, Input, Row, Select, Space, Spin, Tag, Tooltip, Typography, Alert } from "antd";
 import { InfoCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 
 import Page from "@/components/Page";
 import { useDevicesTree } from "@/features/devices/queries";
 import { useRuns } from "@/features/runs/queries";
+import { api } from "@/lib/api";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
@@ -75,6 +76,34 @@ export default function DashboardPage() {
   const devices = devicesQ.data || [];
   const runsQ = useRuns();
   const runs = runsQ.data || [];
+  const [windowsMap, setWindowsMap] = useState<Map<number, any[]>>(new Map());
+  const [isLoadingWindows, setIsLoadingWindows] = useState(false);
+
+  // 加载所有 run 的 windows
+  useEffect(() => {
+    const loadRunWindows = async () => {
+      if (runs.length === 0) return;
+
+      setIsLoadingWindows(true);
+      const map = new Map<number, any[]>();
+
+      await Promise.all(
+        runs.map(async (r: any) => {
+          try {
+            const wsRes = await api.get(`/runs/${r.run_id}/windows`);
+            map.set(r.run_id, wsRes.data.data);
+          } catch (e) {
+            console.error(`Failed to load windows for run ${r.run_id}`, e);
+          }
+        })
+      );
+
+      setWindowsMap(map);
+      setIsLoadingWindows(false);
+    };
+
+    loadRunWindows();
+  }, [runs]);
 
   // filters
   const [q, setQ] = useState("");
@@ -89,11 +118,12 @@ export default function DashboardPage() {
       // run filter
       if (runFilter !== undefined && runFilter !== "") {
         // 找到该 run 下的所有窗口
-        const run = runs.find((r: any) => String(r.id) === runFilter);
+        const run = runs.find((r: any) => String(r.run_id) === runFilter);
         if (run) {
+          const windows = windowsMap.get(Number(runFilter)) || [];
           // 检查设备是否在该 run 的任何窗口中
-          const deviceInRun = (run.windows || []).some((w: any) =>
-            (w.devices || []).some((dev: any) => dev.device_id === d.device_id)
+          const deviceInRun = windows.some((w: any) =>
+            (w.device_ids || []).includes(d.device_id)
           );
           if (!deviceInRun) return false;
         }
@@ -125,7 +155,7 @@ export default function DashboardPage() {
       const hay = `${d.name || ""} ${d.code || ""}`.toLowerCase();
       return hay.includes(qq);
     });
-  }, [devices, q, statusFilter, alertFilter, runFilter, runs]);
+  }, [devices, q, statusFilter, alertFilter, runFilter, runs, windowsMap]);
 
   // KPI
   const kpi = useMemo(() => {
@@ -202,8 +232,8 @@ export default function DashboardPage() {
             options={[
               { value: "", label: "全部批次" },
               ...runs.map((r: any) => ({
-                value: String(r.id),
-                label: `${r.name} (${r.group || "N/A"})`,
+                value: String(r.run_id),
+                label: r.name,
               })),
             ]}
           />
