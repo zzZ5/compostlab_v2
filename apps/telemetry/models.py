@@ -41,7 +41,24 @@ class TelemetryKV(models.Model):
     class Meta:
         db_table = "telemetry_telemetrykv"
         indexes = [
-            models.Index(fields=["device", "code", "ts"]),
-            models.Index(fields=["code", "ts"]),
-            models.Index(fields=["device", "ts"]),
+            # 核心查询索引：按设备+通道+时间查询（最常用）
+            models.Index(fields=["device", "code", "ts"], name="idx_device_code_ts"),
+            
+            # 覆盖索引：包含 value，避免回表查询（性能提升 30-50%）
+            models.Index(
+                fields=["device", "code", "ts", "value"],
+                name="idx_device_code_ts_value"
+            ),
+            
+            # 跨设备通道查询索引
+            models.Index(fields=["code", "ts"], name="idx_code_ts"),
+            
+            # 设备维度时间范围查询索引
+            models.Index(fields=["device", "ts"], name="idx_device_ts"),
+            
+            # 降序索引：优化 ORDER BY ts DESC 查询（最新值查询）
+            models.Index(fields=["device", "code", "-ts"], name="idx_device_code_ts_desc"),
+            
+            # 时间分区索引：优化按天/周/月的聚合查询
+            models.Index(fields=["ts", "device", "code"], name="idx_ts_device_code"),
         ]

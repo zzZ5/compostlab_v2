@@ -29,6 +29,7 @@ from django.views import View
 
 from apps.api.mixins import BasicAuthMixin
 from apps.api.utils import parse_dt, parse_bucket
+from apps.api.pagination import CursorPaginator, paginated_response
 from apps.devices.models import Device
 from apps.telemetry.models import TelemetryKV
 
@@ -67,9 +68,13 @@ class Echo:
 
 class DeviceTelemetryView(BasicAuthMixin, View):
     """
-    GET /api/v2/devices/<device_id>/telemetry?channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m
-    - bucket 为空：raw 点数据（ORM）
+    GET /api/v2/devices/<device_id>/telemetry?channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m&cursor=...
+    - bucket 为空：raw 点数据（ORM）支持游标分页
     - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
+    
+    分页参数：
+    - limit: 每页数量，默认 1000，最大 10000
+    - cursor: 游标值（时间戳），用于获取下一页数据
     """
 
     def get(self, request, device_id: int):
@@ -81,8 +86,10 @@ class DeviceTelemetryView(BasicAuthMixin, View):
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
         bucket = parse_bucket(request.GET.get("bucket"))
 
-        limit = int(request.GET.get("limit") or "20000")
-        limit = max(1, min(limit, 200000))
+        # 分页参数
+        limit = int(request.GET.get("limit") or "1000")
+        limit = max(1, min(limit, 10000))
+        cursor = request.GET.get("cursor")
 
         # -------- bucket aggregation via SQL (Timescale) --------
         if bucket:
@@ -148,19 +155,34 @@ class DeviceTelemetryView(BasicAuthMixin, View):
                 status=200,
             )
 
-        # -------- raw points via ORM --------
+        # -------- raw points via ORM with cursor pagination --------
         qs = TelemetryKV.objects.filter(device_id=device_id, ts__lt=dt_to)
         if dt_from is not None:
             qs = qs.filter(ts__gte=dt_from)
         if codes:
             qs = qs.filter(code__in=codes)
 
-        rows = qs.values(
-            "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
-        ).order_by("code", "ts")[:limit]
+        # 使用游标分页器
+        paginator = CursorPaginator(
+            queryset=qs.values(
+                "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
+            ),
+            cursor_field="ts",
+            page_size=limit,
+            max_page_size=10000,
+            ordering="asc",
+        )
+        
+        # 解析游标（时间戳字符串）
+        cursor_value = None
+        if cursor:
+            cursor_value = parse_dt(cursor)
+        
+        result = paginator.paginate(cursor=cursor_value)
 
+        # 格式化输出
         out = []
-        for r in rows:
+        for r in result["data"]:
             out.append(
                 {
                     "device_id": r["device_id"],
@@ -173,15 +195,22 @@ class DeviceTelemetryView(BasicAuthMixin, View):
                 }
             )
 
-        return JsonResponse(
-            {
+        # 格式化分页信息中的游标
+        pagination_info = result["pagination"]
+        if pagination_info["next_cursor"]:
+            pagination_info["next_cursor"] = _dt_local_str(
+                parse_dt(pagination_info["next_cursor"])
+            )
+
+        return paginated_response(
+            data=out,
+            pagination=pagination_info,
+            extra={
                 "scope": "device",
                 "device_id": device_id,
                 "from": _dt_local_str(dt_from) if dt_from else None,
                 "to": _dt_local_str(dt_to),
                 "filters": {"channels": codes or None},
-                "count": len(out),
-                "data": out,
             },
             status=200,
         )
@@ -189,7 +218,11 @@ class DeviceTelemetryView(BasicAuthMixin, View):
 
 class DeviceChannelTelemetryView(BasicAuthMixin, View):
     """
-    GET /api/v2/devices/<device_id>/channels/<code>/telemetry?from=...&to=...&bucket=10m
+    GET /api/v2/devices/<device_id>/channels/<code>/telemetry?from=...&to=...&bucket=10m&cursor=...
+    
+    分页参数：
+    - limit: 每页数量，默认 1000，最大 10000
+    - cursor: 游标值（时间戳），用于获取下一页数据
     """
 
     def get(self, request, device_id: int, code: str):
@@ -201,8 +234,10 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
         bucket = parse_bucket(request.GET.get("bucket"))
 
-        limit = int(request.GET.get("limit") or "20000")
-        limit = max(1, min(limit, 200000))
+        # 分页参数
+        limit = int(request.GET.get("limit") or "1000")
+        limit = max(1, min(limit, 10000))
+        cursor = request.GET.get("cursor")
 
         # --- bucket aggregation (SQL) ---
         if bucket:
@@ -265,17 +300,31 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
                 status=200,
             )
 
-        # --- raw points (ORM) ---
+        # --- raw points (ORM) with cursor pagination ---
         qs = TelemetryKV.objects.filter(device_id=device_id, code=code, ts__lt=dt_to)
         if dt_from is not None:
             qs = qs.filter(ts__gte=dt_from)
 
-        rows = qs.values(
-            "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
-        ).order_by("ts")[:limit]
+        # 使用游标分页器
+        paginator = CursorPaginator(
+            queryset=qs.values(
+                "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
+            ),
+            cursor_field="ts",
+            page_size=limit,
+            max_page_size=10000,
+            ordering="asc",
+        )
+        
+        # 解析游标
+        cursor_value = None
+        if cursor:
+            cursor_value = parse_dt(cursor)
+        
+        result = paginator.paginate(cursor=cursor_value)
 
         out = []
-        for r in rows:
+        for r in result["data"]:
             out.append(
                 {
                     "device_id": r["device_id"],
@@ -288,15 +337,22 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
                 }
             )
 
-        return JsonResponse(
-            {
+        # 格式化分页信息中的游标
+        pagination_info = result["pagination"]
+        if pagination_info["next_cursor"]:
+            pagination_info["next_cursor"] = _dt_local_str(
+                parse_dt(pagination_info["next_cursor"])
+            )
+
+        return paginated_response(
+            data=out,
+            pagination=pagination_info,
+            extra={
                 "scope": "channel",
                 "device_id": device_id,
                 "code": code,
                 "from": _dt_local_str(dt_from) if dt_from else None,
                 "to": _dt_local_str(dt_to),
-                "count": len(out),
-                "data": out,
             },
             status=200,
         )
@@ -441,12 +497,16 @@ class DeviceSummaryView(BasicAuthMixin, View):
 
 class MultiDeviceTelemetryView(BasicAuthMixin, View):
     """
-    GET /api/v2/telemetry?device_ids=1,2,3&channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m
+    GET /api/v2/telemetry?device_ids=1,2,3&channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m&cursor=...
     跨设备遥测查询，支持多个设备和多个通道的对比
     - device_ids: 设备ID列表，逗号分隔
     - channels: 通道code列表，逗号分隔
-    - bucket 为空：raw 点数据（ORM）
+    - bucket 为空：raw 点数据（ORM）支持游标分页
     - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
+    
+    分页参数：
+    - limit: 每页数量，默认 1000，最大 10000
+    - cursor: 游标值（时间戳），用于获取下一页数据
     """
 
     def get(self, request):
@@ -485,8 +545,10 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
         bucket = parse_bucket(request.GET.get("bucket"))
 
-        limit = int(request.GET.get("limit") or "20000")
-        limit = max(1, min(limit, 200000))
+        # 分页参数
+        limit = int(request.GET.get("limit") or "1000")
+        limit = max(1, min(limit, 10000))
+        cursor = request.GET.get("cursor")
 
         # -------- bucket aggregation via SQL (Timescale) --------
         if bucket:
@@ -552,19 +614,33 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
                 status=200,
             )
 
-        # -------- raw points via ORM --------
+        # -------- raw points via ORM with cursor pagination --------
         qs = TelemetryKV.objects.filter(device_id__in=device_ids, ts__lt=dt_to)
         if dt_from is not None:
             qs = qs.filter(ts__gte=dt_from)
         if codes:
             qs = qs.filter(code__in=codes)
 
-        rows = qs.values(
-            "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
-        ).order_by("device_id", "code", "ts")[:limit]
+        # 使用游标分页器
+        paginator = CursorPaginator(
+            queryset=qs.values(
+                "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
+            ),
+            cursor_field="ts",
+            page_size=limit,
+            max_page_size=10000,
+            ordering="asc",
+        )
+        
+        # 解析游标
+        cursor_value = None
+        if cursor:
+            cursor_value = parse_dt(cursor)
+        
+        result = paginator.paginate(cursor=cursor_value)
 
         out = []
-        for r in rows:
+        for r in result["data"]:
             out.append(
                 {
                     "device_id": r["device_id"],
@@ -577,15 +653,22 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
                 }
             )
 
-        return JsonResponse(
-            {
+        # 格式化分页信息中的游标
+        pagination_info = result["pagination"]
+        if pagination_info["next_cursor"]:
+            pagination_info["next_cursor"] = _dt_local_str(
+                parse_dt(pagination_info["next_cursor"])
+            )
+
+        return paginated_response(
+            data=out,
+            pagination=pagination_info,
+            extra={
                 "scope": "multi_device",
                 "device_ids": device_ids,
                 "from": _dt_local_str(dt_from) if dt_from else None,
                 "to": _dt_local_str(dt_to),
                 "filters": {"channels": codes or None},
-                "count": len(out),
-                "data": out,
             },
             status=200,
         )

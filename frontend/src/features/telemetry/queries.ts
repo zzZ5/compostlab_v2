@@ -9,9 +9,11 @@ export function useDeviceTelemetry(args: {
 	to?: string | null;
 	channels?: string[] | null; // code 列表
 	bucket?: string | null;
+	limit?: number; // 每页数量，默认 1000
+	cursor?: string | null; // 游标，用于加载下一页
 }) {
-	const { deviceId, from, to, channels, bucket } = args;
-	const argsKey = [from, to, channels?.join(",") || "", bucket || ""].join("|");
+	const { deviceId, from, to, channels, bucket, limit, cursor } = args;
+	const argsKey = [from, to, channels?.join(",") || "", bucket || "", limit || "", cursor || ""].join("|");
 
 	return useQuery<DeviceTelemetryResp>({
 		queryKey: deviceKeys.telemetry(deviceId, argsKey),
@@ -21,6 +23,8 @@ export function useDeviceTelemetry(args: {
 				to,
 				channels: channels && channels.length ? channels : null,
 				bucket,
+				limit,
+				cursor,
 			});
 			const res = await api.get<DeviceTelemetryResp>(`/devices/${deviceId}/telemetry${qs}`);
 			return res.data;
@@ -35,14 +39,18 @@ export function useMultiDeviceTelemetry(args: {
 	to?: string | null;
 	channels?: string[] | null;
 	bucket?: string | null;
+	limit?: number; // 每页数量，默认 1000
+	cursor?: string | null; // 游标，用于加载下一页
 }) {
-	const { deviceIds, from, to, channels, bucket } = args;
+	const { deviceIds, from, to, channels, bucket, limit, cursor } = args;
 	const argsKey = [
 		deviceIds.join(","),
 		from,
 		to,
 		channels?.join(",") || "",
 		bucket || "",
+		limit || "",
+		cursor || "",
 	].join("|");
 
 	return useQuery<MultiDeviceTelemetryResp>({
@@ -54,6 +62,8 @@ export function useMultiDeviceTelemetry(args: {
 				to,
 				channels: channels && channels.length ? channels : null,
 				bucket,
+				limit,
+				cursor,
 			});
 			const res = await api.get<MultiDeviceTelemetryResp>(`/telemetry${qs}`);
 			return res.data;

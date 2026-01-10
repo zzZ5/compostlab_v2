@@ -24,6 +24,20 @@ export type ListResp<T> = {
 	data: T[];
 };
 
+/** 分页信息（游标分页） */
+export type PaginationInfo = {
+	has_next: boolean;
+	next_cursor: string | null;
+	page_size: number;
+	total_returned: number;
+};
+
+/** 支持分页的列表响应 */
+export type PaginatedResp<T> = {
+	data: T[];
+	pagination: PaginationInfo;
+};
+
 export type DetailResp = { detail: string };
 
 /* =========================
@@ -192,8 +206,11 @@ export type DeviceTelemetryResp = {
 		channels: string[] | null;
 	};
 
-	count: number;
 	data: TelemetryPoint[];
+	/** 分页信息（新版 API） */
+	pagination?: PaginationInfo;
+	/** 兼容旧版 API */
+	count?: number;
 };
 
 /** GET /api/v2/telemetry?device_ids=1,2,3 */
@@ -211,8 +228,11 @@ export type MultiDeviceTelemetryResp = {
 		channels: string[] | null;
 	};
 
-	count: number;
 	data: TelemetryPoint[];
+	/** 分页信息（新版 API） */
+	pagination?: PaginationInfo;
+	/** 兼容旧版 API */
+	count?: number;
 };
 
 /** GET /api/v2/devices/<device_id>/channels/<code>/telemetry */
@@ -226,8 +246,11 @@ export type DeviceChannelTelemetryResp = {
 
 	bucket?: string;
 
-	count: number;
 	data: TelemetryPoint[];
+	/** 分页信息（新版 API） */
+	pagination?: PaginationInfo;
+	/** 兼容旧版 API */
+	count?: number;
 };
 
 /** GET /api/v2/devices/<id>/latest */
