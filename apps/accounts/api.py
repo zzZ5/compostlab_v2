@@ -6,6 +6,8 @@ from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from django.db.models import Q
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -16,6 +18,7 @@ from .utils import log_audit, get_or_create_profile, get_client_ip
 
 # ==================== 认证相关 ====================
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LoginView(View):
     """
     POST /api/v2/auth/login
@@ -88,6 +91,7 @@ class LoginView(View):
         )
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class RefreshTokenView(View):
     """
     POST /api/v2/auth/refresh
@@ -112,6 +116,7 @@ class RefreshTokenView(View):
             return JsonResponse({"detail": f"Invalid refresh token: {str(e)}"}, status=401)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LogoutView(JWTAuthMixin, View):
     """
     POST /api/v2/auth/logout
@@ -128,6 +133,7 @@ class LogoutView(JWTAuthMixin, View):
         return JsonResponse({"detail": "Logged out successfully."}, status=200)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class MeView(JWTAuthMixin, View):
     """
     GET /api/v2/auth/me
@@ -158,6 +164,7 @@ class MeView(JWTAuthMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class ChangePasswordView(JWTAuthMixin, View):
     """
     POST /api/v2/auth/change-password
@@ -206,6 +213,7 @@ class ChangePasswordView(JWTAuthMixin, View):
 
 # ==================== 用户管理（管理员） ====================
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserListView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     GET /api/v2/users?q=...&role=...&is_active=...
@@ -261,6 +269,7 @@ class UserListView(JWTAuthMixin, AdminRequiredMixin, View):
         return JsonResponse({"count": len(data), "data": data}, status=200)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserDetailView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     GET /api/v2/users/<user_id>
@@ -295,6 +304,7 @@ class UserDetailView(JWTAuthMixin, AdminRequiredMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserCreateView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     POST /api/v2/users
@@ -361,6 +371,7 @@ class UserCreateView(JWTAuthMixin, AdminRequiredMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     PUT /api/v2/users/<user_id>
@@ -419,6 +430,7 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
         return JsonResponse({"detail": "User updated successfully."}, status=200)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class UserToggleActiveView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     POST /api/v2/users/<user_id>/toggle-active
@@ -457,6 +469,7 @@ class UserToggleActiveView(JWTAuthMixin, AdminRequiredMixin, View):
 
 # ==================== 审计日志 ====================
 
+@method_decorator(csrf_exempt, name='dispatch')
 class AuditLogListView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     GET /api/v2/audit-logs?username=...&action=...&from=...&to=...&limit=100
@@ -508,6 +521,7 @@ class AuditLogListView(JWTAuthMixin, AdminRequiredMixin, View):
         return JsonResponse({"count": len(data), "data": data}, status=200)
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class MyAuditLogListView(JWTAuthMixin, View):
     """
     GET /api/v2/auth/my-logs?limit=50
