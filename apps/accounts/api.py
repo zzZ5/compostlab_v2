@@ -12,7 +12,7 @@ from django.utils.decorators import method_decorator
 from django.db.models import Q
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import UserProfile, AuditLog
+from .models import UserProfile, AuditLog, UserRole
 from .mixins import JWTAuthMixin, AdminRequiredMixin
 from .utils import log_audit, get_or_create_profile, get_client_ip
 
