@@ -52,13 +52,13 @@ class Run(models.Model):
 
 class RunWindow(models.Model):
     """
-    Run 下的窗口：把 device 的数据在某段时间归入某个 group/treatment
+    Run 下的窗口：把 device(s) 的数据在某段时间归入某个 group/treatment
+    - 支持多设备：一个窗口可以包含多个监测设备
     """
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="windows")
-    device = models.ForeignKey(
-        Device, on_delete=models.CASCADE, related_name="run_windows"
-    )
+    # ✅ 改为 ManyToMany，支持多设备
+    devices = models.ManyToManyField(Device, related_name="run_windows", blank=True)
 
     # ✅ 真正可选填：不填则 follow_run=True 时继承 run 时间
     start_at = models.DateTimeField(null=True, blank=True)
@@ -86,13 +86,13 @@ class RunWindow(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["device", "start_at"]),
             models.Index(fields=["run", "start_at"]),
             models.Index(fields=["run", "group", "start_at"]),
         ]
 
     def __str__(self) -> str:
+        device_codes = ", ".join([d.code for d in self.devices.all()])
         return (
-            f"Run#{self.run_id} {self.group} {self.device.code} "
+            f"Run#{self.run_id} {self.group} [{device_codes}] "
             f"[{self.start_at} - {self.end_at or '...'}]"
         )

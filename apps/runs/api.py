@@ -107,10 +107,13 @@ def _window_to_dict(run: Run, w: RunWindow) -> dict:
     eff_s = _window_effective_start(run, w)
     eff_e = _window_effective_end(run, w)
 
+    # ✅ 支持多设备：返回设备 ID 列表
+    device_ids = list(w.devices.values_list("id", flat=True))
+
     out = {
         "window_id": w.id,
         "run_id": run.id,
-        "device_id": w.device_id,
+        "device_ids": device_ids,
         "group": getattr(w, "group", None),
         "treatment": getattr(w, "treatment", None),
         "follow_run": getattr(w, "follow_run", None),
@@ -171,6 +174,7 @@ def _overlapped_predicates(
     """
     把 windows 与 [dt_from, dt_to) 求交集，输出 predicates：
       [(device_id, start, end), ...]
+    ✅ 支持多设备：每个窗口可以包含多个设备
     同时返回 matched_device_ids 去重列表
     """
     preds: List[Tuple[int, timezone.datetime, timezone.datetime]] = []
@@ -187,8 +191,10 @@ def _overlapped_predicates(
         if start >= end:
             continue
 
-        preds.append((w.device_id, start, end))
-        matched.append(w.device_id)
+        # ✅ 支持多设备：为每个设备添加一个 predicate
+        for device in w.devices.all():
+            preds.append((device.id, start, end))
+            matched.append(device.id)
 
     return preds, sorted(list(set(matched)))
 
@@ -355,12 +361,21 @@ class RunWindowCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, Vie
         run = Run.objects.get(id=run_id)
         body = self.json_body(request)
 
-        device_id = body.get("device_id")
-        if not device_id:
-            return JsonResponse({"detail": "device_id is required."}, status=400)
-        Device.objects.get(id=device_id)
+        # ✅ 支持多设备：device_ids 数组
+        device_ids = body.get("device_ids")
+        if not isinstance(device_ids, list) or len(device_ids) == 0:
+            return JsonResponse({"detail": "device_ids is required (non-empty array)."}, status=400)
 
-        w = RunWindow(run=run, device_id=device_id)
+        # 验证所有设备存在
+        valid_devices = Device.objects.filter(id__in=device_ids)
+        if valid_devices.count() != len(device_ids):
+            return JsonResponse({"detail": "one or more devices not found."}, status=404)
+
+        w = RunWindow(run=run)
+        w.save()
+
+        # 设置设备关联
+        w.devices.set(device_ids)
 
         if hasattr(w, "group") and "group" in body:
             w.group = (body.get("group") or "").strip() or "CK"
@@ -416,9 +431,18 @@ class RunWindowUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, Vie
 
         body = self.json_body(request)
 
-        if "device_id" in body:
-            Device.objects.get(id=body.get("device_id"))
-            w.device_id = body.get("device_id")
+        # ✅ 支持多设备：device_ids 数组
+        if "device_ids" in body:
+            device_ids = body.get("device_ids")
+            if isinstance(device_ids, list) and len(device_ids) > 0:
+                # 验证所有设备存在
+                valid_devices = Device.objects.filter(id__in=device_ids)
+                if valid_devices.count() == len(device_ids):
+                    w.devices.set(device_ids)
+                else:
+                    return JsonResponse(
+                        {"detail": "one or more devices not found."}, status=404
+                    )
 
         if hasattr(w, "group") and "group" in body:
             w.group = (body.get("group") or "").strip() or "CK"

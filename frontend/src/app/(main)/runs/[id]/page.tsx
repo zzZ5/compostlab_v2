@@ -147,7 +147,7 @@ export default function RunDetailPage() {
 		setEditingWindow(null);
 		windowForm.resetFields();
 		windowForm.setFieldsValue({
-			device_id: undefined,
+			device_ids: undefined,
 			group: "",
 			treatment: "",
 			follow_run: true,
@@ -164,7 +164,7 @@ export default function RunDetailPage() {
 		setEditingWindow(w);
 		windowForm.resetFields();
 		windowForm.setFieldsValue({
-			device_id: w.device_id,
+			device_ids: w.device_ids || [],
 			group: w.group || "",
 			treatment: w.treatment || "",
 			follow_run: w.follow_run !== false,
@@ -181,7 +181,7 @@ export default function RunDetailPage() {
 		try {
 			const v = await windowForm.validateFields();
 			const body: any = {
-				device_id: Number(v.device_id),
+				device_ids: (v.device_ids || []).map(Number),
 				group: (v.group || "").trim() || undefined,
 				treatment: (v.treatment || "").trim() || undefined,
 				follow_run: !!v.follow_run,
@@ -209,9 +209,16 @@ export default function RunDetailPage() {
 	}
 
 	function confirmDeleteWindow(w: RunWindow) {
+		const deviceInfo = (w.device_ids || [])
+			.map((did: number) => {
+				const dev = deviceMap.get(did);
+				return dev ? dev.code : `ID:${did}`;
+			})
+			.join(", ");
+
 		Modal.confirm({
 			title: "删除 Window",
-			content: `确认删除该 Window 吗？（device_id=${w.device_id}）`,
+			content: `确认删除该 Window 吗？（设备: ${deviceInfo}）`,
 			okType: "danger",
 			async onOk() {
 				try {
@@ -231,7 +238,7 @@ export default function RunDetailPage() {
 	/**
 	 * bucket：
 	 * - 为了最大兼容你的后端 parse_bucket：
-	 *   raw 用空字符串表示“不传 bucket”
+	 *   raw 用空字符串表示"不传 bucket"
 	 * - export_wide 必须 bucket 不能为空（raw 不支持）
 	 */
 	const [bucket, setBucket] = useState<string>("10m");
@@ -243,7 +250,11 @@ export default function RunDetailPage() {
 	const windowDeviceIds = useMemo(() => {
 		const s = new Set<number>();
 		for (const w of windows) {
-			if (typeof w.device_id === "number") s.add(w.device_id);
+			// ✅ 支持多设备：收集所有窗口的设备 ID
+			const ids = w.device_ids || [];
+			for (const id of ids) {
+				if (typeof id === "number") s.add(id);
+			}
 		}
 		return Array.from(s);
 	}, [windows]);
@@ -329,33 +340,37 @@ export default function RunDetailPage() {
 	}, [windowsAll]);
 
 	const chartOption = useMemo(() => {
-		// group by code
-		const byCode = new Map<string, Array<[string, number]>>();
+		// ✅ 支持多设备：按 "device_id:code" 分组，避免不同设备的相同 code 混在一起
+		const byKey = new Map<string, { name: string; data: Array<[string, number]> }>();
 		for (const p of points as any[]) {
 			const code = p.code || "UNKNOWN";
+			const deviceId = (p as any).device_id || "unknown";
+			const key = `${deviceId}:${code}`;
 			const v = typeof p.value === "number" ? p.value : Number(p.value);
 			if (!Number.isFinite(v)) continue;
-			if (!byCode.has(code)) byCode.set(code, []);
-			byCode.get(code)!.push([p.ts, v]);
+
+			// 查找设备名称用于显示
+			const deviceName = deviceMap.get(deviceId)?.code || `Device#${deviceId}`;
+			const label = `${deviceName}:${code}`;
+
+			if (!byKey.has(key)) {
+				byKey.set(key, { name: label, data: [] });
+			}
+			byKey.get(key)!.data.push([p.ts, v]);
 		}
 
 		// sort by time (避免线段回折)
-		for (const [, arr] of byCode) {
-			arr.sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
+		for (const { data } of byKey.values()) {
+			data.sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
 		}
 
-		// 当数据点过少时，隐藏 slider（否则容易“挤到上面”）
+		// 当数据点过少时，隐藏 slider（否则容易"挤到上面"）
 		const uniqueTs = new Set<string>();
 		for (const p of points as any[]) if (p?.ts) uniqueTs.add(String(p.ts));
 		// 数据点太少时 slider 容易把布局挤乱（尤其是只有 1-2 个点/不成线时）；设更稳阈值
 		const enableSlider = uniqueTs.size >= 6;
 
-		const series = Array.from(byCode.entries()).map(([code, data]) => ({
-			name: code,
-			type: "line",
-			showSymbol: data.length <= 1,
-			data,
-		}));
+		const series = Array.from(byKey.values());
 
 		// 说明：默认 slider dataZoom 会占用底部空间，若 grid.bottom 太小，
 		// 会造成 x 轴时间标签与 dataZoom/legend 视觉重叠。
@@ -377,10 +392,15 @@ export default function RunDetailPage() {
 			},
 			xAxis: { type: "time", axisLabel: { hideOverlap: true, margin: 6 } },
 			yAxis: { type: "value" },
-			series,
+			series: series.map((s) => ({
+				name: s.name,
+				type: "line",
+				showSymbol: s.data.length <= 1,
+				data: s.data,
+			})),
 			dataZoom: dz,
 		};
-	}, [points, isMobile]);
+	}, [points, isMobile, deviceMap]);
 
 	async function exportRunRaw() {
 		try {
@@ -586,7 +606,10 @@ export default function RunDetailPage() {
 							<div style={{ maxHeight: 520, overflow: "auto" }}>
 								<Space orientation="vertical" style={{ width: "100%" }} size={8}>
 									{windows.map((w) => {
-										const dev = deviceMap.get(w.device_id);
+										// ✅ 支持多设备：显示所有绑定的设备
+										const devicesForWindow = (w.device_ids || [])
+											.map((did: number) => deviceMap.get(did))
+											.filter(Boolean);
 										return (
 											<Card
 												key={w.window_id}
@@ -607,8 +630,11 @@ export default function RunDetailPage() {
 												<Space orientation="vertical" size={2} style={{ width: "100%" }}>
 													<Space wrap>
 														<Tag>window {w.window_id}</Tag>
-														<Tag color="blue">device {w.device_id}</Tag>
-														{dev?.code && <Tag color="geekblue">{dev.code}</Tag>}
+														{devicesForWindow.length > 0 && (
+															<Tag color="blue">
+																{devicesForWindow.map((d: any) => d?.code).join(", ")}
+															</Tag>
+														)}
 													</Space>
 													<Text style={{ fontSize: 12 }}>group: {w.group || "-"}</Text>
 													<Text style={{ fontSize: 12 }}>treatment: {w.treatment || "-"}</Text>
@@ -693,14 +719,16 @@ export default function RunDetailPage() {
 				<Form layout="vertical" form={windowForm}>
 					<Form.Item
 						label="绑定设备"
-						name="device_id"
-						rules={[{ required: true, message: "请选择设备" }]}
+						name="device_ids"
+						rules={[{ required: true, message: "请至少选择一个设备" }]}
 					>
 						<Select
+							mode="multiple"
 							showSearch
 							optionFilterProp="label"
-							placeholder="选择 device"
+							placeholder="选择设备（可多选）"
 							options={deviceOptions as any}
+							maxTagCount="responsive"
 						/>
 					</Form.Item>
 

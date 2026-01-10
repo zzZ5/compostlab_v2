@@ -48,12 +48,14 @@ class RunAdmin(admin.ModelAdmin):
 
 @admin.register(RunWindow)
 class RunWindowAdmin(admin.ModelAdmin):
-    # ✅ 后台更直观：显示 device（会显示 __str__，通常含 code/name）
-    # 如果你就想显示 code，也可以在 Device.__str__ 里改成返回 code
+    # ✅ 后台更直观：显示 devices（会显示 __str__，通常含 code/name）
+    # 使用 ManyToManyField 后需要用 filter_horizontal 或 filter_vertical 提供多选界面
+    filter_horizontal = ("devices",)
+
     base_list_display = (
         "id",
         "run",
-        "device",
+        "devices_display",
         "group",
         "treatment",
         "follow_run",
@@ -75,7 +77,7 @@ class RunWindowAdmin(admin.ModelAdmin):
 
     # ✅ 搜索：run 名称、device code、group/treatment、note（如果存在）
     search_fields = (
-        ("run__name", "device__code")
+        ("run__name", "devices__code")
         + (("group",) if "group" in WINDOW_FIELDS else ())
         + (("treatment",) if "treatment" in WINDOW_FIELDS else ())
         + (("note",) if "note" in WINDOW_FIELDS else ())
@@ -86,3 +88,9 @@ class RunWindowAdmin(admin.ModelAdmin):
 
     follow_run.boolean = True
     follow_run.short_description = "follow_run"
+
+    def devices_display(self, obj: RunWindow):
+        """在列表中显示所有设备的 code"""
+        return ", ".join(d.code for d in obj.devices.all())
+
+    devices_display.short_description = "devices"
