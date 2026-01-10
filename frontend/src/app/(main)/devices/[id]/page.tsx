@@ -452,29 +452,9 @@ export default function DeviceDetailPage() {
 	const [editingTemplate, setEditingTemplate] = useState<any>(null);
 	const [templateForm] = Form.useForm();
 
-	const CMD_TEMPLATES: Record<string, any> = {
-		set_aeration: {
-			commands: [{ command: "set_aeration", params: { on: 1, ms: 60000 } }],
-		},
-		config_update: {
-			commands: [
-				{
-					command: "config_update",
-					config: { pump_run_time: 60000, read_interval: 600000 },
-				},
-			],
-		},
-	};
-
-	const [cmdTemplate, setCmdTemplate] = useState<string>("set_aeration");
 	const [cmdJson, setCmdJson] = useState<string>(
-		JSON.stringify(CMD_TEMPLATES.set_aeration, null, 2)
+		JSON.stringify({ commands: [] }, null, 2)
 	);
-
-	function insertTemplate(key: string) {
-		const t = CMD_TEMPLATES[key] || CMD_TEMPLATES.set_aeration;
-		setCmdJson(JSON.stringify(t, null, 2));
-	}
 
 	// 从保存的模板插入命令
 	function insertSavedTemplate(template: any) {
@@ -1070,30 +1050,12 @@ export default function DeviceDetailPage() {
 												</>
 											)}
 
-											{/* 内置模板（可选） */}
-											<Space wrap>
-												<Select
-													style={{ width: 200 }}
-													value={cmdTemplate}
-													onChange={(k) => {
-														setCmdTemplate(k);
-														insertTemplate(k);
-													}}
-													options={[
-														{ value: "set_aeration", label: "set_aeration（曝气开关）" },
-														{ value: "config_update", label: "config_update（配置更新）" },
-													]}
-												/>
-												<Button onClick={() => insertTemplate(cmdTemplate)}>
-													插入内置模板
-												</Button>
-											</Space>
-
 											<Text strong>Command JSON</Text>
 											<Input.TextArea
 												value={cmdJson}
 												onChange={(e) => setCmdJson(e.target.value)}
 												rows={isMobile ? 12 : 14}
+												placeholder='例如：{ "commands": [{ "command": "set_aeration", "params": { "on": 1, "ms": 60000 } }] }'
 												style={{
 													fontFamily:
 														"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",

@@ -4,11 +4,7 @@ from __future__ import annotations
 from django.contrib import admin
 from django.utils.html import format_html
 
-from apps.devices.models import Device, Channel
-
-# 如果你已经按我前面建议新增了 DeviceCommand 模型，就会存在这个 import
-# 若你暂时还没迁移/还没加模型，也不会影响你把这份文件先放进去（但会报 ImportError）。
-from apps.devices.models import DeviceCommand
+from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate
 
 
 def _field_names(model) -> set[str]:
@@ -259,3 +255,32 @@ class DeviceCommandAdmin(admin.ModelAdmin):
         return format_html('<b style="color:{}">{}</b>', color, status or "-")
 
     status_colored.short_description = "status"
+
+
+@admin.register(ControlTemplate)
+class ControlTemplateAdmin(admin.ModelAdmin):
+    """
+    控制模板后台管理
+    """
+
+    list_display = (
+        "id",
+        "name",
+        "device",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("device", "is_active")
+    search_fields = ("name", "description")
+    ordering = ("-id",)
+    readonly_fields = ("created_at", "updated_at")
+
+    def is_active(self, obj: ControlTemplate):
+        return getattr(obj, "is_active", None)
+
+    def created_at(self, obj: ControlTemplate):
+        return getattr(obj, "created_at", None)
+
+    def updated_at(self, obj: ControlTemplate):
+        return getattr(obj, "updated_at", None)
