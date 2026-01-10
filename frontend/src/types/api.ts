@@ -288,7 +288,7 @@ export type Run = {
 export type RunWindow = {
 	window_id: ID;
 	run_id: ID;
-	device_id: ID;
+	device_ids: ID[];
 
 	group?: string | null;        // API 会给
 	treatment?: string | null;
@@ -297,7 +297,7 @@ export type RunWindow = {
 	start_at?: LocalDateTimeString | null;
 	end_at?: LocalDateTimeString | null;
 
-	/** API 额外给的“有效时间”（继承 run） */
+	/** API 额外给的"有效时间"（继承 run） */
 	effective_start_at?: LocalDateTimeString | null;
 	effective_end_at?: LocalDateTimeString | null;
 
