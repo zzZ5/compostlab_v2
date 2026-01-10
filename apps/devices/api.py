@@ -902,6 +902,17 @@ class ControlTemplateListView(
             )
 
         payload = data.get("payload", {})
+        # 如果 payload 是字符串，尝试解析为 JSON 对象
+        if isinstance(payload, str):
+            try:
+                import json
+                payload = json.loads(payload)
+            except (json.JSONDecodeError, ValueError):
+                return JsonResponse(
+                    {"detail": "payload must be valid JSON object"},
+                    status=400,
+                )
+
         if not isinstance(payload, dict):
             return JsonResponse(
                 {"detail": "payload must be an object"},
@@ -966,6 +977,17 @@ class ControlTemplateDetailView(
 
         if "payload" in data:
             payload = data["payload"]
+            # 如果 payload 是字符串，尝试解析为 JSON 对象
+            if isinstance(payload, str):
+                try:
+                    import json
+                    payload = json.loads(payload)
+                except (json.JSONDecodeError, ValueError):
+                    return JsonResponse(
+                        {"detail": "payload must be valid JSON object"},
+                        status=400,
+                    )
+
             if not isinstance(payload, dict):
                 return JsonResponse(
                     {"detail": "payload must be an object"},
