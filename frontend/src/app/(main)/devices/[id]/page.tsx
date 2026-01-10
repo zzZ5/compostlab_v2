@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
 import {
 	Button,
@@ -41,14 +42,13 @@ import { useSendDeviceCommand } from "@/features/devices/mutations";
 import {
 	useControlTemplates,
 	useCreateControlTemplate,
-	useUpdateControlTemplate,
 	useDeleteControlTemplate,
 } from "@/features/templates/queries";
 
 import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
 import { emptyObjectToUndefined } from "@/lib/kv";
 import { channelByMetric } from "@/lib/channel";
-import { MetricKey, metricLabel, normalizeMetric, getChannelDisplayName } from "@/lib/metrics";
+import { MetricKey, getChannelDisplayName } from "@/lib/metrics";
 import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey } from "@/lib/channelGroups";
 
 import type { Channel } from "@/types/api";
@@ -445,12 +445,13 @@ export default function DeviceDetailPage() {
 	// 控制模板相关
 	const templatesQ = useControlTemplates(deviceId, true);
 	const createTemplate = useCreateControlTemplate();
-	const updateTemplate = useUpdateControlTemplate(0); // id 在使用时动态传入
 	const deleteTemplate = useDeleteControlTemplate();
+	const queryClient = useQueryClient();
 
 	const [templateModalOpen, setTemplateModalOpen] = useState(false);
 	const [editingTemplate, setEditingTemplate] = useState<any>(null);
 	const [templateForm] = Form.useForm();
+	const [templateSubmitting, setTemplateSubmitting] = useState(false);
 
 	const [cmdJson, setCmdJson] = useState<string>(
 		JSON.stringify({ commands: [] }, null, 2)
@@ -464,13 +465,20 @@ export default function DeviceDetailPage() {
 	// 打开模板编辑/新建
 	function openTemplateEdit(template?: any) {
 		setEditingTemplate(template || null);
+		setTemplateModalOpen(true);
+		// 注意：setFieldsValue 需要在 Modal 打开后 Form 挂载后再调用
+	}
+
+	// 当 Modal 打开时设置表单值
+	useEffect(() => {
+		if (!templateModalOpen) return;
 		templateForm.resetFields();
-		if (template) {
+		if (editingTemplate) {
 			templateForm.setFieldsValue({
-				name: template.name,
-				description: template.description || "",
-				payload: template.payload,
-				is_active: template.is_active,
+				name: editingTemplate.name,
+				description: editingTemplate.description || "",
+				payload: editingTemplate.payload,
+				is_active: editingTemplate.is_active,
 			});
 		} else {
 			templateForm.setFieldsValue({
@@ -480,11 +488,17 @@ export default function DeviceDetailPage() {
 				is_active: true,
 			});
 		}
-		setTemplateModalOpen(true);
+	}, [templateModalOpen, editingTemplate]);
+
+	// 更新模板（内部调用）
+	async function updateTemplate(id: number, data: any) {
+		const res = await api.patch(`/control-templates/${id}`, data);
+		return res.data;
 	}
 
 	// 提交模板
 	async function submitTemplate() {
+		setTemplateSubmitting(true);
 		try {
 			const v = await templateForm.validateFields();
 			const body: any = {
@@ -496,16 +510,20 @@ export default function DeviceDetailPage() {
 			};
 
 			if (editingTemplate) {
-				await updateTemplate.mutateAsync({ ...body, id: editingTemplate.id });
+				await updateTemplate(editingTemplate.id, body);
 				message.success("模板已更新");
 			} else {
 				await createTemplate.mutateAsync(body);
 				message.success("模板已创建");
 			}
+			// 刷新列表
+			queryClient.invalidateQueries({ queryKey: ["control-templates"] });
 			setTemplateModalOpen(false);
 		} catch (err) {
 			if ((err as any)?.errorFields) return;
 			message.error(getErrorMessage(err, "操作失败"));
+		} finally {
+			setTemplateSubmitting(false);
 		}
 	}
 
@@ -1349,8 +1367,8 @@ export default function DeviceDetailPage() {
 				onOk={submitTemplate}
 				okText={editingTemplate ? "保存" : "创建"}
 				destroyOnHidden
-				confirmLoading={createTemplate.isPending || updateTemplate.isPending}
-				maskClosable={!(createTemplate.isPending || updateTemplate.isPending)}
+				confirmLoading={templateSubmitting || createTemplate.isPending}
+				maskClosable={!(templateSubmitting || createTemplate.isPending)}
 				width={600}
 			>
 				<Form layout="vertical" form={templateForm}>

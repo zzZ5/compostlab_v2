@@ -892,7 +892,7 @@ class ControlTemplateListView(
         )
 
     def post(self, request):
-        data = self.get_json_body()
+        data = self.json_body(request)
 
         name = data.get("name", "").strip()
         if not name:
@@ -953,7 +953,7 @@ class ControlTemplateDetailView(
         except ControlTemplate.DoesNotExist:
             return _json_404("Template not found.")
 
-        data = self.get_json_body()
+        data = self.json_body(request)
 
         if "name" in data:
             name = data["name"].strip()
