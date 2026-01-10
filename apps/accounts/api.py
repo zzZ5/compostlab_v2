@@ -1,4 +1,5 @@
 import json
+import logging
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
@@ -14,6 +15,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import UserProfile, AuditLog
 from .mixins import JWTAuthMixin, AdminRequiredMixin
 from .utils import log_audit, get_or_create_profile, get_client_ip
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== 认证相关 ====================
@@ -397,7 +400,7 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
     PUT /api/v2/users/<user_id>
     Body: {"email": "...", "role": "...", "real_name": "...", ...}
     """
-    
+
     def put(self, request, user_id: int):
         try:
             user = User.objects.get(id=user_id)
@@ -412,61 +415,81 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
         profile = get_or_create_profile(user)
         changes = {}
 
-        # 更新 User 字段
-        if "email" in body:
-            old_email = user.email
-            email_value = body["email"]
-            email_stripped = email_value.strip() if email_value else ""
-            # 只有当 email 确实改变时才更新
-            if email_stripped != old_email:
-                user.email = email_stripped
-                changes["email"] = {"old": old_email, "new": user.email}
-
-        # 只有当有变化时才保存
-        if changes or any(field in body for field in ["role", "real_name", "department", "phone"]):
-            try:
-                user.save()
-            except Exception as e:
-                return JsonResponse({"detail": f"Failed to update user: {str(e)}"}, status=400)
-
-        # 更新 Profile 字段
-        if "role" in body:
-            role_value = body["role"]
-            if role_value in [choice[0] for choice in UserRole.choices]:
-                old_role = profile.role
-                if role_value != old_role:
-                    profile.role = role_value
-                    changes["role"] = {"old": old_role, "new": profile.role}
-
-        if "real_name" in body:
-            real_name_value = body["real_name"]
-            real_name_stripped = real_name_value.strip() if real_name_value else ""
-            profile.real_name = real_name_stripped
-
-        if "department" in body:
-            department_value = body["department"]
-            department_stripped = department_value.strip() if department_value else ""
-            profile.department = department_stripped
-
-        if "phone" in body:
-            phone_value = body["phone"]
-            phone_stripped = phone_value.strip() if phone_value else ""
-            profile.phone = phone_stripped
-
         try:
-            profile.save()
-        except Exception as e:
-            return JsonResponse({"detail": f"Failed to update profile: {str(e)}"}, status=400)
+            # 更新 User 字段
+            if "email" in body:
+                old_email = user.email
+                email_value = body["email"]
+                email_stripped = email_value.strip() if email_value else ""
+                # 只有当 email 确实改变时才更新
+                if email_stripped != old_email:
+                    # 如果设置为空，检查其他用户是否有空邮箱
+                    if email_stripped == "":
+                        user.email = ""
+                    else:
+                        # 检查邮箱是否已被其他用户使用
+                        existing = User.objects.filter(email=email_stripped).exclude(id=user.id).first()
+                        if existing:
+                            return JsonResponse({"detail": f"Email {email_stripped} is already in use by another user."}, status=400)
+                        user.email = email_stripped
+                    changes["email"] = {"old": old_email, "new": user.email}
 
-        log_audit(
-            request.user,
-            AuditLog.Action.USER_UPDATE,
-            resource_type="user",
-            resource_id=user.id,
-            description=f"更新用户：{user.username}",
-            changes=changes,
-            request=request,
-        )
+            # 只有当有变化时才保存
+            if changes or any(field in body for field in ["role", "real_name", "department", "phone"]):
+                try:
+                    user.save()
+                except Exception as e:
+                    logger.error(f"Failed to save user: {e}", exc_info=True)
+                    return JsonResponse({"detail": f"Failed to update user: {str(e)}"}, status=400)
+
+            # 更新 Profile 字段
+            if "role" in body:
+                role_value = body["role"]
+                if role_value in [choice[0] for choice in UserRole.choices]:
+                    old_role = profile.role
+                    if role_value != old_role:
+                        profile.role = role_value
+                        changes["role"] = {"old": old_role, "new": profile.role}
+
+            if "real_name" in body:
+                real_name_value = body["real_name"]
+                real_name_stripped = real_name_value.strip() if real_name_value else ""
+                profile.real_name = real_name_stripped
+
+            if "department" in body:
+                department_value = body["department"]
+                department_stripped = department_value.strip() if department_value else ""
+                profile.department = department_stripped
+
+            if "phone" in body:
+                phone_value = body["phone"]
+                phone_stripped = phone_value.strip() if phone_value else ""
+                profile.phone = phone_stripped
+
+            try:
+                profile.save()
+            except Exception as e:
+                logger.error(f"Failed to save profile: {e}", exc_info=True)
+                return JsonResponse({"detail": f"Failed to update profile: {str(e)}"}, status=400)
+
+        except Exception as e:
+            logger.error(f"Unexpected error updating user: {e}", exc_info=True)
+            return JsonResponse({"detail": f"Unexpected error: {str(e)}"}, status=500)
+
+        # 记录审计日志
+        try:
+            log_audit(
+                request.user,
+                AuditLog.Action.USER_UPDATE,
+                resource_type="user",
+                resource_id=user.id,
+                description=f"更新用户：{user.username}",
+                changes=changes,
+                request=request,
+            )
+        except Exception as e:
+            # 审计日志失败不影响主流程，只打印错误
+            logger.error(f"Failed to log audit: {e}", exc_info=True)
 
         return JsonResponse({"detail": "User updated successfully."}, status=200)
 
