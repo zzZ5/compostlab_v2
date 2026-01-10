@@ -103,51 +103,54 @@ export default function UsersPage() {
           loading={usersQ.isLoading}
           dataSource={users}
           rowKey="id"
-          pagination={{ pageSize: 20 }}
-          scroll={{ x: isMobile ? 800 : undefined }}
+          pagination={{ pageSize: isMobile ? 10 : 20 }}
+          scroll={{ x: isMobile ? 600 : undefined }}
           columns={[
-            { title: "ID", dataIndex: "id", width: 80, responsive: ["lg"] },
-            { title: "用户名", dataIndex: "username", width: 150 },
+            { title: "ID", dataIndex: "id", width: 60, responsive: ["lg"] },
+            { title: "用户名", dataIndex: "username", width: 120 },
             {
               title: "真实姓名",
               dataIndex: "real_name",
-              width: 120,
-              responsive: ["sm"],
+              width: 100,
+              responsive: ["xs", "sm", "md", "lg", "xl"],
               render: (v) => v || "-",
             },
             {
               title: "角色",
               dataIndex: "role_display",
-              width: 120,
-              responsive: ["sm"],
+              width: 90,
+              responsive: ["xs", "sm", "md", "lg", "xl"],
               render: (v, r) => {
                 const colors: any = { readonly: "default", operator: "blue", admin: "red" };
                 return <Tag color={colors[r.role]}>{v}</Tag>;
               },
             },
-            { title: "部门", dataIndex: "department", width: 150, responsive: ["md"], render: (v) => v || "-" },
-            { title: "邮箱", dataIndex: "email", width: 200, responsive: ["md"], render: (v) => v || "-" },
+            { title: "部门", dataIndex: "department", width: 120, responsive: ["md"], render: (v) => v || "-" },
+            { title: "邮箱", dataIndex: "email", width: 150, responsive: ["md"], render: (v) => v || "-" },
             {
               title: "状态",
               dataIndex: "is_active",
-              width: 100,
-              responsive: ["sm"],
+              width: 80,
+              responsive: ["xs", "sm", "md", "lg", "xl"],
               render: (v) => (v ? <Tag color="success">启用</Tag> : <Tag>禁用</Tag>),
             },
             {
               title: "操作",
-              width: 200,
+              width: isMobile ? 140 : 200,
               fixed: isMobile ? "right" : undefined,
+              responsive: ["xs", "sm", "md", "lg", "xl"],
               render: (_, record) => (
                 <Space size="small" wrap>
-                  <Button size="small" onClick={() => openEditModal(record)}>
+                  <Button size="small" type="primary" onClick={() => openEditModal(record)}>
                     编辑
                   </Button>
                   <Popconfirm
                     title={record.is_active ? "确定禁用？" : "确定启用？"}
                     onConfirm={() => handleToggleActive(record)}
                   >
-                    <Button size="small">{record.is_active ? "禁用" : "启用"}</Button>
+                    <Button size="small" danger={record.is_active}>
+                      {record.is_active ? "禁用" : "启用"}
+                    </Button>
                   </Popconfirm>
                 </Space>
               ),

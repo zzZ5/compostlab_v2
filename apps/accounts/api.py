@@ -411,36 +411,30 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
         
         profile = get_or_create_profile(user)
         changes = {}
-
+        
         # 更新 User 字段
         if "email" in body:
             old_email = user.email
-            email_value = body["email"]
-            user.email = email_value.strip() if email_value else ""
+            user.email = body["email"].strip()
             changes["email"] = {"old": old_email, "new": user.email}
-
+        
         user.save()
-
+        
         # 更新 Profile 字段
-        if "role" in body:
-            role_value = body["role"]
-            if role_value in [choice[0] for choice in UserProfile.UserRole.choices]:
-                old_role = profile.role
-                profile.role = role_value
-                changes["role"] = {"old": old_role, "new": profile.role}
-
+        if "role" in body and body["role"] in dict(UserProfile.UserRole.choices):
+            old_role = profile.role
+            profile.role = body["role"]
+            changes["role"] = {"old": old_role, "new": profile.role}
+        
         if "real_name" in body:
-            real_name_value = body["real_name"]
-            profile.real_name = real_name_value.strip() if real_name_value else ""
-
+            profile.real_name = body["real_name"].strip()
+        
         if "department" in body:
-            department_value = body["department"]
-            profile.department = department_value.strip() if department_value else ""
-
+            profile.department = body["department"].strip()
+        
         if "phone" in body:
-            phone_value = body["phone"]
-            profile.phone = phone_value.strip() if phone_value else ""
-
+            profile.phone = body["phone"].strip()
+        
         profile.save()
         
         log_audit(
