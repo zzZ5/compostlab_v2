@@ -41,6 +41,49 @@ export type PaginatedResp<T> = {
 export type DetailResp = { detail: string };
 
 /* =========================
+ * Auth / Users
+ * ========================= */
+
+export type UserRole = "readonly" | "operator" | "admin";
+
+export type User = {
+	id: ID;
+	username: string;
+	email: string;
+	role: UserRole;
+	role_display: string;
+	real_name: string;
+	department: string;
+	phone?: string;
+	is_staff: boolean;
+	is_superuser: boolean;
+	is_active: boolean;
+	last_login_at: LocalDateTimeString | null;
+	date_joined: LocalDateTimeString;
+};
+
+export type LoginResp = {
+	access: string;
+	refresh: string;
+	user: User;
+};
+
+export type AuditLog = {
+	id: ID;
+	username: string;
+	action: string;
+	action_display: string;
+	resource_type: string;
+	resource_id: string;
+	description: string;
+	changes: JSONObject | null;
+	ip_address: string | null;
+	success: boolean;
+	error_message?: string;
+	created_at: LocalDateTimeString;
+};
+
+/* =========================
  * Devices / Channels
  * ========================= */
 

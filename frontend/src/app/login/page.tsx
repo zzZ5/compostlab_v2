@@ -3,8 +3,9 @@
 import { Suspense } from "react";
 import { Button, Card, Form, Input, Typography, message } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
-import { setBasicAuth, clearBasicAuth } from "@/lib/auth";
+import { setTokens, setUser, clearTokens } from "@/lib/auth";
 import { api } from "@/lib/api";
+import type { LoginResp } from "@/types/api";
 
 const { Title, Text } = Typography;
 
@@ -19,21 +20,30 @@ function LoginForm() {
         <Title level={3} style={{ marginTop: 0, marginBottom: 4 }}>
           CompostLab 登录
         </Title>
-        <Text type="secondary">使用后端 Basic Auth 账号密码</Text>
+        <Text type="secondary">使用账号密码登录</Text>
 
         <Form
           layout="vertical"
           style={{ marginTop: 16 }}
           onFinish={async (v) => {
             try {
-              setBasicAuth(v.username, v.password);
-              // 立刻验证：请求一个轻量接口
-              await api.get("/devices/tree");
-              message.success("登录成功");
+              const res = await api.post<LoginResp>("/auth/login", {
+                username: v.username,
+                password: v.password,
+              });
+              
+              const { access, refresh, user } = res.data;
+              
+              // 保存 token 和用户信息
+              setTokens(access, refresh);
+              setUser(user);
+              
+              message.success(`欢迎回来，${user.real_name || user.username}！`);
               router.replace(next);
-            } catch {
-              message.error("登录失败：账号/密码错误，或后端不可达");
-              clearBasicAuth();
+            } catch (err: any) {
+              const errMsg = err?.response?.data?.detail || "登录失败";
+              message.error(errMsg);
+              clearTokens();
             }
           }}
         >

@@ -10,6 +10,7 @@ urlpatterns = [
     # ✅ Django Admin 后台入口
     path("admin/", admin.site.urls),
     # ✅ 你的 API v2
+    path("api/v2/", include("apps.accounts.urls")),
     path("api/v2/", include("apps.devices.urls")),
     path("api/v2/", include("apps.runs.urls")),
     path("api/v2/", include("apps.telemetry.urls")),

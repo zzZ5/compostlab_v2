@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import type { APIError } from "@/types/api";
+import { getAccessToken, getRefreshToken, setTokens, clearTokens } from "@/lib/auth";
 
 /**
  * 统一读取 API_BASE
@@ -17,21 +18,19 @@ function getApiBase(): string {
 }
 
 /**
- * Basic Auth header
- * - 优先 localStorage（持久化，关闭浏览器后仍保持登录状态）
- * - 可选 env 兜底（开发方便，上线可移除）
+ * Auth header（JWT Token 优先，兼容 Basic Auth）
  */
-function basicAuthHeader(): string | null {
-	if (typeof window !== "undefined") {
-		const token = localStorage.getItem("basic_auth");
-		if (token) return `Basic ${token}`;
-	}
-
-	const user = process.env.NEXT_PUBLIC_BASIC_USER || "";
-	const pass = process.env.NEXT_PUBLIC_BASIC_PASS || "";
-	if (user && pass && typeof window !== "undefined") {
-		return "Basic " + btoa(`${user}:${pass}`);
-	}
+function authHeader(): string | null {
+	if (typeof window === "undefined") return null;
+	
+	// 优先使用 JWT Token
+	const token = getAccessToken();
+	if (token) return `Bearer ${token}`;
+	
+	// 向后兼容 Basic Auth
+	const basicToken = localStorage.getItem("basic_auth");
+	if (basicToken) return `Basic ${basicToken}`;
+	
 	return null;
 }
 
@@ -131,18 +130,48 @@ export const api = axios.create({
 // request: inject Authorization
 api.interceptors.request.use((config) => {
 	config.headers = config.headers ?? {};
-	const h = basicAuthHeader();
+	const h = authHeader();
 	if (h) config.headers["Authorization"] = h;
 	return config;
 });
 
-// response: handle 401 redirect
+// response: handle 401 redirect and token refresh
 api.interceptors.response.use(
 	(res) => res,
-	(err) => {
+	async (err) => {
 		const status = err?.response?.status;
+		const originalRequest = err.config;
 
-		if (status === 401 && typeof window !== "undefined") {
+		// Token 过期，尝试刷新
+		if (status === 401 && !originalRequest._retry && typeof window !== "undefined") {
+			const refreshToken = getRefreshToken();
+			
+			if (refreshToken) {
+				originalRequest._retry = true;
+				
+				try {
+					const res = await axios.post(`${getApiBase()}/auth/refresh`, {
+						refresh: refreshToken,
+					});
+					
+					const newAccessToken = res.data.access;
+					setTokens(newAccessToken, refreshToken);
+					
+					// 重试原请求
+					originalRequest.headers["Authorization"] = `Bearer ${newAccessToken}`;
+					return api(originalRequest);
+				} catch (refreshError) {
+					// Refresh 失败，清除 token 并跳转登录
+					clearTokens();
+					if (!window.location.pathname.startsWith("/login")) {
+						const next = encodeURIComponent(window.location.pathname + window.location.search);
+						window.location.href = `/login?next=${next}`;
+					}
+					return Promise.reject(refreshError);
+				}
+			}
+			
+			// 没有 refresh token，直接跳转登录
 			if (!window.location.pathname.startsWith("/login")) {
 				const next = encodeURIComponent(window.location.pathname + window.location.search);
 				window.location.href = `/login?next=${next}`;

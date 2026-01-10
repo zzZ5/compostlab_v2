@@ -9,8 +9,11 @@ import {
   DatabaseOutlined,
   ExperimentOutlined,
   LineChartOutlined,
+  UserOutlined,
+  TeamOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
-import { hasBasicAuth, clearBasicAuth } from "@/lib/auth";
+import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser } from "@/lib/auth";
 
 const { Header, Content, Sider } = Layout;
 const { useBreakpoint } = Grid;
@@ -19,6 +22,9 @@ function getSelectedKey(pathname: string) {
   if (pathname.startsWith("/devices")) return "/devices";
   if (pathname.startsWith("/runs")) return "/runs";
   if (pathname.startsWith("/telemetry")) return "/telemetry";
+  if (pathname.startsWith("/users")) return "/users";
+  if (pathname.startsWith("/profile")) return "/profile";
+  if (pathname.startsWith("/audit-logs")) return "/audit-logs";
   return "/";
 }
 
@@ -30,6 +36,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   const selectedKey = useMemo(() => getSelectedKey(pathname), [pathname]);
 
@@ -45,11 +52,15 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }, [isMobile]);
 
   useEffect(() => {
-    const ok = typeof window !== "undefined" ? hasBasicAuth() : true;
+    const ok = typeof window !== "undefined" ? (hasToken() || hasBasicAuth()) : true;
     if (!ok) {
       const next = encodeURIComponent(pathname);
       router.replace(`/login?next=${next}`);
       return;
+    }
+    // 加载用户信息
+    if (typeof window !== "undefined") {
+      setCurrentUser(getUser());
     }
     setReady(true);
   }, [pathname, router]);
@@ -110,6 +121,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             { key: "/devices", icon: <DatabaseOutlined />, label: <Link href="/devices">设备</Link> },
             { key: "/runs", icon: <ExperimentOutlined />, label: <Link href="/runs">运行批次</Link> },
             { key: "/telemetry", icon: <LineChartOutlined />, label: <Link href="/telemetry">数据探索</Link> },
+            { type: "divider" },
+            { key: "/profile", icon: <UserOutlined />, label: <Link href="/profile">个人中心</Link> },
+            ...(currentUser?.role === "admin" || currentUser?.is_staff || currentUser?.is_superuser
+              ? [
+                  { key: "/users", icon: <TeamOutlined />, label: <Link href="/users">用户管理</Link> },
+                  { key: "/audit-logs", icon: <AuditOutlined />, label: <Link href="/audit-logs">操作日志</Link> },
+                ]
+              : []),
           ]}
         />
       </Sider>
@@ -133,6 +152,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           <Space>
             <Button
               onClick={() => {
+                clearTokens();
                 clearBasicAuth();
                 router.replace("/login");
               }}

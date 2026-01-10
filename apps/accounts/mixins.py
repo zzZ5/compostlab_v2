@@ -1,0 +1,96 @@
+"""
+新的认证和权限 Mixin，支持 JWT Token
+保留 BasicAuth 作为备选方案（向后兼容）
+"""
+import base64
+from django.contrib.auth import authenticate
+from django.http import JsonResponse
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+
+from .utils import has_permission
+
+
+class JWTAuthMixin:
+    """
+    JWT Token 认证 Mixin
+    支持：
+      1. Authorization: Bearer <token>
+      2. 向后兼容 Basic Auth
+    """
+    
+    def dispatch(self, request, *args, **kwargs):
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        
+        # 优先尝试 JWT Token
+        if auth_header.startswith("Bearer "):
+            jwt_auth = JWTAuthentication()
+            try:
+                validated_token = jwt_auth.get_validated_token(auth_header.split(" ")[1])
+                user = jwt_auth.get_user(validated_token)
+                request.user = user
+                return super().dispatch(request, *args, **kwargs)
+            except (InvalidToken, TokenError) as e:
+                return JsonResponse(
+                    {"detail": f"Invalid token: {str(e)}"},
+                    status=401,
+                )
+        
+        # 向后兼容 Basic Auth
+        elif auth_header.startswith("Basic "):
+            try:
+                b64 = auth_header.split(" ", 1)[1].strip()
+                raw = base64.b64decode(b64).decode("utf-8")
+                username, password = raw.split(":", 1)
+            except Exception:
+                return JsonResponse({"detail": "Invalid Authorization header."}, status=401)
+            
+            user = authenticate(username=username, password=password)
+            if not user:
+                return JsonResponse(
+                    {"detail": "Invalid username or password."},
+                    status=401,
+                    headers={"WWW-Authenticate": 'Basic realm="CompostLab API"'},
+                )
+            
+            request.user = user
+            return super().dispatch(request, *args, **kwargs)
+        
+        # 无认证信息
+        return JsonResponse(
+            {"detail": "Authentication required (Bearer token or Basic auth)."},
+            status=401,
+            headers={"WWW-Authenticate": 'Bearer realm="CompostLab API"'},
+        )
+
+
+class RoleRequiredMixin:
+    """
+    角色权限检查 Mixin
+    
+    用法：
+        class MyView(JWTAuthMixin, RoleRequiredMixin, View):
+            required_role = "operator"  # 或 "admin" / "readonly"
+    """
+    required_role = "readonly"  # 默认只读
+    
+    def dispatch(self, request, *args, **kwargs):
+        user = getattr(request, "user", None)
+        
+        if not has_permission(user, self.required_role):
+            return JsonResponse(
+                {"detail": f"Permission denied. Required role: {self.required_role}"},
+                status=403,
+            )
+        
+        return super().dispatch(request, *args, **kwargs)
+
+
+class OperatorRequiredMixin(RoleRequiredMixin):
+    """操作员权限（快捷方式）"""
+    required_role = "operator"
+
+
+class AdminRequiredMixin(RoleRequiredMixin):
+    """管理员权限（快捷方式）"""
+    required_role = "admin"

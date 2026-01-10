@@ -46,6 +46,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt",
+    "apps.accounts",
     "apps.devices",
     "apps.runs",
     "apps.telemetry",
@@ -155,3 +157,26 @@ CSRF_TRUSTED_ORIGINS = [
     "http://compostlab-backend-v2.cpolar.cn",
     "https://compostlab-backend-v2.cpolar.cn",
 ]
+
+# JWT 配置
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),  # Access token 有效期 8 小时
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),  # Refresh token 有效期 7 天
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+}
+
+# REST Framework 配置
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ],
+}
+
