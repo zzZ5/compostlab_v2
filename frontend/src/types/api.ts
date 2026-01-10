@@ -129,6 +129,29 @@ export type DeviceCommandListResp = ListResp<DeviceCommandRecord>;
 export type DeviceCommandDetailResp = DeviceCommandRecord;
 
 /* =========================
+ * Control Templates（控制模板）
+ * ========================= */
+
+export type ControlTemplate = {
+	id: ID;
+	name: string;
+	description: string;
+	payload: JSONObject;
+	is_active: boolean;
+	device_id: ID | null;
+	created_at: LocalDateTimeString;
+	updated_at: LocalDateTimeString;
+};
+
+export type ControlTemplateCreateBody = Partial<ControlTemplate> & {
+	name: string;
+	payload: JSONObject;
+};
+
+export type ControlTemplateListResp = ListResp<ControlTemplate>;
+export type ControlTemplateDetailResp = ControlTemplate;
+
+/* =========================
  * Telemetry（devices 维度）
  * ========================= */
 

@@ -116,4 +116,33 @@ urlpatterns = [
         method_router({"GET": views.DeviceCommandDetailView}),
         name="device_command_detail",
     ),
+    # -------- Control Templates --------
+    # GET  /api/v2/control-templates?device_id=<id>&is_active=1
+    # POST /api/v2/control-templates
+    path(
+        "control-templates",
+        method_router(
+            {
+                "GET": views.ControlTemplateListView,
+                "POST": views.ControlTemplateListView,
+            }
+        ),
+        name="control_template_list_create",
+    ),
+    # GET    /api/v2/control-templates/<id>
+    # PATCH  /api/v2/control-templates/<id>
+    # PUT    /api/v2/control-templates/<id>
+    # DELETE /api/v2/control-templates/<id>
+    path(
+        "control-templates/<int:template_id>",
+        method_router(
+            {
+                "GET": views.ControlTemplateDetailView,
+                "PATCH": views.ControlTemplateDetailView,
+                "PUT": views.ControlTemplateDetailView,
+                "DELETE": views.ControlTemplateDetailView,
+            }
+        ),
+        name="control_template_detail_update_delete",
+    ),
 ]

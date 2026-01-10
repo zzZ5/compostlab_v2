@@ -36,7 +36,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 
 from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
-from apps.devices.models import Device, Channel, DeviceCommand
+from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate
 from apps.devices.services.mqtt_pub import publish_json
 
 
@@ -837,3 +837,167 @@ class DeviceCommandDetailView(BasicAuthMixin, StaffRequiredMixin, View):
         except DeviceCommand.DoesNotExist:
             return _json_404("Command not found.")
         return JsonResponse(_command_to_dict(rec), status=200)
+
+
+# -------------------------
+# Control Templates
+# -------------------------
+def _template_to_dict(tpl: ControlTemplate) -> dict:
+    return {
+        "id": tpl.id,
+        "name": tpl.name,
+        "description": tpl.description,
+        "payload": tpl.payload,
+        "is_active": tpl.is_active,
+        "device_id": tpl.device_id,
+        "created_at": _dt_local_str(tpl.created_at),
+        "updated_at": _dt_local_str(tpl.updated_at),
+    }
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ControlTemplateListView(
+    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+):
+    """
+    GET  /api/v2/control-templates?device_id=<id>&is_active=1
+    POST /api/v2/control-templates
+
+    POST body:
+    {
+      "name": "曝气开启",
+      "description": "开启曝气泵60秒",
+      "payload": { "commands": [...] },
+      "is_active": true,
+      "device_id": 123  // 可选，不填则为全局模板
+    }
+    """
+
+    def get(self, request):
+        qs = ControlTemplate.objects.all()
+
+        # 筛选参数
+        device_id = request.GET.get("device_id")
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+
+        is_active = _parse_bool(request.GET.get("is_active"))
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active)
+
+        templates = [_template_to_dict(t) for t in qs.order_by("-created_at")]
+        return JsonResponse(
+            {"count": len(templates), "data": templates},
+            status=200,
+        )
+
+    def post(self, request):
+        data = self.get_json_body()
+
+        name = data.get("name", "").strip()
+        if not name:
+            return JsonResponse(
+                {"detail": "name is required"},
+                status=400,
+            )
+
+        payload = data.get("payload", {})
+        if not isinstance(payload, dict):
+            return JsonResponse(
+                {"detail": "payload must be an object"},
+                status=400,
+            )
+
+        # 可选：关联设备
+        device_id = data.get("device_id")
+        device = None
+        if device_id:
+            try:
+                device = Device.objects.get(id=device_id)
+            except Device.DoesNotExist:
+                return _json_404("Device not found.")
+
+        tpl = ControlTemplate.objects.create(
+            name=name,
+            description=data.get("description", "").strip() or "",
+            payload=payload,
+            is_active=data.get("is_active", True),
+            device=device,
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        return JsonResponse(_template_to_dict(tpl), status=201)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ControlTemplateDetailView(
+    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+):
+    """
+    GET    /api/v2/control-templates/<id>
+    PATCH  /api/v2/control-templates/<id>
+    PUT    /api/v2/control-templates/<id>
+    DELETE /api/v2/control-templates/<id>
+    """
+
+    def get(self, request, template_id: int):
+        try:
+            tpl = ControlTemplate.objects.get(id=template_id)
+        except ControlTemplate.DoesNotExist:
+            return _json_404("Template not found.")
+        return JsonResponse(_template_to_dict(tpl), status=200)
+
+    def patch(self, request, template_id: int):
+        try:
+            tpl = ControlTemplate.objects.get(id=template_id)
+        except ControlTemplate.DoesNotExist:
+            return _json_404("Template not found.")
+
+        data = self.get_json_body()
+
+        if "name" in data:
+            name = data["name"].strip()
+            if not name:
+                return JsonResponse({"detail": "name cannot be empty"}, status=400)
+            tpl.name = name
+
+        if "description" in data:
+            tpl.description = data["description"].strip() or ""
+
+        if "payload" in data:
+            payload = data["payload"]
+            if not isinstance(payload, dict):
+                return JsonResponse(
+                    {"detail": "payload must be an object"},
+                    status=400,
+                )
+            tpl.payload = payload
+
+        if "is_active" in data:
+            tpl.is_active = bool(data["is_active"])
+
+        if "device_id" in data:
+            device_id = data["device_id"]
+            if device_id:
+                try:
+                    tpl.device = Device.objects.get(id=device_id)
+                except Device.DoesNotExist:
+                    return _json_404("Device not found.")
+            else:
+                tpl.device = None
+
+        tpl.save()
+
+        return JsonResponse(_template_to_dict(tpl), status=200)
+
+    def put(self, request, template_id: int):
+        return self.patch(request, template_id)
+
+    def delete(self, request, template_id: int):
+        try:
+            tpl = ControlTemplate.objects.get(id=template_id)
+        except ControlTemplate.DoesNotExist:
+            return _json_404("Template not found.")
+
+        tpl.delete()
+        return JsonResponse({"detail": "deleted", "id": template_id}, status=200)

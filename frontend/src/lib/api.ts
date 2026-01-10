@@ -18,12 +18,12 @@ function getApiBase(): string {
 
 /**
  * Basic Auth header
- * - 优先 sessionStorage
+ * - 优先 localStorage（持久化，关闭浏览器后仍保持登录状态）
  * - 可选 env 兜底（开发方便，上线可移除）
  */
 function basicAuthHeader(): string | null {
 	if (typeof window !== "undefined") {
-		const token = sessionStorage.getItem("basic_auth");
+		const token = localStorage.getItem("basic_auth");
 		if (token) return `Basic ${token}`;
 	}
 

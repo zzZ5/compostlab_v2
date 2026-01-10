@@ -34,6 +34,17 @@ function latestNumber(ch: any): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
+function getQualityInfo(ch: any): { quality: string; color: string } {
+	if (!ch?.latest) return { quality: "无数据", color: "default" };
+	const q = ch.latest.quality || ch.latest.quality_flag || "OK";
+	const qUpper = String(q).toUpperCase();
+	if (qUpper === "OK") return { quality: "OK", color: "green" };
+	if (qUpper === "WARN" || qUpper === "WARNING") return { quality: "WARN", color: "orange" };
+	if (qUpper === "BAD" || qUpper === "ERROR") return { quality: "BAD", color: "red" };
+	if (qUpper === "ERR") return { quality: "ERR", color: "red" };
+	return { quality: qUpper, color: "default" };
+}
+
 function maxLatest(chs: any[]): number | null {
 	let best: number | null = null;
 	for (const ch of chs || []) {
@@ -205,10 +216,10 @@ export default function DashboardPage() {
 			const oA = evalO2(minO2);
           const ov = overallSev(tA.sev, oA.sev);
 
-          const ovTagColor = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
-          const ovText = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
+			const ovTagColor = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
+			const ovText = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
 
-			const featured = pickFeaturedChannels(d.channels || [], 5);
+			const featured = pickFeaturedChannels(d.channels || []);
 
 			// show metrics present
           const ms = Array.from(
@@ -252,6 +263,7 @@ export default function DashboardPage() {
 										const isTemp = mk === "temperature";
 										const isO2 = mk === "o2";
 										const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
+										const qualityInfo = getQualityInfo(ch);
 										const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
 										const displayName = getChannelDisplayName(ch);
 										return (
@@ -261,6 +273,7 @@ export default function DashboardPage() {
 												</Text>
 												<Space size={6}>
 													<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
+													<Tag color={qualityInfo.color} style={{ fontSize: 11 }}>{qualityInfo.quality}</Tag>
 													{a ? (
 														<Tooltip title={a.tip}>
 															<span style={{ color: "rgba(0,0,0,.45)" }}>ⓘ</span>

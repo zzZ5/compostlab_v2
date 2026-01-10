@@ -38,6 +38,12 @@ import { useDeleteChannel } from "@/features/channels/mutations";
 import { useUpdateDevice } from "@/features/devices/mutations";
 import { useDeleteDevice } from "@/features/devices/mutations";
 import { useSendDeviceCommand } from "@/features/devices/mutations";
+import {
+	useControlTemplates,
+	useCreateControlTemplate,
+	useUpdateControlTemplate,
+	useDeleteControlTemplate,
+} from "@/features/templates/queries";
 
 import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
 import { emptyObjectToUndefined } from "@/lib/kv";
@@ -78,7 +84,7 @@ export default function DeviceDetailPage() {
 	const channelsQ = useDeviceChannels(deviceId);
 	const channelsFromApi: Channel[] = channelsQ.data || [];
 	const channels: Channel[] = useMemo(() => {
-		// 优先使用 /devices/<id>/channels（更“权威”），否则退回 tree 里的 channels
+		// 优先使用 /devices/<id>/channels（更"权威"），否则退回 tree 里的 channels
 		if (channelsFromApi.length) return channelsFromApi;
 		return device?.channels || [];
 	}, [channelsFromApi, device?.channels]);
@@ -114,7 +120,7 @@ export default function DeviceDetailPage() {
 		return metricGroups.find((g) => g.key === activeMetric)?.label || (activeMetric ? String(activeMetric) : "-");
 	}, [metricGroups, activeMetric]);
 
-	// 默认选第一个“存在的”分组，而不是强行预设温度/氧气
+	// 默认选第一个"存在的"分组，而不是强行预设温度/氧气
 	useEffect(() => {
 		if (!metricGroups.length) return;
 		if (!activeMetric || !metricGroups.some((g) => g.key === activeMetric)) {
@@ -168,6 +174,15 @@ export default function DeviceDetailPage() {
 
 	const points = telemetryQ.data?.data || [];
 
+	// ✅ 按时间倒序排列（最新的在前），用于数据表展示
+	const pointsDesc = useMemo(() => {
+		return [...(points as any[])].sort((a, b) => {
+			const tA = Date.parse(a.ts || "");
+			const tB = Date.parse(b.ts || "");
+			return tB - tA; // 降序
+		});
+	}, [points]);
+
 	const chartOption = useMemo(() => {
 		// group by code
 		const byCode = new Map<string, Array<[string, number]>>();
@@ -184,16 +199,16 @@ export default function DeviceDetailPage() {
 			arr.sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
 		}
 
-		// 当数据点过少时，隐藏 slider（否则容易“挤到上面”）
+		// 当数据点过少时，隐藏 slider（否则容易"挤到上面"）
 		const uniqueTs = new Set<string>();
 		for (const p of points as any[]) if (p?.ts) uniqueTs.add(String(p.ts));
-		// 数据点太少时 slider 容易把布局“挤乱”（跑到上面）；这里设一个更稳的阈值
+		// 数据点太少时 slider 容易把布局"挤乱"（跑到上面）；这里设一个更稳的阈值
 		const enableSlider = uniqueTs.size >= 6;
 
 		const series = Array.from(byCode.entries()).map(([code, data]) => ({
 			name: code,
 			type: "line",
-			// 只有一个点时显示 symbol，避免“什么都没有”
+			// 只有一个点时显示 symbol，避免"什么都没有"
 			showSymbol: data.length <= 1,
 			data,
 		}));
@@ -427,6 +442,16 @@ export default function DeviceDetailPage() {
 	const sendCmd = useSendDeviceCommand(deviceId);
 	const commandsQ = useDeviceCommands(deviceId, 30);
 
+	// 控制模板相关
+	const templatesQ = useControlTemplates(deviceId, true);
+	const createTemplate = useCreateControlTemplate();
+	const updateTemplate = useUpdateControlTemplate(0); // id 在使用时动态传入
+	const deleteTemplate = useDeleteControlTemplate();
+
+	const [templateModalOpen, setTemplateModalOpen] = useState(false);
+	const [editingTemplate, setEditingTemplate] = useState<any>(null);
+	const [templateForm] = Form.useForm();
+
 	const CMD_TEMPLATES: Record<string, any> = {
 		set_aeration: {
 			commands: [{ command: "set_aeration", params: { on: 1, ms: 60000 } }],
@@ -449,6 +474,77 @@ export default function DeviceDetailPage() {
 	function insertTemplate(key: string) {
 		const t = CMD_TEMPLATES[key] || CMD_TEMPLATES.set_aeration;
 		setCmdJson(JSON.stringify(t, null, 2));
+	}
+
+	// 从保存的模板插入命令
+	function insertSavedTemplate(template: any) {
+		setCmdJson(JSON.stringify(template.payload, null, 2));
+	}
+
+	// 打开模板编辑/新建
+	function openTemplateEdit(template?: any) {
+		setEditingTemplate(template || null);
+		templateForm.resetFields();
+		if (template) {
+			templateForm.setFieldsValue({
+				name: template.name,
+				description: template.description || "",
+				payload: template.payload,
+				is_active: template.is_active,
+			});
+		} else {
+			templateForm.setFieldsValue({
+				name: "",
+				description: "",
+				payload: JSON.stringify({ commands: [] }, null, 2),
+				is_active: true,
+			});
+		}
+		setTemplateModalOpen(true);
+	}
+
+	// 提交模板
+	async function submitTemplate() {
+		try {
+			const v = await templateForm.validateFields();
+			const body: any = {
+				name: v.name.trim(),
+				description: v.description?.trim() || "",
+				payload: v.payload,
+				is_active: v.is_active !== false,
+				device_id: deviceId,
+			};
+
+			if (editingTemplate) {
+				await updateTemplate.mutateAsync({ ...body, id: editingTemplate.id });
+				message.success("模板已更新");
+			} else {
+				await createTemplate.mutateAsync(body);
+				message.success("模板已创建");
+			}
+			setTemplateModalOpen(false);
+		} catch (err) {
+			if ((err as any)?.errorFields) return;
+			message.error(getErrorMessage(err, "操作失败"));
+		}
+	}
+
+	// 删除模板
+	function confirmDeleteTemplate(template: any) {
+		Modal.confirm({
+			title: `确认删除模板 "${template.name}"？`,
+			okText: "删除",
+			okButtonProps: { danger: true },
+			cancelText: "取消",
+			onOk: async () => {
+				try {
+					await deleteTemplate.mutateAsync(template.id);
+					message.success("模板已删除");
+				} catch (e) {
+					message.error(getErrorMessage(e, "删除失败"));
+				}
+			},
+		});
 	}
 
 	async function sendCommand() {
@@ -574,6 +670,9 @@ export default function DeviceDetailPage() {
 			),
 		},
 	];
+
+	// === 分开的数据表tab管理 ===
+	const [activeDataTableTab, setActiveDataTableTab] = useState<string>("all");
 
 	return (
 		<Page
@@ -789,47 +888,107 @@ export default function DeviceDetailPage() {
 
 											<Divider style={{ margin: "8px 0" }} />
 											<Text type="secondary">数据表（{points.length}）</Text>
-											<Table
-												size="small"
-												rowKey={(r: any) => `${r.code}-${r.ts}-${r.value}`}
-												dataSource={points as any}
-												pagination={{
-													pageSize: 50,
-													showSizeChanger: true,
-													pageSizeOptions: [20, 50, 100],
-													showTotal: (total) => `共 ${total} 条`,
-												}}
-												scroll={{ x: 900 }}
-												columns={[
-													{ title: "时间", dataIndex: "ts", key: "ts", width: 180 },
-													{ title: "通道", dataIndex: "code", key: "code", width: 160 },
+											<Tabs
+												activeKey={activeDataTableTab}
+												onChange={setActiveDataTableTab}
+												items={[
 													{
-														title: "数值",
-														dataIndex: "value",
-														key: "value",
-														width: 140,
-														render: (v: any) => (typeof v === "number" ? v : Number(v)),
+														key: "all",
+														label: `全部 (${points.length})`,
+														children: (
+															<Table
+																size="small"
+																rowKey={(r: any) => `${r.code}-${r.ts}-${r.value}`}
+																dataSource={pointsDesc as any}
+																pagination={{
+																	pageSize: 50,
+																	showSizeChanger: true,
+																	pageSizeOptions: [20, 50, 100],
+																	showTotal: (total) => `共 ${total} 条`,
+																}}
+																scroll={{ x: 900 }}
+																columns={[
+																	{ title: "时间", dataIndex: "ts", key: "ts", width: 180 },
+																	{ title: "通道", dataIndex: "code", key: "code", width: 160 },
+																	{
+																		title: "数值",
+																		dataIndex: "value",
+																		key: "value",
+																		width: 140,
+																		render: (v: any) => (typeof v === "number" ? v : Number(v)),
+																	},
+																	{ title: "单位", dataIndex: "unit", key: "unit", width: 100 },
+																	{
+																		title: "质量",
+																		dataIndex: "quality",
+																		key: "quality",
+																		width: 120,
+																		render: (_: any, r: any) => {
+																			if (r && r.quality) return r.quality;
+																			return "-";
+																		},
+																	},
+																	{
+																		title: "来源",
+																		dataIndex: "source",
+																		key: "source",
+																		render: (_: any, r: any) => {
+																			if (r && r.source) return r.source;
+																			return "-";
+																		},
+																	},
+																]}
+															/>
+														),
 													},
-													{ title: "单位", dataIndex: "unit", key: "unit", width: 100 },
-													{
-														title: "质量",
-														dataIndex: "quality",
-														key: "quality",
-														width: 120,
-														render: (_: any, r: any) => {
-															if (r && r.quality) return r.quality;
-															return "-";
-														},
-													},
-													{
-														title: "来源",
-														dataIndex: "source",
-														key: "source",
-														render: (_: any, r: any) => {
-															if (r && r.source) return r.source;
-															return "-";
-														},
-													},
+													...effectiveCodes.map((code) => ({
+														key: code,
+														label: `${code} (${pointsDesc.filter((p: any) => p.code === code).length})`,
+														children: (
+															<Table
+																size="small"
+																rowKey={(r: any) => `${r.code}-${r.ts}-${r.value}`}
+																dataSource={pointsDesc.filter((p: any) => p.code === code) as any}
+																pagination={{
+																	pageSize: 50,
+																	showSizeChanger: true,
+																	pageSizeOptions: [20, 50, 100],
+																	showTotal: (total) => `共 ${total} 条`,
+																}}
+																scroll={{ x: 900 }}
+																columns={[
+																	{ title: "时间", dataIndex: "ts", key: "ts", width: 180 },
+																	{
+																		title: "数值",
+																		dataIndex: "value",
+																		key: "value",
+																		width: 140,
+																		render: (v: any) => (typeof v === "number" ? v : Number(v)),
+																	},
+																	{ title: "单位", dataIndex: "unit", key: "unit", width: 100 },
+																	{
+																		title: "质量",
+																		dataIndex: "quality",
+																		key: "quality",
+																		width: 120,
+																		render: (_: any, r: any) => {
+																			if (r && r.quality) return r.quality;
+																			return "-";
+																		},
+																	},
+																	{
+																		title: "来源",
+																		dataIndex: "source",
+																		key: "source",
+																		render: (_: any, r: any) => {
+																			if (r && r.source) return r.source;
+																			return "-";
+																		},
+																	},
+																]}
+															/>
+														),
+													})),
 												]}
 											/>
 											</Space>
@@ -855,7 +1014,7 @@ export default function DeviceDetailPage() {
 							>
 								<Space orientation="vertical" style={{ width: "100%" }} size={10}>
 									<Text type="secondary">
-										说明：metric/role/display_name 用于把原始 code 映射到“温度/氧气/二氧化碳/含水率”等语义层。
+										说明：metric/role/display_name 用于把原始 code 映射到"温度/氧气/二氧化碳/含水率"等语义层。
 									</Text>
 									<Table
 										rowKey="channel_id"
@@ -876,7 +1035,14 @@ export default function DeviceDetailPage() {
 						children: (
 							<Row gutter={[12, 12]}>
 								<Col xs={24} md={12}>
-									<Card title="下发命令">
+									<Card
+										title="下发命令"
+										extra={
+											<Button type="primary" onClick={() => openTemplateEdit()}>
+												新建模板
+											</Button>
+										}
+									>
 										<Space orientation="vertical" style={{ width: "100%" }} size={10}>
 											<Text type="secondary">
 												这里直接下发结构化 JSON 命令到设备的 response_topic。当前阶段不需要 ack 回执，因此请求不会长轮询。
@@ -884,6 +1050,27 @@ export default function DeviceDetailPage() {
 
 											<Divider style={{ margin: "8px 0" }} />
 
+											{/* 保存的模板列表 */}
+											{templatesQ.data?.data && templatesQ.data.data.length > 0 && (
+												<>
+													<Text strong>保存的模板</Text>
+													<div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+														{templatesQ.data.data.map((tpl) => (
+															<Tag
+																key={tpl.id}
+																color="blue"
+																style={{ cursor: "pointer", padding: "4px 8px", fontSize: 13 }}
+																onClick={() => insertSavedTemplate(tpl)}
+															>
+																{tpl.name}
+															</Tag>
+														))}
+													</div>
+													<Divider style={{ margin: "8px 0" }} />
+												</>
+											)}
+
+											{/* 内置模板（可选） */}
 											<Space wrap>
 												<Select
 													style={{ width: 200 }}
@@ -898,7 +1085,7 @@ export default function DeviceDetailPage() {
 													]}
 												/>
 												<Button onClick={() => insertTemplate(cmdTemplate)}>
-													插入模板
+													插入内置模板
 												</Button>
 											</Space>
 
@@ -927,6 +1114,80 @@ export default function DeviceDetailPage() {
 								</Col>
 
 								<Col xs={24} md={12}>
+									<Card
+										title="控制模板管理"
+										extra={
+											manage ? (
+												<Button type="primary" size="small" onClick={() => openTemplateEdit()}>
+													新建模板
+												</Button>
+											) : null
+										}
+									>
+										<Table
+											rowKey="id"
+											size="small"
+											pagination={{ pageSize: 10, hideOnSinglePage: true }}
+											dataSource={templatesQ.data?.data || []}
+											loading={templatesQ.isLoading}
+											columns={[
+												{
+													title: "名称",
+													dataIndex: "name",
+													render: (v: string, r: any) => (
+														<Space direction="vertical" size={0}>
+															<Text strong>{v}</Text>
+															{r.description && (
+																<Text type="secondary" style={{ fontSize: 12 }}>
+																	{r.description}
+																</Text>
+															)}
+														</Space>
+													),
+												},
+												{
+													title: "状态",
+													dataIndex: "is_active",
+													render: (v: boolean) => (
+														<Tag color={v ? "green" : "red"}>{v ? "启用" : "禁用"}</Tag>
+													),
+													width: 70,
+												},
+												{
+													title: "操作",
+													key: "actions",
+													render: (_: any, r: any) => (
+														<Space size={6}>
+															<Button size="small" onClick={() => insertSavedTemplate(r)}>
+																使用
+															</Button>
+															{manage && (
+																<>
+																	<Button size="small" onClick={() => openTemplateEdit(r)}>
+																		编辑
+																	</Button>
+																	<Button size="small" danger onClick={() => confirmDeleteTemplate(r)}>
+																		删除
+																	</Button>
+																</>
+															)}
+														</Space>
+													),
+												},
+											]}
+											expandable={{
+												expandedRowRender: (r: any) => (
+													<pre style={{ margin: 0, fontSize: 12, background: "#f5f5f5", padding: 8 }}>
+														{JSON.stringify(r.payload, null, 2)}
+													</pre>
+												),
+												rowExpandable: () => true,
+											}}
+										/>
+									</Card>
+								</Col>
+
+								<Col xs={24}>
 									<Card title="命令历史（最近30条）" extra={commandsQ.isFetching ? <Text type="secondary">刷新中…</Text> : null}>
 										<Table
 											rowKey="command_id"
@@ -993,6 +1254,7 @@ export default function DeviceDetailPage() {
 				okText="保存"
 				destroyOnHidden
 				confirmLoading={updateDevice.isPending}
+				maskClosable={!updateDevice.isPending}
 			>
 				<Form layout="vertical" form={deviceForm}>
 					<Row gutter={12}>
@@ -1039,6 +1301,7 @@ export default function DeviceDetailPage() {
 				okText={editingChannel ? "保存" : "创建"}
 				destroyOnHidden
 				confirmLoading={createChannel.isPending || updateChannel.isPending}
+				maskClosable={!(createChannel.isPending || updateChannel.isPending)}
 			>
 				<Form layout="vertical" form={channelForm}>
 					<Row gutter={12}>
@@ -1050,12 +1313,28 @@ export default function DeviceDetailPage() {
 						<Col xs={24} md={12}>
 							<Form.Item label="metric" name="metric" rules={[{ required: true, message: "请选择 metric" }]}>
 								<Select
+									showSearch
+									optionFilterProp="label"
 									options={[
-										{ value: "temperature", label: "temperature" },
-										{ value: "o2", label: "o2" },
-										{ value: "co2", label: "co2" },
-										{ value: "moisture", label: "moisture" },
-										{ value: "unknown", label: "unknown" },
+										{ value: "temperature", label: "temperature (温度)" },
+										{ value: "o2", label: "o2 (氧气)" },
+										{ value: "co2", label: "co2 (二氧化碳)" },
+										{ value: "ch4", label: "ch4 (甲烷)" },
+										{ value: "nh3", label: "nh3 (氨气)" },
+										{ value: "moisture", label: "moisture (含水率)" },
+										{ value: "humidity", label: "humidity (湿度)" },
+										{ value: "ph", label: "ph (pH值)" },
+										{ value: "pressure", label: "pressure (压力)" },
+										{ value: "wind_speed", label: "wind_speed (风速)" },
+										{ value: "wind_direction", label: "wind_direction (风向)" },
+										{ value: "flow", label: "flow (流量)" },
+										{ value: "switch", label: "switch (开关)" },
+										{ value: "voltage", label: "voltage (电压)" },
+										{ value: "current", label: "current (电流)" },
+										{ value: "power", label: "power (功率)" },
+										{ value: "speed", label: "speed (转速)" },
+										{ value: "level", label: "level (液位)" },
+										{ value: "unknown", label: "unknown (未分类)" },
 									]}
 								/>
 							</Form.Item>
@@ -1096,6 +1375,59 @@ export default function DeviceDetailPage() {
 					<Text strong>meta（Key-Value）</Text>
 					<Form.Item name="meta" style={{ marginTop: 8 }}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
+					</Form.Item>
+				</Form>
+			</Modal>
+
+			{/* ===== Control Template 新建 / 编辑 ===== */}
+			<Modal
+				open={templateModalOpen}
+				title={editingTemplate ? `编辑模板 ${editingTemplate.name}` : "新建控制模板"}
+				onCancel={() => setTemplateModalOpen(false)}
+				onOk={submitTemplate}
+				okText={editingTemplate ? "保存" : "创建"}
+				destroyOnHidden
+				confirmLoading={createTemplate.isPending || updateTemplate.isPending}
+				maskClosable={!(createTemplate.isPending || updateTemplate.isPending)}
+				width={600}
+			>
+				<Form layout="vertical" form={templateForm}>
+					<Form.Item label="模板名称" name="name" rules={[{ required: true, message: "请输入模板名称" }]}>
+						<Input placeholder="例如：曝气开启" />
+					</Form.Item>
+
+					<Form.Item label="描述" name="description">
+						<Input.TextArea placeholder="可选，例如：开启曝气泵60秒" autoSize={{ minRows: 2, maxRows: 4 }} />
+					</Form.Item>
+
+					<Form.Item
+						label="Payload (JSON)"
+						name="payload"
+						rules={[
+							{ required: true, message: "请输入 JSON payload" },
+							{
+								validator: (_, value) => {
+									try {
+										JSON.parse(value);
+										return Promise.resolve();
+									} catch {
+										return Promise.reject(new Error("JSON 格式错误"));
+									}
+								},
+							},
+						]}
+					>
+						<Input.TextArea
+							placeholder='{ "commands": [{ "command": "set_aeration", "params": { "on": 1, "ms": 60000 } }] }'
+							rows={12}
+							style={{
+								fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+							}}
+						/>
+					</Form.Item>
+
+					<Form.Item label="启用状态" name="is_active" valuePropName="checked">
+						<Switch />
 					</Form.Item>
 				</Form>
 			</Modal>

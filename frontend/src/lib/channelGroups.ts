@@ -64,13 +64,12 @@ export function groupChannelsByMetric(channels: Channel[]): ChannelGroup[] {
 }
 
 export function pickFeaturedChannels(channels: Channel[], maxRows = 5): Channel[] {
-	// 目标：温度可展示多个，其它指标各取 1 个，再补充其他
+	// ✅ 展示全部 channels，不再限制数量
 	const groups = groupChannelsByMetric(channels);
 
 	const out: Channel[] = [];
 	const add = (arr: Channel[]) => {
 		for (const ch of arr) {
-			if (out.length >= maxRows) return;
 			if (out.some((x) => x.code === ch.code)) continue;
 			out.push(ch);
 		}
@@ -87,17 +86,15 @@ export function pickFeaturedChannels(channels: Channel[], maxRows = 5): Channel[
 	}
 
 	// fill remaining with anything that has latest first
-	if (out.length < maxRows) {
-		const rest = channels
-			.filter((c) => !out.some((x) => x.code === c.code))
-			.sort((a, b) => {
-				const ah = a.latest ? 0 : 1;
-				const bh = b.latest ? 0 : 1;
-				if (ah !== bh) return ah - bh;
-				return String(a.code || "").localeCompare(String(b.code || ""));
-			});
-		add(rest);
-	}
+	const rest = channels
+		.filter((c) => !out.some((x) => x.code === c.code))
+		.sort((a, b) => {
+			const ah = a.latest ? 0 : 1;
+			const bh = b.latest ? 0 : 1;
+			if (ah !== bh) return ah - bh;
+			return String(a.code || "").localeCompare(String(b.code || ""));
+		});
+	add(rest);
 
-	return out.slice(0, maxRows);
+	return out;
 }
