@@ -196,6 +196,25 @@ export type DeviceTelemetryResp = {
 	data: TelemetryPoint[];
 };
 
+/** GET /api/v2/telemetry?device_ids=1,2,3 */
+export type MultiDeviceTelemetryResp = {
+	scope: "multi_device";
+	device_ids: ID[];
+
+	from: LocalDateTimeString | null;
+	to: LocalDateTimeString;
+
+	/** 只有 bucket 模式存在 */
+	bucket?: string;
+
+	filters: {
+		channels: string[] | null;
+	};
+
+	count: number;
+	data: TelemetryPoint[];
+};
+
 /** GET /api/v2/devices/<device_id>/channels/<code>/telemetry */
 export type DeviceChannelTelemetryResp = {
 	scope: "channel";

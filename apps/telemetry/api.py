@@ -439,6 +439,158 @@ class DeviceSummaryView(BasicAuthMixin, View):
         )
 
 
+class MultiDeviceTelemetryView(BasicAuthMixin, View):
+    """
+    GET /api/v2/telemetry?device_ids=1,2,3&channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m
+    跨设备遥测查询，支持多个设备和多个通道的对比
+    - device_ids: 设备ID列表，逗号分隔
+    - channels: 通道code列表，逗号分隔
+    - bucket 为空：raw 点数据（ORM）
+    - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
+    """
+
+    def get(self, request):
+        device_ids_str = (request.GET.get("device_ids") or "").strip()
+        if not device_ids_str:
+            return JsonResponse(
+                {"detail": "device_ids is required"},
+                status=400,
+            )
+
+        try:
+            device_ids = [int(x.strip()) for x in device_ids_str.split(",") if x.strip()]
+        except ValueError:
+            return JsonResponse(
+                {"detail": "device_ids must be comma-separated integers"},
+                status=400,
+            )
+
+        if not device_ids:
+            return JsonResponse(
+                {"detail": "at least one device_id is required"},
+                status=400,
+            )
+
+        # 验证所有设备存在
+        valid_devices = Device.objects.filter(id__in=device_ids).values_list("id", flat=True)
+        if len(valid_devices) != len(device_ids):
+            return JsonResponse(
+                {"detail": "one or more devices not found"},
+                status=404,
+            )
+
+        codes = _parse_channels_param(request)
+
+        dt_from = parse_dt(request.GET.get("from"))
+        dt_to = parse_dt(request.GET.get("to")) or timezone.now()
+        bucket = parse_bucket(request.GET.get("bucket"))
+
+        limit = int(request.GET.get("limit") or "20000")
+        limit = max(1, min(limit, 200000))
+
+        # -------- bucket aggregation via SQL (Timescale) --------
+        if bucket:
+            params: list = [f"{bucket.seconds} seconds"]
+            where = "WHERE device_id = ANY(%s)"
+            params.append(device_ids)
+
+            if dt_from is not None:
+                where += " AND ts >= %s"
+                params.append(dt_from)
+
+            where += " AND ts < %s"
+            params.append(dt_to)
+
+            if codes:
+                where += " AND code = ANY(%s)"
+                params.append(codes)
+
+            sql = f"""
+                SELECT
+                    device_id,
+                    code,
+                    time_bucket(%s, ts) AS bts,
+                    AVG(value) AS vavg,
+                    COALESCE(NULLIF(unit,''),'') AS unit
+                FROM telemetry_telemetrykv
+                {where}
+                GROUP BY device_id, code, bts, unit
+                ORDER BY device_id, code, bts
+                LIMIT %s;
+            """
+            params.append(limit)
+
+            with connection.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+
+            out = []
+            for did, code, bts, vavg, unit in rows:
+                out.append(
+                    {
+                        "device_id": int(did),
+                        "code": str(code),
+                        "ts": _dt_local_str(bts),
+                        "value": float(vavg),
+                        "unit": unit or "",
+                        "agg": "avg",
+                        "bucket": bucket.label,
+                    }
+                )
+
+            return JsonResponse(
+                {
+                    "scope": "multi_device",
+                    "device_ids": device_ids,
+                    "from": _dt_local_str(dt_from) if dt_from else None,
+                    "to": _dt_local_str(dt_to),
+                    "bucket": bucket.label,
+                    "filters": {"channels": codes or None},
+                    "count": len(out),
+                    "data": out,
+                },
+                status=200,
+            )
+
+        # -------- raw points via ORM --------
+        qs = TelemetryKV.objects.filter(device_id__in=device_ids, ts__lt=dt_to)
+        if dt_from is not None:
+            qs = qs.filter(ts__gte=dt_from)
+        if codes:
+            qs = qs.filter(code__in=codes)
+
+        rows = qs.values(
+            "device_id", "code", "ts", "value", "unit", "quality_flag", "source"
+        ).order_by("device_id", "code", "ts")[:limit]
+
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "device_id": r["device_id"],
+                    "code": r["code"],
+                    "ts": _dt_local_str(r["ts"]),
+                    "value": float(r["value"]),
+                    "unit": r["unit"] or "",
+                    "quality": r["quality_flag"],
+                    "source": r["source"],
+                }
+            )
+
+        return JsonResponse(
+            {
+                "scope": "multi_device",
+                "device_ids": device_ids,
+                "from": _dt_local_str(dt_from) if dt_from else None,
+                "to": _dt_local_str(dt_to),
+                "filters": {"channels": codes or None},
+                "count": len(out),
+                "data": out,
+            },
+            status=200,
+        )
+
+
 class DeviceExportView(BasicAuthMixin, View):
     """
     GET /api/v2/devices/<device_id>/export?from=...&to=...&channels=...

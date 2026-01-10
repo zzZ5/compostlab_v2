@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, buildQuery } from "@/lib/api";
-import type { DeviceTelemetryResp } from "@/types/api";
+import type { DeviceTelemetryResp, MultiDeviceTelemetryResp } from "@/types/api";
 import { deviceKeys } from "@/features/devices/keys";
 
 export function useDeviceTelemetry(args: {
@@ -26,5 +26,38 @@ export function useDeviceTelemetry(args: {
 			return res.data;
 		},
 		enabled: Number.isFinite(deviceId),
+	});
+}
+
+export function useMultiDeviceTelemetry(args: {
+	deviceIds: number[];
+	from?: string | null;
+	to?: string | null;
+	channels?: string[] | null;
+	bucket?: string | null;
+}) {
+	const { deviceIds, from, to, channels, bucket } = args;
+	const argsKey = [
+		deviceIds.join(","),
+		from,
+		to,
+		channels?.join(",") || "",
+		bucket || "",
+	].join("|");
+
+	return useQuery<MultiDeviceTelemetryResp>({
+		queryKey: ["telemetry", "multi", argsKey],
+		queryFn: async () => {
+			const qs = buildQuery({
+				device_ids: deviceIds.join(","),
+				from,
+				to,
+				channels: channels && channels.length ? channels : null,
+				bucket,
+			});
+			const res = await api.get<MultiDeviceTelemetryResp>(`/telemetry${qs}`);
+			return res.data;
+		},
+		enabled: deviceIds.length > 0,
 	});
 }

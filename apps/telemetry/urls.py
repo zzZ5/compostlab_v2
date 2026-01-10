@@ -7,6 +7,13 @@ from apps.telemetry import api as views
 
 
 urlpatterns = [
+    # 跨设备 telemetry
+    # GET /api/v2/telemetry?device_ids=1,2,3&channels=...&from=...&to=...&bucket=10m
+    path(
+        "telemetry",
+        views.MultiDeviceTelemetryView.as_view(),
+        name="multi_device_telemetry",
+    ),
     # 设备级 telemetry
     # GET /api/v2/devices/<device_id>/telemetry?channels=...&from=...&to=...&bucket=10m
     path(
