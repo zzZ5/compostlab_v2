@@ -158,8 +158,11 @@ class ControlTemplate(models.Model):
     用于保存常用的设备控制命令，方便快速下发
     """
 
+    test = models.CharField(max_length=64, blank=True, default="")
     name = models.CharField(max_length=128, help_text="模板名称，如：曝气开启")
-    description = models.CharField(max_length=256, blank=True, default="", help_text="模板描述")
+    description = models.CharField(
+        max_length=256, blank=True, default="", help_text="模板描述"
+    )
     # 存储完整的命令 JSON 结构: { "commands": [...] }
     payload = models.JSONField(default=dict, help_text="命令payload")
 
@@ -172,7 +175,7 @@ class ControlTemplate(models.Model):
         related_name="control_templates",
         null=True,
         blank=True,
-        help_text="关联设备（可选）"
+        help_text="关联设备（可选）",
     )
 
     # 创建者
