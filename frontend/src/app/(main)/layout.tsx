@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Layout, Menu, Spin, Button, Space, Grid } from "antd";
+import { Layout, Menu, Spin, Button, Space, Grid, Dropdown, Avatar, Typography, Tag } from "antd";
 import {
   DashboardOutlined,
   DatabaseOutlined,
@@ -12,8 +12,14 @@ import {
   UserOutlined,
   TeamOutlined,
   AuditOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  LogoutOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser } from "@/lib/auth";
+
+const { Text } = Typography;
 
 const { Header, Content, Sider } = Layout;
 const { useBreakpoint } = Grid;
@@ -105,11 +111,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             alignItems: "center",
             padding: "0 16px",
             fontWeight: 700,
+            fontSize: 18,
             letterSpacing: 0.2,
             color: "#fff",
           }}
         >
-          {collapsed ? "CL" : "CompostLab"}
+          {collapsed ? "🧪" : "🧪 CompostLab"}
         </div>
 
         <Menu
@@ -138,27 +145,67 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           style={{
             background: "#fff",
             borderBottom: "1px solid rgba(0,0,0,0.06)",
-            padding: "0 16px",
+            padding: "0 24px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 12,
+            gap: 16,
+            height: 56,
           }}
         >
-          <Space>
-            <Button onClick={onToggleCollapsed}>{collapsed ? "展开菜单" : "收起菜单"}</Button>
-          </Space>
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={onToggleCollapsed}
+            style={{ fontSize: 16 }}
+          />
 
-          <Space>
-            <Button
-              onClick={() => {
-                clearTokens();
-                clearBasicAuth();
-                router.replace("/login");
+          <Space size="middle">
+            {currentUser && (
+              <>
+                <Space size="small">
+                  <Text type="secondary" style={{ fontSize: 13 }}>
+                    {currentUser.real_name || currentUser.username}
+                  </Text>
+                  {currentUser.role && (
+                    <Tag color={currentUser.role === "admin" ? "red" : currentUser.role === "operator" ? "blue" : "default"}>
+                      {currentUser.role_display || currentUser.role}
+                    </Tag>
+                  )}
+                </Space>
+              </>
+            )}
+            
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "profile",
+                    icon: <UserOutlined />,
+                    label: "个人中心",
+                    onClick: () => router.push("/profile"),
+                  },
+                  { type: "divider" },
+                  {
+                    key: "logout",
+                    icon: <LogoutOutlined />,
+                    label: "退出登录",
+                    danger: true,
+                    onClick: () => {
+                      clearTokens();
+                      clearBasicAuth();
+                      router.replace("/login");
+                    },
+                  },
+                ],
               }}
+              trigger={["click"]}
             >
-              退出登录
-            </Button>
+              <Avatar
+                icon={<UserOutlined />}
+                style={{ cursor: "pointer", backgroundColor: "#1890ff" }}
+              />
+            </Dropdown>
           </Space>
         </Header>
 
