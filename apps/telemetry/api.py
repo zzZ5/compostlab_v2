@@ -619,31 +619,32 @@ class DeviceExportView(BasicAuthMixin, View):
         writer = csv.writer(pseudo_buffer)
 
         def row_iter():
-            yield writer.writerow(
-                [
-                    "ts",
-                    "device_id",
-                    "code",
-                    "value",
-                    "unit",
-                    "quality",
-                    "source",
-                ]
-            )
+            # 使用 yield 返回字节流，而不是使用 writer.writerow
+            yield b'\xef\xbb\xbf'  # UTF-8 BOM，确保 Excel 正确识别编码
+
+            # 写入表头
+            header = "ts,device_id,code,value,unit,quality,source\n"
+            yield header.encode('utf-8')
+
+            # 写入数据行
             for r in qs.iterator(chunk_size=10000):
-                yield writer.writerow(
-                    [
-                        _dt_local_str(r["ts"]),
-                        r["device_id"],
-                        r["code"],
-                        float(r["value"]),
-                        r["unit"] or "",
-                        r["quality_flag"],
-                        r["source"],
-                    ]
-                )
+                row = [
+                    _dt_local_str(r["ts"]),
+                    str(r["device_id"]),
+                    r["code"],
+                    str(float(r["value"])),
+                    (r["unit"] or "").replace('"', '""'),  # 处理引号
+                    r["quality_flag"] or "",
+                    r["source"] or "",
+                ]
+                # 每一行写入 CSV 格式（带引号，处理逗号等）
+                line = ','.join([f'"{col}"' for col in row])
+                yield (line + '\n').encode('utf-8')
 
         filename = f"device_{device_id}_telemetry.csv"
-        resp = StreamingHttpResponse(row_iter(), content_type="text/csv; charset=utf-8")
+        resp = StreamingHttpResponse(
+            row_iter(),
+            content_type="text/csv; charset=utf-8"
+        )
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp
