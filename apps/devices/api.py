@@ -274,6 +274,7 @@ def _apply_channel_semantic_fields(c: Channel, body: dict) -> Optional[JsonRespo
 # -------------------------
 # Device CRUD
 # -------------------------
+@method_decorator(csrf_exempt, name="dispatch")
 class DeviceListView(BasicAuthMixin, View):
     """GET /api/v2/devices"""
 
@@ -283,6 +284,7 @@ class DeviceListView(BasicAuthMixin, View):
         return JsonResponse({"count": len(data), "data": data}, status=200)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class DeviceDetailView(BasicAuthMixin, View):
     """GET /api/v2/devices/<device_id>"""
 
@@ -452,6 +454,7 @@ class DeviceChannelsView(BasicAuthMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class DeviceTreeView(BasicAuthMixin, View):
     """
     GET /api/v2/devices/tree?with_latest=1
@@ -480,6 +483,7 @@ class DeviceTreeView(BasicAuthMixin, View):
         return JsonResponse({"count": len(out), "data": out}, status=200)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class ChannelDetailView(BasicAuthMixin, View):
     """GET /api/v2/devices/<device_id>/channels/<channel_id>"""
 
@@ -495,6 +499,7 @@ class ChannelDetailView(BasicAuthMixin, View):
         return JsonResponse(_channel_to_dict(c), status=200)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class ChannelByCodeView(BasicAuthMixin, View):
     """GET /api/v2/devices/<device_id>/channels/by-code/<code>"""
 
@@ -828,6 +833,7 @@ class DeviceCommandListCreateView(
         return JsonResponse(_command_to_dict(rec), status=201)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class DeviceCommandDetailView(BasicAuthMixin, StaffRequiredMixin, View):
     """GET /api/v2/devices/<device_id>/commands/<command_id>"""
 

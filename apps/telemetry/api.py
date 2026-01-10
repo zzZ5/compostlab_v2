@@ -26,6 +26,8 @@ from django.db.models import Min, Max
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from apps.api.mixins import BasicAuthMixin
 from apps.api.utils import parse_dt, parse_bucket

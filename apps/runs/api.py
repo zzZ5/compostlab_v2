@@ -30,6 +30,8 @@ from django.utils import timezone
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
 from apps.api.utils import parse_dt, parse_bucket
@@ -209,6 +211,7 @@ class Echo:
 # -------------------------
 # Runs CRUD
 # -------------------------
+@method_decorator(csrf_exempt, name="dispatch")
 class RunListView(BasicAuthMixin, View):
     """GET /api/v2/runs"""
 
@@ -218,6 +221,7 @@ class RunListView(BasicAuthMixin, View):
         return JsonResponse({"count": len(data), "data": data}, status=200)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class RunDetailView(BasicAuthMixin, View):
     """GET /api/v2/runs/<run_id>"""
 
@@ -226,6 +230,7 @@ class RunDetailView(BasicAuthMixin, View):
         return JsonResponse(_run_to_dict(run), status=200)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
 class RunCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
     """POST /api/v2/runs"""
@@ -260,6 +265,7 @@ class RunCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
         return JsonResponse(_run_to_dict(run), status=201)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
 class RunUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
     """PATCH/PUT /api/v2/runs/<run_id>"""
@@ -320,6 +326,7 @@ class RunUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+@method_decorator(csrf_exempt, name="dispatch")
 class RunDeleteView(BasicAuthMixin, StaffRequiredMixin, View):
     """DELETE /api/v2/runs/<run_id>"""
 
@@ -332,6 +339,7 @@ class RunDeleteView(BasicAuthMixin, StaffRequiredMixin, View):
 # -------------------------
 # RunWindows CRUD
 # -------------------------
+@method_decorator(csrf_exempt, name="dispatch")
 class RunWindowListView(BasicAuthMixin, View):
     """GET /api/v2/runs/<run_id>/windows"""
 
@@ -353,6 +361,7 @@ class RunWindowListView(BasicAuthMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
 class RunWindowCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
     """POST /api/v2/runs/<run_id>/windows"""
@@ -421,6 +430,7 @@ class RunWindowCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, Vie
         return JsonResponse(_window_to_dict(run, w), status=201)
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
 class RunWindowUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
     """PATCH/PUT /api/v2/runs/<run_id>/windows/<window_id>"""
@@ -509,6 +519,7 @@ class RunWindowUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, Vie
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+@method_decorator(csrf_exempt, name="dispatch")
 class RunWindowDeleteView(BasicAuthMixin, StaffRequiredMixin, View):
     """DELETE /api/v2/runs/<run_id>/windows/<window_id>"""
 
@@ -524,6 +535,7 @@ class RunWindowDeleteView(BasicAuthMixin, StaffRequiredMixin, View):
 # -------------------------
 # Run Telemetry / Summary / Export / Export Wide
 # -------------------------
+@method_decorator(csrf_exempt, name="dispatch")
 class RunTelemetryView(BasicAuthMixin, View):
     """
     GET /api/v2/runs/<run_id>/telemetry?channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m
@@ -708,6 +720,7 @@ class RunTelemetryView(BasicAuthMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class RunSummaryView(BasicAuthMixin, View):
     """GET /api/v2/runs/<run_id>/summary"""
 
@@ -779,6 +792,7 @@ class RunSummaryView(BasicAuthMixin, View):
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class RunExportView(BasicAuthMixin, View):
     """
     CSV（raw 点数据）
@@ -859,6 +873,7 @@ class RunExportView(BasicAuthMixin, View):
         return resp
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class RunExportWideView(BasicAuthMixin, View):
     """
     宽表（每 bucket 一行，每 code 一个列）：必须 bucket + channels
