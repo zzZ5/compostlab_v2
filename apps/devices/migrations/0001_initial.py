@@ -56,8 +56,11 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["id"],
                 "indexes": [
-                    models.Index(fields=["code"]),
-                    models.Index(fields=["is_active", "last_seen_at"]),
+                    models.Index(fields=["code"], name="devices_device_code_idx"),
+                    models.Index(
+                        fields=["is_active", "last_seen_at"],
+                        name="devices_device_is_active_last_seen_idx",
+                    ),
                 ],
             },
         ),
@@ -108,9 +111,15 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["device_id", "code"],
                 "indexes": [
-                    models.Index(fields=["device", "code"]),
-                    models.Index(fields=["code"]),
-                    models.Index(fields=["device", "is_active"]),
+                    models.Index(
+                        fields=["device", "code"],
+                        name="devices_channel_device_code_idx",
+                    ),
+                    models.Index(fields=["code"], name="devices_channel_code_idx"),
+                    models.Index(
+                        fields=["device", "is_active"],
+                        name="devices_channel_device_is_active_idx",
+                    ),
                 ],
                 "constraints": [
                     models.UniqueConstraint(
@@ -175,7 +184,12 @@ class Migration(migrations.Migration):
             ],
             options={
                 "ordering": ["-id"],
-                "indexes": [models.Index(fields=["device", "status", "created_at"])],
+                "indexes": [
+                    models.Index(
+                        fields=["device", "status", "created_at"],
+                        name="devices_devicecommand_device_status_created_at_idx",
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
@@ -224,8 +238,14 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["-created_at"],
                 "indexes": [
-                    models.Index(fields=["device", "is_active"]),
-                    models.Index(fields=["is_active"]),
+                    models.Index(
+                        fields=["device", "is_active"],
+                        name="devices_controltemplate_device_is_active_idx",
+                    ),
+                    models.Index(
+                        fields=["is_active"],
+                        name="devices_controltemplate_is_active_idx",
+                    ),
                 ],
             },
         ),
