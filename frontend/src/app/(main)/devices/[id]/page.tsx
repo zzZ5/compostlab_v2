@@ -479,6 +479,7 @@ export default function DeviceDetailPage() {
 				description: editingTemplate.description || "",
 				payload: editingTemplate.payload,
 				is_active: editingTemplate.is_active,
+				is_global: editingTemplate.device_id === null,
 			});
 		} else {
 			templateForm.setFieldsValue({
@@ -486,6 +487,7 @@ export default function DeviceDetailPage() {
 				description: "",
 				payload: JSON.stringify({ commands: [] }, null, 2),
 				is_active: true,
+				is_global: false,
 			});
 		}
 	}, [templateModalOpen, editingTemplate]);
@@ -506,7 +508,7 @@ export default function DeviceDetailPage() {
 				description: v.description?.trim() || "",
 				payload: v.payload,
 				is_active: v.is_active !== false,
-				device_id: deviceId,
+				device_id: v.is_global ? null : deviceId,
 			};
 
 			if (editingTemplate) {
@@ -1115,7 +1117,7 @@ export default function DeviceDetailPage() {
 													title: "名称",
 													dataIndex: "name",
 													render: (v: string, r: any) => (
-														<Space direction="vertical" size={0}>
+														<Space orientation="vertical" size={0}>
 															<Text strong>{v}</Text>
 															{r.description && (
 																<Text type="secondary" style={{ fontSize: 12 }}>
@@ -1407,6 +1409,15 @@ export default function DeviceDetailPage() {
 					</Form.Item>
 
 					<Form.Item label="启用状态" name="is_active" valuePropName="checked">
+						<Switch />
+					</Form.Item>
+
+					<Form.Item
+						label="全局模板"
+						name="is_global"
+						valuePropName="checked"
+						tooltip="全局模板可用于所有设备，不绑定到当前设备"
+					>
 						<Switch />
 					</Form.Item>
 				</Form>

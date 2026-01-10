@@ -151,7 +151,7 @@ export default function RunsPage() {
 			key: "status",
 			width: 200,
 			render: (_: any, r: any) => (
-				<Space direction="vertical" size={2}>
+				<Space orientation="vertical" size={2}>
 					<Text>
 						状态：
 						{getRunStatus(r)}
@@ -179,7 +179,7 @@ export default function RunsPage() {
 			key: "recipe_settings",
 			width: 260,
 			render: (_: any, r: any) => (
-				<Space direction="vertical" size={2}>
+				<Space orientation="vertical" size={2}>
 					<Text style={{ fontSize: 12 }}>
 						配方：{getRecipeSummary(r.recipe)}
 					</Text>
