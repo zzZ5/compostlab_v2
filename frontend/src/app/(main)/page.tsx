@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Card, Col, Grid, Input, Row, Select, Space, Spin, Tag, Tooltip, Typography } from "antd";
+import { Card, Col, Grid, Input, Row, Select, Space, Spin, Tag, Tooltip, Typography, Alert } from "antd";
+import { InfoCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 
 import Page from "@/components/Page";
 import { useDevicesTree } from "@/features/devices/queries";
@@ -253,7 +254,7 @@ export default function DashboardPage() {
                     {ms.length ? ms.map((m) => <Tag key={m}>{metricLabel(m)}</Tag>) : <Tag>未分类</Tag>}
                   </div>
 
-                  {/* values (dynamic) */}
+                          {/* values (dynamic) */}
                   <div style={{ marginTop: 8 }}>
                     {featured.length ? (
                       featured.map((ch: any) => {
@@ -273,17 +274,39 @@ export default function DashboardPage() {
                             style={{
                               display: "flex",
                               justifyContent: "space-between",
-                              padding: "4px 0",
+                              alignItems: "center",
+                              padding: "6px 0",
                             }}
                           >
                             <Text type="secondary" style={{ fontSize: 13 }}>
                               {displayName}
                             </Text>
-                            <Space size={4}>
+                            <Space size={6}>
                               <Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
                               <Tag color={qualityInfo.color} style={{ fontSize: 11 }}>
                                 {qualityInfo.quality}
                               </Tag>
+                              {a && a.sev !== "ok" && a.sev !== "none" && (
+                                <Tooltip title={a.tip}>
+                                  {a.sev === "danger" ? (
+                                    <ExclamationCircleOutlined
+                                      style={{
+                                        color: "#ff4d4f",
+                                        fontSize: 15,
+                                        cursor: "help"
+                                      }}
+                                    />
+                                  ) : (
+                                    <InfoCircleOutlined
+                                      style={{
+                                        color: "#faad14",
+                                        fontSize: 15,
+                                        cursor: "help"
+                                      }}
+                                    />
+                                  )}
+                                </Tooltip>
+                              )}
                             </Space>
                           </div>
                         );
