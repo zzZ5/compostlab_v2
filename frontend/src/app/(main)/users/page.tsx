@@ -49,8 +49,15 @@ export default function UsersPage() {
   async function handleSubmit(values: any) {
     try {
       if (editingUser) {
-        // 更新用户
-        await api.put(`/users/${editingUser.id}/update`, values);
+        // 更新用户 - 确保所有字段都被发送
+        const updateData = {
+          email: values.email || "",
+          role: values.role,
+          real_name: values.real_name || "",
+          department: values.department || "",
+          phone: values.phone || "",
+        };
+        await api.put(`/users/${editingUser.id}/update`, updateData);
         message.success("用户更新成功");
       } else {
         // 创建用户
@@ -63,6 +70,7 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || "操作失败";
+      console.error("User update error:", err);
       message.error(errMsg);
     }
   }

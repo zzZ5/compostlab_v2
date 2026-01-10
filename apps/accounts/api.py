@@ -403,40 +403,61 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return JsonResponse({"detail": "User not found."}, status=404)
-        
+
         try:
             body = json.loads(request.body.decode("utf-8"))
         except Exception:
             return JsonResponse({"detail": "Invalid JSON body."}, status=400)
-        
+
         profile = get_or_create_profile(user)
         changes = {}
-        
+
         # 更新 User 字段
         if "email" in body:
             old_email = user.email
-            user.email = body["email"].strip()
-            changes["email"] = {"old": old_email, "new": user.email}
-        
-        user.save()
-        
+            email_value = body["email"]
+            email_stripped = email_value.strip() if email_value else ""
+            # 只有当 email 确实改变时才更新
+            if email_stripped != old_email:
+                user.email = email_stripped
+                changes["email"] = {"old": old_email, "new": user.email}
+
+        # 只有当有变化时才保存
+        if changes or any(field in body for field in ["role", "real_name", "department", "phone"]):
+            try:
+                user.save()
+            except Exception as e:
+                return JsonResponse({"detail": f"Failed to update user: {str(e)}"}, status=400)
+
         # 更新 Profile 字段
-        if "role" in body and body["role"] in dict(UserProfile.UserRole.choices):
-            old_role = profile.role
-            profile.role = body["role"]
-            changes["role"] = {"old": old_role, "new": profile.role}
-        
+        if "role" in body:
+            role_value = body["role"]
+            if role_value in [choice[0] for choice in UserRole.choices]:
+                old_role = profile.role
+                if role_value != old_role:
+                    profile.role = role_value
+                    changes["role"] = {"old": old_role, "new": profile.role}
+
         if "real_name" in body:
-            profile.real_name = body["real_name"].strip()
-        
+            real_name_value = body["real_name"]
+            real_name_stripped = real_name_value.strip() if real_name_value else ""
+            profile.real_name = real_name_stripped
+
         if "department" in body:
-            profile.department = body["department"].strip()
-        
+            department_value = body["department"]
+            department_stripped = department_value.strip() if department_value else ""
+            profile.department = department_stripped
+
         if "phone" in body:
-            profile.phone = body["phone"].strip()
-        
-        profile.save()
-        
+            phone_value = body["phone"]
+            phone_stripped = phone_value.strip() if phone_value else ""
+            profile.phone = phone_stripped
+
+        try:
+            profile.save()
+        except Exception as e:
+            return JsonResponse({"detail": f"Failed to update profile: {str(e)}"}, status=400)
+
         log_audit(
             request.user,
             AuditLog.Action.USER_UPDATE,
@@ -446,7 +467,7 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
             changes=changes,
             request=request,
         )
-        
+
         return JsonResponse({"detail": "User updated successfully."}, status=200)
 
 
