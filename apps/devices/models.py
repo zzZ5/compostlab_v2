@@ -158,7 +158,6 @@ class ControlTemplate(models.Model):
     用于保存常用的设备控制命令，方便快速下发
     """
 
-    test = models.CharField(max_length=64, blank=True, default="")
     name = models.CharField(max_length=128, help_text="模板名称，如：曝气开启")
     description = models.CharField(
         max_length=256, blank=True, default="", help_text="模板描述"
