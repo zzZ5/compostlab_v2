@@ -19,9 +19,10 @@ function LoginForm() {
     <div
       style={{
         minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
         background: "#f5f5f5",
       }}
     >
@@ -33,6 +34,7 @@ function LoginForm() {
           boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
           border: "1px solid #e8e8e8",
         }}
+        bodyStyle={{ padding: 24 }}
       >
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <Title level={3} style={{ marginBottom: 8, fontWeight: 600 }}>
@@ -75,17 +77,20 @@ function LoginForm() {
             />
           </Form.Item>
 
-          <Form.Item
-            label="密码"
-            name="password"
-            rules={[{ required: true, message: "请输入密码" }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="请输入密码"
-              size="large"
-            />
-          </Form.Item>
+              <Form.Item
+                label="密码"
+                name="password"
+                rules={[
+                  { required: true, message: "请输入密码" },
+                  { min: 8, message: "密码至少 8 位" }
+                ]}
+              >
+                <Input.Password
+                  prefix={<LockOutlined />}
+                  placeholder="请输入密码（至少 8 位）"
+                  size="large"
+                />
+              </Form.Item>
 
           <Button type="primary" htmlType="submit" block size="large">
             登录

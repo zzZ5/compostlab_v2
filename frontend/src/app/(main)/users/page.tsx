@@ -52,7 +52,7 @@ export default function UsersPage() {
         // 更新用户 - 确保所有字段都被发送
         const updateData = {
           email: values.email || "",
-          role: values.role,
+          role: values.role || "readonly",
           real_name: values.real_name || "",
           department: values.department || "",
           phone: values.phone || "",
@@ -60,8 +60,19 @@ export default function UsersPage() {
         await api.put(`/users/${editingUser.id}/update`, updateData);
         message.success("用户更新成功");
       } else {
-        // 创建用户
-        const res = await api.post("/users/create", values);
+        // 创建用户 - 确保所有字段都有默认值
+        const createData = {
+          username: values.username || "",
+          password: values.password || "",
+          email: values.email || "",
+          role: values.role || "readonly",
+          real_name: values.real_name || "",
+          department: values.department || "",
+          phone: values.phone || "",
+        };
+        console.log("创建用户数据:", createData);
+        const res = await api.post("/users/create", createData);
+        console.log("创建用户响应:", res.data);
         message.success("用户创建成功");
       }
       setModalOpen(false);
@@ -70,7 +81,8 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || "操作失败";
-      console.error("User update error:", err);
+      console.error("用户操作错误:", err);
+      console.error("错误响应:", err?.response?.data);
       message.error(errMsg);
     }
   }
@@ -89,6 +101,13 @@ export default function UsersPage() {
   function openCreateModal() {
     setEditingUser(null);
     form.resetFields();
+    form.setFieldsValue({
+      email: "",
+      role: "readonly",
+      real_name: "",
+      department: "",
+      phone: "",
+    });
     setModalOpen(true);
   }
 
@@ -190,19 +209,22 @@ export default function UsersPage() {
               <Form.Item
                 label="密码"
                 name="password"
-                rules={[{ required: true, message: "请输入密码" }]}
+                rules={[
+                  { required: true, message: "请输入密码" },
+                  { min: 8, message: "密码至少 8 位" }
+                ]}
               >
-                <Input.Password placeholder="至少 8 位" />
+                <Input.Password placeholder="至少 8 位，不能过于简单" />
               </Form.Item>
             </>
           )}
 
-          <Form.Item label="邮箱" name="email">
-            <Input placeholder="可选" />
+          <Form.Item label="角色" name="role" rules={[{ required: true, message: "请选择角色" }]}>
+            <Select options={roleOptions} />
           </Form.Item>
 
-          <Form.Item label="角色" name="role" initialValue="readonly">
-            <Select options={roleOptions} />
+          <Form.Item label="邮箱" name="email">
+            <Input placeholder="可选" />
           </Form.Item>
 
           <Form.Item label="真实姓名" name="real_name">
