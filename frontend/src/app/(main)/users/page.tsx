@@ -101,13 +101,15 @@ export default function UsersPage() {
   function openCreateModal() {
     setEditingUser(null);
     form.resetFields();
+    // 使用 form.setFieldValue 设置默认角色，而不是 setFieldsValue
     form.setFieldsValue({
       email: "",
-      role: "readonly",
       real_name: "",
       department: "",
       phone: "",
     });
+    // 确保角色字段的初始值
+    form.setFieldValue("role", "readonly");
     setModalOpen(true);
   }
 

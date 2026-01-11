@@ -347,26 +347,36 @@ class UserCreateView(JWTAuthMixin, AdminRequiredMixin, View):
         real_name = body.get("real_name", "").strip()
         department = body.get("department", "").strip()
         phone = body.get("phone", "").strip()
-        
+
+        logger.info(f"创建用户请求: username={username}, role={role}, email={email}")
+
         if not username or not password:
             return JsonResponse({"detail": "Username and password required."}, status=400)
-        
+
         if User.objects.filter(username=username).exists():
             return JsonResponse({"detail": "Username already exists."}, status=400)
-        
+
         # 验证密码强度
         try:
             validate_password(password)
         except ValidationError as e:
             return JsonResponse({"detail": "Password validation failed.", "errors": e.messages}, status=400)
-        
+
+        # 验证角色值是否有效
+        valid_roles = [choice[0] for choice in UserProfile.UserRole.choices]
+        logger.info(f"有效角色列表: {valid_roles}")
+        logger.info(f"请求角色: {role}, 是否有效: {role in valid_roles}")
+        if role not in valid_roles:
+            logger.warning(f"无效角色 {role}，回退到 readonly")
+            role = "readonly"
+
         # 创建用户
         user = User.objects.create_user(username=username, password=password, email=email)
-        
+
         # 创建 Profile
         profile = UserProfile.objects.create(
             user=user,
-            role=role if role in dict(UserProfile.UserRole.choices) else "readonly",
+            role=role,
             real_name=real_name,
             department=department,
             phone=phone,
