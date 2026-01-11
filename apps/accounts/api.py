@@ -363,7 +363,7 @@ class UserCreateView(JWTAuthMixin, AdminRequiredMixin, View):
             return JsonResponse({"detail": "Password validation failed.", "errors": e.messages}, status=400)
 
         # 验证角色值是否有效
-        valid_roles = [choice[0] for choice in UserProfile.UserRole.choices]
+        valid_roles = [choice[0] for choice in UserRole.choices]
         logger.info(f"有效角色列表: {valid_roles}")
         logger.info(f"请求角色: {role}, 是否有效: {role in valid_roles}")
         if role not in valid_roles:

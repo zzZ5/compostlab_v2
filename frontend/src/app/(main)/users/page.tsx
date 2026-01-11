@@ -47,6 +47,8 @@ export default function UsersPage() {
   const users = usersQ.data?.data || [];
 
   async function handleSubmit(values: any) {
+    console.log("表单提交值:", values);
+
     try {
       if (editingUser) {
         // 更新用户 - 确保所有字段都被发送
@@ -57,8 +59,13 @@ export default function UsersPage() {
           department: values.department || "",
           phone: values.phone || "",
         };
+        console.log("更新用户数据:", updateData);
         await api.put(`/users/${editingUser.id}/update`, updateData);
         message.success("用户更新成功");
+        setModalOpen(false);
+        form.resetFields();
+        setEditingUser(null);
+        queryClient.invalidateQueries({ queryKey: ["users"] });
       } else {
         // 创建用户 - 确保所有字段都有默认值
         const createData = {
@@ -70,21 +77,73 @@ export default function UsersPage() {
           department: values.department || "",
           phone: values.phone || "",
         };
+
         console.log("创建用户数据:", createData);
-        const res = await api.post("/users/create", createData);
-        console.log("创建用户响应:", res.data);
-        message.success("用户创建成功");
+
+        try {
+          const res = await api.post("/users/create", createData);
+          console.log("创建用户响应:", res.data);
+
+          // 检查返回的角色是否与请求的一致
+          if (res.data.role !== createData.role) {
+            message.warning(`用户已创建，但角色从 ${createData.role} 变更为 ${res.data.role}`);
+          } else {
+            message.success("用户创建成功");
+          }
+
+          // 创建成功后关闭模态框
+          setModalOpen(false);
+          form.resetFields();
+          setEditingUser(null);
+          queryClient.invalidateQueries({ queryKey: ["users"] });
+        } catch (apiError: any) {
+          console.error("API 请求错误:", apiError);
+          throw apiError;
+        }
       }
-      setModalOpen(false);
-      form.resetFields();
-      setEditingUser(null);
-      queryClient.invalidateQueries({ queryKey: ["users"] });
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || "操作失败";
+      const status = err?.response?.status;
+      const responseData = err?.response?.data;
+
       console.error("用户操作错误:", err);
-      console.error("错误响应:", err?.response?.data);
-      message.error(errMsg);
+      console.error("错误响应:", responseData);
+      console.error("状态码:", status);
+
+      // 根据不同的状态码显示不同的错误信息
+      if (status === 400) {
+        if (responseData?.errors && Array.isArray(responseData.errors)) {
+          message.error(`验证失败: ${responseData.errors.join("; ")}`);
+        } else if (responseData?.detail) {
+          message.error(responseData.detail);
+        } else {
+          message.error("请求参数错误，请检查输入");
+        }
+      } else if (status === 403) {
+        message.error("权限不足：需要管理员权限才能创建用户");
+      } else if (status === 401) {
+        message.error("未授权：请重新登录");
+      } else if (status === 422) {
+        message.error(`验证失败: ${JSON.stringify(responseData?.errors || responseData?.detail || errMsg)}`);
+      } else {
+        message.error(`${errMsg}${status ? ` (HTTP ${status})` : ""}`);
+      }
+
+      // 错误时不关闭模态框，让用户可以修正后重试
+      return;
     }
+  }
+
+  function handleOk() {
+    form.validateFields()
+      .then((values) => {
+        console.log("表单验证通过:", values);
+        handleSubmit(values);
+      })
+      .catch((errorInfo) => {
+        console.error("表单验证失败:", errorInfo);
+        // 表单验证失败时，Ant Design 会自动显示字段错误
+      });
   }
 
   async function handleToggleActive(user: User) {
@@ -196,7 +255,7 @@ export default function UsersPage() {
           setEditingUser(null);
           form.resetFields();
         }}
-        onOk={() => form.submit()}
+        onOk={handleOk}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           {!editingUser && (
