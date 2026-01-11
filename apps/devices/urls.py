@@ -6,6 +6,7 @@ from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
 
 from apps.devices import api as views
+from apps.devices import api_script as script_views
 
 
 def method_router(method_to_viewcls: dict):
@@ -145,4 +146,58 @@ urlpatterns = [
         ),
         name="control_template_detail_update_delete",
     ),
+    # -------- Script Templates -------- (d:/PythonProject/backend_v2/apps/devices/api_script.py)
+    # GET  /api/v2/scripts
+    # POST /api/v2/scripts
+    path(
+        "scripts",
+        method_router(
+            {
+                "GET": script_views.ScriptTemplateListView,
+                "POST": script_views.ScriptTemplateListView,
+            }
+        ),
+        name="script_template_list_create",
+    ),
+    # GET    /api/v2/scripts/<id>
+    # PATCH  /api/v2/scripts/<id>
+    # PUT    /api/v2/scripts/<id>
+    # DELETE /api/v2/scripts/<id>
+    path(
+        "scripts/<int:script_id>",
+        method_router(
+            {
+                "GET": script_views.ScriptTemplateDetailView,
+                "PATCH": script_views.ScriptTemplateDetailView,
+                "PUT": script_views.ScriptTemplateDetailView,
+                "DELETE": script_views.ScriptTemplateDetailView,
+            }
+        ),
+        name="script_template_detail_update_delete",
+    ),
+    # GET  /api/v2/scripts/<script_id>/executions
+    # POST /api/v2/scripts/<script_id>/execute
+    path(
+        "scripts/<int:script_id>/executions",
+        method_router(
+            {
+                "GET": script_views.ScriptExecutionListView,
+                "POST": script_views.ScriptExecutionListView,
+            }
+        ),
+        name="script_execution_list_create",
+    ),
+    # GET /api/v2/script-executions/<execution_id>
+    path(
+        "script-executions/<int:execution_id>",
+        script_views.ScriptExecutionDetailView.as_view(),
+        name="script_execution_detail",
+    ),
+    # POST /api/v2/scripts/check-thresholds (手动触发阈值检查）
+    path(
+        "scripts/check-thresholds",
+        script_views.AutoControlView.as_view(),
+        name="auto_control_check",
+    ),
 ]
+

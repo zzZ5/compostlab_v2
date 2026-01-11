@@ -5,17 +5,18 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Layout, Menu, Spin, Button, Space, Grid, Dropdown, Avatar, Typography, Tag } from "antd";
 import {
-  DashboardOutlined,
-  DatabaseOutlined,
-  ExperimentOutlined,
-  LineChartOutlined,
-  UserOutlined,
-  TeamOutlined,
-  AuditOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  LogoutOutlined,
-  SettingOutlined,
+    DashboardOutlined,
+    DatabaseOutlined,
+    ExperimentOutlined,
+    LineChartOutlined,
+    UserOutlined,
+    TeamOutlined,
+    AuditOutlined,
+    MenuFoldOutlined,
+    MenuUnfoldOutlined,
+    LogoutOutlined,
+    SettingOutlined,
+    ControlOutlined,
 } from "@ant-design/icons";
 import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser } from "@/lib/auth";
 
@@ -25,13 +26,14 @@ const { Header, Content, Sider } = Layout;
 const { useBreakpoint } = Grid;
 
 function getSelectedKey(pathname: string) {
-  if (pathname.startsWith("/devices")) return "/devices";
-  if (pathname.startsWith("/runs")) return "/runs";
-  if (pathname.startsWith("/telemetry")) return "/telemetry";
-  if (pathname.startsWith("/users")) return "/users";
-  if (pathname.startsWith("/profile")) return "/profile";
-  if (pathname.startsWith("/audit-logs")) return "/audit-logs";
-  return "/";
+    if (pathname.startsWith("/devices")) return "/devices";
+    if (pathname.startsWith("/runs")) return "/runs";
+    if (pathname.startsWith("/telemetry")) return "/telemetry";
+    if (pathname.startsWith("/scripts")) return "/scripts";
+    if (pathname.startsWith("/users")) return "/users";
+    if (pathname.startsWith("/profile")) return "/profile";
+    if (pathname.startsWith("/audit-logs")) return "/audit-logs";
+    return "/";
 }
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
@@ -125,10 +127,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           items={[
             { key: "/", icon: <DashboardOutlined />, label: <Link href="/">仪表盘</Link> },
             { key: "/devices", icon: <DatabaseOutlined />, label: <Link href="/devices">设备</Link> },
+            { key: "/scripts", icon: <ControlOutlined />, label: <Link href="/scripts">控制脚本</Link> },
             { key: "/runs", icon: <ExperimentOutlined />, label: <Link href="/runs">运行批次</Link> },
             { key: "/telemetry", icon: <LineChartOutlined />, label: <Link href="/telemetry">数据探索</Link> },
             { type: "divider" },
-            { key: "/profile", icon: <UserOutlined />, label: <Link href="/profile">个人中心</Link> },
             ...(currentUser?.role === "admin" || currentUser?.is_staff || currentUser?.is_superuser
               ? [
                   { key: "/users", icon: <TeamOutlined />, label: <Link href="/users">用户管理</Link> },

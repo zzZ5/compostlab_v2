@@ -167,6 +167,189 @@ class ControlTemplate(models.Model):
 
     is_active = models.BooleanField(default=True, help_text="是否启用")
 
+
+class ScriptTemplate(models.Model):
+    """
+    控制脚本模板
+    存储自动控制算法和脚本，后端根据脚本自动下发命令
+    """
+
+    class ScriptType(models.TextChoices):
+        THRESHOLD = "threshold", "阈值触发"
+        SCHEDULE = "schedule", "定时执行"
+        HYBRID = "hybrid", "混合模式（阈值+定时）"
+        PYTHON = "python", "Python脚本"
+
+    name = models.CharField(max_length=128, help_text="脚本名称，如：高温自动降温")
+    description = models.CharField(
+        max_length=512, blank=True, default="", help_text="脚本描述"
+    )
+    script_type = models.CharField(
+        max_length=20,
+        choices=ScriptType.choices,
+        default=ScriptType.THRESHOLD,
+        help_text="脚本类型",
+    )
+
+    # 阈值配置（用于阈值触发类型）
+    threshold_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='阈值配置，例如: {"metric": "temperature", "operator": ">=", "value": 75, "action": "pump_off"}',
+    )
+
+    # 定时配置（用于定时执行类型）
+    schedule_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='定时配置，例如: {"cron": "0 9 * * *", "commands": [...]}',
+    )
+
+    # Python脚本代码
+    python_code = models.TextField(
+        blank=True, help_text="Python脚本代码（script_type=python时使用）"
+    )
+
+    # 默认命令模板（所有类型都可以使用）
+    command_template = models.JSONField(
+        default=dict,
+        help_text='命令模板，例如: {"commands": [{"command": "pump", "action": "on"}]}',
+    )
+
+    # 关联的设备和批次
+    devices = models.ManyToManyField(
+        Device,
+        blank=True,
+        related_name="script_templates",
+        help_text="应用到哪些设备",
+    )
+    run = models.ForeignKey(
+        "runs.Run",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="script_templates",
+        help_text="应用到哪个批次",
+    )
+
+    is_active = models.BooleanField(default=True, help_text="是否启用")
+    priority = models.IntegerField(
+        default=0, help_text="优先级，数字越大越优先执行"
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="script_templates",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "devices_scripttemplate"
+        ordering = ["-priority", "-created_at"]
+        indexes = [
+            models.Index(fields=["script_type", "is_active"]),
+            models.Index(fields=["run", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.get_script_type_display()})"
+
+
+class ScriptExecution(models.Model):
+    """
+    脚本执行记录
+    记录每次脚本的执行情况和结果
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "待执行"
+        RUNNING = "running", "执行中"
+        SUCCESS = "success", "成功"
+        FAILED = "failed", "失败"
+        SKIPPED = "skipped", "跳过"
+
+    script = models.ForeignKey(
+        ScriptTemplate,
+        on_delete=models.CASCADE,
+        related_name="executions",
+        help_text="执行的脚本模板",
+    )
+
+    device = models.ForeignKey(
+        Device,
+        on_delete=models.CASCADE,
+        related_name="script_executions",
+        help_text="目标设备",
+    )
+
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+
+    # 触发原因
+    trigger_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="触发原因，如：threshold_exceeded, schedule, manual",
+    )
+
+    # 执行的命令
+    commands = models.JSONField(
+        default=list, help_text="实际下发的命令列表"
+    )
+
+    # 执行结果
+    result = models.JSONField(
+        default=dict, blank=True, help_text="执行结果详情"
+    )
+
+    error_message = models.TextField(
+        blank=True, default="", help_text="错误信息（如果失败）"
+    )
+
+    # 时间信息
+    scheduled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="计划执行时间",
+    )
+    started_at = models.DateTimeField(
+        null=True, blank=True, help_text="实际开始时间"
+    )
+    completed_at = models.DateTimeField(
+        null=True, blank=True, help_text="完成时间"
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="script_executions",
+        help_text="手动执行的用户（null表示自动执行）",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "devices_scriptexecution"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["script", "status"]),
+            models.Index(fields=["device", "created_at"]),
+            models.Index(fields=["status", "scheduled_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.script.name} -> {self.device.code} ({self.status})"
+
     # 可选：关联特定设备，为空则通用模板
     device = models.ForeignKey(
         Device,
