@@ -209,7 +209,7 @@ else:
                         <Text type="secondary">
                             可用函数：get_latest_value(metric) - 获取指定指标的最新值<br />
                             可用变量：device (当前设备信息)、datetime (日期时间)、timedelta (时间差)<br />
-                            必须返回：commands 变量（命令列表，格式：[{"command": "pump", "action": "on"}]）
+                            必须返回：commands 变量（命令列表，格式：[{{&quot;command&quot;: &quot;pump&quot;, &quot;action&quot;: &quot;on&quot;}}]）
                         </Text>
                     </>
                 )}
@@ -229,7 +229,7 @@ else:
 {"commands": [{"command": "pump", "action": "on"}]}
 
 示例：组合控制
-{"commands": [{"command": "pump", "action": "on"}, {"command": "fan", "action": "on"}]}`}
+{"commands": [{"command": "pump", "action": "on"}, {"command": "fan", "action": "on"}]}`.replace(/"/g, '&quot;')}
                         style={{ fontFamily: "monospace" }}
                     />
                 </Form.Item>
