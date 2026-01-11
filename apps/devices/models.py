@@ -165,7 +165,39 @@ class ControlTemplate(models.Model):
     # 存储完整的命令 JSON 结构: { "commands": [...] }
     payload = models.JSONField(default=dict, help_text="命令payload")
 
+    # 可选：关联特定设备，为空则通用模板
+    device = models.ForeignKey(
+        Device,
+        on_delete=models.CASCADE,
+        related_name="control_templates",
+        null=True,
+        blank=True,
+        help_text="关联设备（可选）",
+    )
+
     is_active = models.BooleanField(default=True, help_text="是否启用")
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="control_templates",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["device", "is_active"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        device_prefix = f"{self.device.code}:" if self.device else "全局:"
+        return f"{device_prefix}{self.name}"
 
 
 class ScriptTemplate(models.Model):
@@ -349,36 +381,3 @@ class ScriptExecution(models.Model):
 
     def __str__(self) -> str:
         return f"{self.script.name} -> {self.device.code} ({self.status})"
-
-    # 可选：关联特定设备，为空则通用模板
-    device = models.ForeignKey(
-        Device,
-        on_delete=models.CASCADE,
-        related_name="control_templates",
-        null=True,
-        blank=True,
-        help_text="关联设备（可选）",
-    )
-
-    # 创建者
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="control_templates",
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["device", "is_active"]),
-            models.Index(fields=["is_active"]),
-        ]
-
-    def __str__(self) -> str:
-        device_prefix = f"{self.device.code}:" if self.device else "全局:"
-        return f"{device_prefix}{self.name}"

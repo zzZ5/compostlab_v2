@@ -72,7 +72,13 @@ class AuditLog(models.Model):
         
         # 命令相关
         COMMAND_SEND = "command_send", "发送命令"
-        
+
+        # 脚本相关
+        SCRIPT_CREATE = "script_create", "创建脚本"
+        SCRIPT_UPDATE = "script_update", "更新脚本"
+        SCRIPT_DELETE = "script_delete", "删除脚本"
+        SCRIPT_EXECUTE = "script_execute", "执行脚本"
+
         # 用户管理
         USER_CREATE = "user_create", "创建用户"
         USER_UPDATE = "user_update", "更新用户"

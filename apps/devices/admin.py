@@ -4,7 +4,7 @@ from __future__ import annotations
 from django.contrib import admin
 from django.utils.html import format_html
 
-from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate
+from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate, ScriptTemplate, ScriptExecution
 
 
 def _field_names(model) -> set[str]:
@@ -276,6 +276,9 @@ class ControlTemplateAdmin(admin.ModelAdmin):
     ordering = ("-id",)
     readonly_fields = ("created_at", "updated_at")
 
+    def device(self, obj: ControlTemplate):
+        return getattr(obj, "device", None)
+
     def is_active(self, obj: ControlTemplate):
         return getattr(obj, "is_active", None)
 
@@ -284,3 +287,141 @@ class ControlTemplateAdmin(admin.ModelAdmin):
 
     def updated_at(self, obj: ControlTemplate):
         return getattr(obj, "updated_at", None)
+
+
+@admin.register(ScriptTemplate)
+class ScriptTemplateAdmin(admin.ModelAdmin):
+    """
+    脚本模板后台管理
+    """
+
+    list_display = (
+        "id",
+        "name",
+        "script_type_display",
+        "is_active",
+        "priority",
+        "device_count",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("script_type", "is_active")
+    search_fields = ("name", "description")
+    ordering = ("-id",)
+    readonly_fields = ("created_at", "updated_at")
+
+    fieldsets = (
+        ("基本信息", {
+            "fields": ("name", "description", "is_active", "priority", "device_ids")
+        }),
+        ("脚本配置", {
+            "fields": (
+                "script_type",
+                "threshold_config",
+                "schedule_config",
+                "python_code",
+            )
+        }),
+        ("命令模板", {
+            "fields": ("command_template",)
+        }),
+        ("时间信息", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )
+
+    def script_type_display(self, obj: ScriptTemplate) -> str:
+        type_labels = {
+            "threshold": "阈值触发",
+            "schedule": "定时执行",
+            "hybrid": "混合模式",
+            "python": "Python脚本",
+        }
+        return type_labels.get(obj.script_type, obj.script_type)
+
+    script_type_display.short_description = "类型"
+
+    def is_active(self, obj: ScriptTemplate):
+        return getattr(obj, "is_active", None)
+
+    def device_count(self, obj: ScriptTemplate) -> int:
+        """显示关联设备数量"""
+        device_ids = obj.device_ids or []
+        return len(device_ids)
+
+    device_count.short_description = "设备数"
+
+    def created_at(self, obj: ScriptTemplate):
+        return getattr(obj, "created_at", None)
+
+    def updated_at(self, obj: ScriptTemplate):
+        return getattr(obj, "updated_at", None)
+
+
+@admin.register(ScriptExecution)
+class ScriptExecutionAdmin(admin.ModelAdmin):
+    """
+    脚本执行记录后台管理
+    """
+
+    list_display = (
+        "id",
+        "script_name",
+        "status_colored",
+        "trigger_reason",
+        "started_at",
+        "duration",
+        "created_at",
+    )
+    list_filter = ("script", "status", "trigger_reason")
+    search_fields = ("script__name", "result")
+    ordering = ("-id", "-created_at")
+    readonly_fields = (
+        "script",
+        "trigger_reason",
+        "status",
+        "started_at",
+        "completed_at",
+        "commands",
+        "result",
+        "error_message",
+        "created_at",
+    )
+
+    # 避免误删执行记录（审计需要）
+    actions = None
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def script_name(self, obj: ScriptExecution) -> str:
+        return obj.script.name if obj.script else "-"
+
+    script_name.short_description = "脚本名称"
+
+    def status_colored(self, obj: ScriptExecution) -> str:
+        status = obj.status or ""
+        color = {
+            "pending": "#888",
+            "running": "blue",
+            "success": "green",
+            "failed": "red",
+        }.get(status, "black")
+        return format_html('<b style="color:{}">{}</b>', color, status or "-")
+
+    status_colored.short_description = "状态"
+
+    def duration(self, obj: ScriptExecution) -> str:
+        if not obj.started_at or not obj.completed_at:
+            return "-"
+        delta = obj.completed_at - obj.started_at
+        seconds = delta.total_seconds()
+        if seconds < 1:
+            return f"{seconds * 1000:.0f}ms"
+        return f"{seconds:.2f}s"
+
+    duration.short_description = "耗时"
+
+    def created_at(self, obj: ScriptExecution):
+        return getattr(obj, "created_at", None)

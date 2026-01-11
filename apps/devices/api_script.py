@@ -16,7 +16,7 @@ from django.utils import timezone
 from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
 from apps.devices.models import Device, ScriptTemplate, ScriptExecution
 from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
-from apps.api.utils import log_audit
+from apps.accounts.utils import log_audit
 from apps.accounts.models import AuditLog
 
 
@@ -158,7 +158,7 @@ class ScriptTemplateListView(
         # 记录审计日志
         log_audit(
             request.user,
-            AuditLog.Action.DEVICE_CREATE,
+            AuditLog.Action.SCRIPT_CREATE,
             resource_type="script_template",
             resource_id=script.id,
             description=f"创建控制脚本：{script.name}",
@@ -236,7 +236,7 @@ class ScriptTemplateDetailView(
         # 记录审计日志
         log_audit(
             request.user,
-            AuditLog.Action.DEVICE_UPDATE,
+            AuditLog.Action.SCRIPT_UPDATE,
             resource_type="script_template",
             resource_id=script.id,
             description=f"更新控制脚本：{script.name}",
@@ -259,7 +259,7 @@ class ScriptTemplateDetailView(
         # 记录审计日志
         log_audit(
             request.user,
-            AuditLog.Action.DEVICE_DELETE,
+            AuditLog.Action.SCRIPT_DELETE,
             resource_type="script_template",
             resource_id=script_id,
             description=f"删除控制脚本：{script.name}",
@@ -348,7 +348,7 @@ class ScriptExecutionListView(
         # 记录审计日志
         log_audit(
             request.user,
-            AuditLog.Action.COMMAND_SEND,
+            AuditLog.Action.SCRIPT_EXECUTE,
             resource_type="script_execution",
             resource_id=script_id,
             description=f"手动执行脚本：{script.name}，设备数：{len(devices)}",
