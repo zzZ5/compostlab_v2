@@ -261,10 +261,60 @@ def _apply_channel_semantic_fields(c: Channel, body: dict) -> Optional[JsonRespo
     写入 channel 的语义层字段：metric/role/display_name
     - 不强制必填
     - 若模型无该字段（还没迁移）则自动忽略
+    - ✅ 如果未提供 metric，根据 unit 自动推断
     - 返回 JsonResponse 表示错误；None 表示 ok
     """
-    if "metric" in body:
+    # 单位到 metric 的映射（用于自动推断）
+    UNIT_TO_METRIC = {
+        "℃": "temperature",
+        "°c": "temperature",
+        "°c": "temperature",
+        "c": "temperature",
+        "%": "o2",  # 默认氧气百分比
+        "vol%": "o2",
+        "v/v": "o2",
+        "ppm": "co2",  # 默认二氧化碳
+        "mg/l": "ch4",  # 默认甲烷
+        "mg/m3": "ch4",
+        "rh": "humidity",
+        "%rh": "humidity",
+        "ph": "ph",
+        "pa": "pressure",
+        "kpa": "pressure",
+        "mpa": "pressure",
+        "bar": "pressure",
+        "l/min": "flow",
+        "l/h": "flow",
+        "m3/h": "flow",
+        "rpm": "speed",
+        "v": "voltage",
+        "kv": "voltage",
+        "mv": "voltage",
+        "a": "current",
+        "ma": "current",
+        "w": "power",
+        "kw": "power",
+        "%": "moisture",  # 含水量百分比
+    }
+
+    # 处理 metric：优先使用请求中的 metric，否则根据 unit 自动推断
+    if "metric" in body and body.get("metric"):
         _set_if_exists(c, "metric", (body.get("metric") or "").strip())
+    elif "unit" in body and hasattr(c, "metric"):
+        unit = (body.get("unit") or "").strip().lower()
+        # 尝试精确匹配单位
+        auto_metric = None
+        if unit in UNIT_TO_METRIC:
+            auto_metric = UNIT_TO_METRIC[unit]
+        else:
+            # 尝试模糊匹配（如包含 ℃）
+            for unit_key, metric in UNIT_TO_METRIC.items():
+                if unit_key in unit or unit in unit_key:
+                    auto_metric = metric
+                    break
+        if auto_metric:
+            c.metric = auto_metric
+
     if "role" in body:
         _set_if_exists(c, "role", (body.get("role") or "").strip())
     if "display_name" in body:

@@ -269,7 +269,7 @@ export default function DashboardPage() {
       </Row>
 
       {/* Cards */}
-      <Row gutter={[12, 12]}>
+      <Row gutter={[8, 8]}>
         {filtered.map((d) => {
           const st = onlineTag(getOnlineState(d.last_seen_at));
 
@@ -304,30 +304,30 @@ export default function DashboardPage() {
           const ms = metricGroups.map((g) => g.key).filter((m) => m !== "unknown") as MetricKey[];
 
           return (
-            <Col key={d.device_id} xs={24} md={12} lg={8}>
+            <Col key={d.device_id} xs={24} md={12} lg={6}>
               <Link href={`/devices/${d.device_id}`} style={{ display: "block" }}>
                 <Card hoverable style={{ borderRadius: 6, height: "100%" }}>
                   {/* header */}
-                  <div style={{ marginBottom: 12 }}>
+                  <div style={{ marginBottom: 8 }}>
                     <div
                       style={{
-                        fontSize: 16,
+                        fontSize: 14,
                         fontWeight: 600,
-                        marginBottom: 8,
+                        marginBottom: 4,
                       }}
                     >
                       {d.name || d.code}
                     </div>
-                    <Space size={4} wrap>
-                      <Tag color={st.color}>{st.text}</Tag>
-                      <Tag color="blue">{d.code}</Tag>
-                      <Tag color={ovTagColor}>{ovText}</Tag>
+                    <Space size={3} wrap>
+                      <Tag color={st.color} style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>{st.text}</Tag>
+                      <Tag color="blue" style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>{d.code}</Tag>
+                      <Tag color={ovTagColor} style={{ fontSize: 11, padding: '0 4px', margin: 0 }}>{ovText}</Tag>
                     </Space>
                   </div>
 
                   {/* metrics chips */}
-                  <div style={{ marginBottom: 8 }}>
-                    {ms.length ? ms.map((m) => <Tag key={m}>{metricLabel(m)}</Tag>) : <Tag>未分类</Tag>}
+                  <div style={{ marginBottom: 6 }}>
+                    {ms.length ? ms.map((m) => <Tag key={m} style={{ fontSize: 11, padding: '0 4px', margin: 0, marginRight: 4 }}>{metricLabel(m)}</Tag>) : <Tag style={{ fontSize: 11, padding: '0 4px' }}>未分类</Tag>}
                   </div>
 
                           {/* values (dynamic) */}
@@ -403,8 +403,8 @@ export default function DashboardPage() {
 
                   {/* last_seen_at */}
                   {d.last_seen_at && (
-                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid #f0f0f0' }}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
+                    <div style={{ marginTop: 6, paddingTop: 4, borderTop: '1px solid #f0f0f0' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
                         最后更新：{d.last_seen_at}
                       </Text>
                     </div>

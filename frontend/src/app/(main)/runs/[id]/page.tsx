@@ -286,16 +286,18 @@ export default function RunDetailPage() {
 
 	// 获取所有可用的 channels（每个设备的每个通道）
 	const allChannels = useMemo(() => {
-		const channels: Array<{ code: string; metric: string; deviceId: number; deviceCode: string; label: string }> = [];
+		const channels: Array<{ code: string; metric: string; deviceId: number; deviceCode: string; label: string; displayName: string }> = [];
 		for (const d of windowDevices) {
 			for (const ch of d.channels || []) {
 				if (ch?.code) {
+					const displayName = ch.display_name || ch.name || ch.code;
 					channels.push({
 						code: ch.code,
 						metric: ch.metric || "unknown",
 						deviceId: d.device_id,
 						deviceCode: d.code,
-						label: `${d.code}:${ch.code}`,
+						label: `${d.code}:${displayName}`,
+						displayName: displayName,
 					});
 				}
 			}
@@ -328,6 +330,18 @@ export default function RunDetailPage() {
 
 		return map;
 	}, [allChannels]);
+
+	// 创建 (deviceId:code) -> displayName 的映射，用于绘图时查找
+	const channelDisplayNameMap = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const ch of allChannels) {
+			const key = `${ch.deviceId}:${ch.code}`;
+			const device = deviceMap.get(ch.deviceId);
+			const deviceName = device?.code || `Device#${ch.deviceId}`;
+			map.set(key, `${deviceName}:${ch.displayName}`);
+		}
+		return map;
+	}, [allChannels, deviceMap]);
 
 	// 可用的 metrics
 	const availableMetrics = useMemo(() => {
@@ -396,9 +410,8 @@ export default function RunDetailPage() {
 			const v = typeof p.value === "number" ? p.value : Number(p.value);
 			if (!Number.isFinite(v)) continue;
 
-			// 查找设备名称用于显示
-			const deviceName = deviceMap.get(deviceId)?.code || `Device#${deviceId}`;
-			const label = `${deviceName}:${code}`;
+			// 从预先构建的映射中获取显示名称（使用 displayName）
+			const label = channelDisplayNameMap.get(key) || `${deviceId}:${code}`;
 
 			if (!byKey.has(key)) {
 				byKey.set(key, { name: label, data: [] });
@@ -428,7 +441,23 @@ export default function RunDetailPage() {
 			: [];
 
 		return {
-			tooltip: { trigger: "axis" },
+			tooltip: {
+				trigger: "axis",
+				formatter: (params: any) => {
+					if (!Array.isArray(params) || params.length === 0) return '';
+					const time = params[0].axisValue;
+					let html = `<div style="margin-bottom: 4px; font-weight: bold;">${time}</div>`;
+					params.forEach((p: any) => {
+						const value = typeof p.value === 'number' ? p.value.toFixed(2) : p.value;
+						html += `<div style="display: flex; align-items: center; margin: 2px 0;">
+							<span style="display: inline-block; width: 10px; height: 10px; background: ${p.color}; border-radius: 50%; margin-right: 8px;"></span>
+							<span style="flex: 1;">${p.seriesName}</span>
+							<span style="font-weight: bold; margin-left: 12px;">${value}</span>
+						</div>`;
+					});
+					return html;
+				},
+			},
 			legend: { type: "scroll", top: 8, left: 0, right: 0 },
 			grid: {
 				left: 56,
@@ -447,7 +476,7 @@ export default function RunDetailPage() {
 			})),
 			dataZoom: dz,
 		};
-	}, [points, isMobile, deviceMap]);
+	}, [points, isMobile, channelDisplayNameMap]);
 
 	async function exportRunRaw() {
 		try {
