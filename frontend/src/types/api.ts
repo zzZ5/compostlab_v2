@@ -349,6 +349,11 @@ export type Run = {
 
 	created_at: LocalDateTimeString;
 	updated_at: LocalDateTimeString;
+
+	// 统计字段（列表接口返回）
+	window_count?: number;
+	device_count?: number;
+	device_list?: string[];
 };
 
 export type RunWindow = {

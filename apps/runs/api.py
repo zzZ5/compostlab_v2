@@ -103,6 +103,7 @@ def _run_to_dict(run: Run, include_stats: bool = False) -> dict:
         if device_ids:
             devices = Device.objects.filter(id__in=device_ids)
             out["device_list"] = [d.code for d in devices]
+    # 只过滤真正为 None 的值，保留空字符串
     return {k: v for k, v in out.items() if v is not None}
 
 

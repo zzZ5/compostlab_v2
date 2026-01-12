@@ -21,10 +21,11 @@ import {
 	Collapse,
 	Spin,
 	Alert,
-	Tabs,
 	Tag,
 	Typography,
 } from "antd";
+
+const { CheckableTag } = Tag;
 import dayjs from "dayjs";
 
 import Page from "@/components/Page";
@@ -235,8 +236,9 @@ export default function RunDetailPage() {
 
 	// metric & time
 	const [activeMetric, setActiveMetric] = useState<MetricKey>("temperature");
+	const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
+	const [selectedWindowId, setSelectedWindowId] = useState<number | null>(null);
 	const [range, setRange] = useState<[any, any] | null>(null);
-	const [activeTab, setActiveTab] = useState<string>("windows");
 
 	/**
 	 * bucket：
@@ -282,39 +284,78 @@ export default function RunDetailPage() {
 		return windowDeviceIds.map((id) => deviceMap.get(id)).filter(Boolean);
 	}, [windowDeviceIds, deviceMap]);
 
-	// 动态 metric：仅显示本 run window 实际存在的指标
-	const availableMetrics = useMemo<MetricKey[]>(() => {
-		const present = new Set<MetricKey>();
+	// 获取所有可用的 channels（每个设备的每个通道）
+	const allChannels = useMemo(() => {
+		const channels: Array<{ code: string; metric: string; deviceId: number; deviceCode: string; label: string }> = [];
 		for (const d of windowDevices) {
 			for (const ch of d.channels || []) {
-				const m = normalizeMetric(ch.metric) as MetricKey;
-				if (m && m !== "unknown") present.add(m);
+				if (ch?.code) {
+					channels.push({
+						code: ch.code,
+						metric: ch.metric || "unknown",
+						deviceId: d.device_id,
+						deviceCode: d.code,
+						label: `${d.code}:${ch.code}`,
+					});
+				}
 			}
 		}
-		// 如果没有任何已知指标，返回所有可能的 metric
-		if (present.size === 0) {
-			return ["temperature", "o2", "co2", "moisture"];
-		}
-		const order: MetricKey[] = ["temperature", "o2", "co2", "moisture"];
-		const out = order.filter((m) => present.has(m));
-		return out;
+		return channels.sort((a, b) => a.label.localeCompare(b.label));
 	}, [windowDevices]);
 
-	useEffect(() => {
-		if (!availableMetrics.length) return;
-		if (!availableMetrics.includes(activeMetric)) setActiveMetric(availableMetrics[0]);
-	}, [availableMetrics, activeMetric]);
+	// 按 metric 分组的 channels
+	const channelsByMetric = useMemo(() => {
+		const map = new Map<MetricKey, typeof allChannels>();
+		const metricOrder: MetricKey[] = ["temperature", "o2", "co2", "ch4", "nh3", "moisture", "humidity", "ph", "pressure", "flow", "speed", "voltage", "current", "power"];
 
-	// codes for current metric across window devices
-	const codesForMetric = useMemo(() => {
-		const s = new Set<string>();
-		for (const d of windowDevices) {
-			for (const ch of d.channels || []) {
-				if (normalizeMetric(ch.metric) === activeMetric && ch?.code) s.add(ch.code);
+		// 初始化所有 metric
+		for (const m of metricOrder) {
+			map.set(m, []);
+		}
+
+		// 分配 channels
+		for (const ch of allChannels) {
+			const metric = normalizeMetric(ch.metric) as MetricKey;
+			if (metric !== "unknown" && map.has(metric)) {
+				map.get(metric)!.push(ch);
 			}
 		}
-		return Array.from(s);
-	}, [windowDevices, activeMetric]);
+
+		// 移除空的 metric
+		for (const [key, val] of map) {
+			if (val.length === 0) map.delete(key);
+		}
+
+		return map;
+	}, [allChannels]);
+
+	// 可用的 metrics
+	const availableMetrics = useMemo(() => {
+		return Array.from(channelsByMetric.keys());
+	}, [channelsByMetric]);
+
+	// 初始化 selectedChannels（第一次加载时默认选中当前 metric 的所有 channels）
+	useEffect(() => {
+		if (selectedChannels.size === 0 && allChannels.length > 0 && availableMetrics.length > 0) {
+			const firstMetric = availableMetrics[0];
+			const channelsForMetric = channelsByMetric.get(firstMetric) || [];
+			setSelectedChannels(new Set(channelsForMetric.map(ch => ch.code)));
+			setActiveMetric(firstMetric);
+		}
+	}, [allChannels, availableMetrics, channelsByMetric]);
+
+	// 当切换 metric 时，清空并选中该 metric 的所有 channels
+	useEffect(() => {
+		if (availableMetrics.includes(activeMetric)) {
+			const channelsForMetric = channelsByMetric.get(activeMetric) || [];
+			setSelectedChannels(new Set(channelsForMetric.map(ch => ch.code)));
+		}
+	}, [activeMetric, channelsByMetric, availableMetrics]);
+
+	// 当前选中的 codes
+	const selectedCodes = useMemo(() => {
+		return Array.from(selectedChannels);
+	}, [selectedChannels]);
 
 	const telemetryQ = useRunTelemetry({
 		runId,
@@ -323,7 +364,7 @@ export default function RunDetailPage() {
 		bucket: bucket ? bucket : null, // raw -> null
 		group,
 		treatment,
-		channels: codesForMetric.length ? codesForMetric : null,
+		channels: selectedCodes.length ? selectedCodes : null,
 	});
 
 	const points = telemetryQ.data?.data || [];
@@ -417,13 +458,13 @@ export default function RunDetailPage() {
 				treatment,
 				// raw export 不要求 bucket/channels，但允许你带上（也不影响）
 				bucket: bucket ? bucket : null,
-				channels: codesForMetric.length ? codesForMetric : null,
+				channels: selectedCodes.length ? selectedCodes : null,
 			});
 
 			await downloadBlob(
 				api,
 				`/runs/${runId}/export${qs}`,
-				`run_${runId}_${activeMetric}_raw.csv`,
+				`run_${runId}_raw.csv`,
 				"text/csv;charset=utf-8"
 			);
 		} catch (e) {
@@ -437,8 +478,8 @@ export default function RunDetailPage() {
 			message.warning("Wide 导出必须选择 bucket（例如 10m/1h），raw 不支持。");
 			return;
 		}
-		if (!codesForMetric.length) {
-			message.warning("Wide 导出必须指定 channels（当前 metric 下未找到通道 code）。");
+		if (!selectedCodes.length) {
+			message.warning("Wide 导出必须指定 channels（请至少选择一个 Channel）。");
 			return;
 		}
 
@@ -449,13 +490,13 @@ export default function RunDetailPage() {
 				group,
 				treatment,
 				bucket, // ✅ 必须
-				channels: codesForMetric, // ✅ 必须
+				channels: selectedCodes, // ✅ 必须
 			});
 
 			await downloadBlob(
 				api,
 				`/runs/${runId}/export_wide${qs}`,
-				`run_${runId}_${activeMetric}_wide_${bucket}.csv`,
+				`run_${runId}_wide_${bucket}.csv`,
 				"text/csv;charset=utf-8"
 			);
 		} catch (e) {
@@ -513,336 +554,427 @@ export default function RunDetailPage() {
 		>
 			<Row gutter={[12, 12]}>
 				<Col xs={24}>
-					<Card size="small">
-						<Space wrap size="large">
-							<div>
-								<Text type="secondary">状态：</Text>
-								{!run.start_at ? (
-									<Tag color="default">未开始</Tag>
-								) : run.end_at ? (
-									<Tag color="success">已结束</Tag>
-								) : (
-									<Tag color="processing">进行中</Tag>
-								)}
-							</div>
-							<div>
-								<Text type="secondary">时长：</Text>
-								{(() => {
-									if (!run.start_at) return "-";
-									const start = dayjs(run.start_at);
-									const end = run.end_at ? dayjs(run.end_at) : dayjs();
-									const minutes = end.diff(start, "minute");
-									if (minutes <= 0) return "-";
-									const hours = Math.floor(minutes / 60);
-									const mins = minutes % 60;
-									if (hours === 0) return `${mins} 分钟`;
-									if (mins === 0) return `${hours} 小时`;
-									return `${hours} 小时 ${mins} 分钟`;
-								})()}
-							</div>
-							<div>
-								<Text type="secondary">开始：</Text>
-								{run.start_at || "-"}
-							</div>
-							<div>
-								<Text type="secondary">结束：</Text>
-								{run.end_at || "-"}
-							</div>
+					<Card size="small" title="Run 信息">
+						<Row gutter={[16, 12]}>
+							<Col xs={12} sm={6} md={4}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>ID</Text>
+									<div style={{ marginTop: 2 }}>
+										<Tag color="blue">{runId}</Tag>
+									</div>
+								</div>
+							</Col>
+							<Col xs={12} sm={6} md={4}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>状态</Text>
+									<div style={{ marginTop: 2 }}>
+										{!run.start_at ? (
+											<Tag color="default">未开始</Tag>
+										) : run.end_at ? (
+											<Tag color="success">已结束</Tag>
+										) : (
+											<Tag color="processing">进行中</Tag>
+										)}
+									</div>
+								</div>
+							</Col>
+							<Col xs={12} sm={6} md={4}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>时长</Text>
+									<div style={{ marginTop: 2 }}>
+										{(() => {
+											if (!run.start_at) return "-";
+											const start = dayjs(run.start_at);
+											const end = run.end_at ? dayjs(run.end_at) : dayjs();
+											const minutes = end.diff(start, "minute");
+											if (minutes <= 0) return "-";
+											const hours = Math.floor(minutes / 60);
+											const mins = minutes % 60;
+											if (hours === 0) return `${mins} 分钟`;
+											if (mins === 0) return `${hours} 小时`;
+											return `${hours} 小时 ${mins} 分钟`;
+										})()}
+									</div>
+								</div>
+							</Col>
+							<Col xs={12} sm={6} md={4}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>开始</Text>
+									<div style={{ marginTop: 2, fontSize: 13 }}>{run.start_at || "-"}</div>
+								</div>
+							</Col>
+							<Col xs={12} sm={6} md={4}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>结束</Text>
+									<div style={{ marginTop: 2, fontSize: 13 }}>{run.end_at || "-"}</div>
+								</div>
+							</Col>
 							{run.note && (
-								<div>
-									<Text type="secondary">备注：</Text>
-									<Text>{run.note}</Text>
-								</div>
+								<Col xs={24} md={4}>
+									<div>
+										<Text type="secondary" style={{ fontSize: 11 }}>备注</Text>
+										<div style={{ marginTop: 2, fontSize: 12 }}>{run.note}</div>
+									</div>
+								</Col>
 							)}
-						</Space>
+						</Row>
 					</Card>
 				</Col>
 				<Col xs={24}>
-					<Card size="small">
-						<Space wrap size="large">
-							<Space size={4}>
-								<Text type="secondary">Windows:</Text>
-								<Tag color="blue" style={{ margin: 0 }}>{windows.length}</Tag>
-							</Space>
-							<Space size={4}>
-								<Text type="secondary">设备:</Text>
-								<Tag color="green" style={{ margin: 0 }}>{windowDevices.length}</Tag>
-							</Space>
-							{windowDevices.length > 0 && (
+					<Card size="small" title="Run 与 Window/设备关联">
+						<Row gutter={[16, 12]}>
+							<Col xs={8} sm={6} md={4}>
 								<div>
-									<Text type="secondary">设备列表：</Text>
-									<Space size={4} wrap>
-										{windowDevices.map((d: any) => (
-											<Tag key={d.device_id} color="blue" style={{ margin: 0 }}>
-												{d.code}
+									<Text type="secondary" style={{ fontSize: 11 }}>Windows</Text>
+									<div style={{ marginTop: 2 }}>
+										<Tag color="purple" style={{ fontSize: 14, padding: "2px 8px" }}>
+											{windows.length} 个
+										</Tag>
+									</div>
+								</div>
+							</Col>
+							<Col xs={16} sm={18} md={20}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>设备</Text>
+									<div style={{ marginTop: 2 }}>
+										<Space size={4} wrap>
+											<Tag color="green" style={{ fontSize: 14, padding: "2px 8px" }}>
+												{windowDevices.length} 个
 											</Tag>
-										))}
-									</Space>
+											{windowDevices.map((d: any) => (
+												<Tag key={d.device_id} color="blue" style={{ margin: 0, fontSize: 12 }}>
+													{d.code}
+												</Tag>
+											))}
+										</Space>
+									</div>
 								</div>
-							)}
-						</Space>
+							</Col>
+						</Row>
 					</Card>
 				</Col>
 				<Col xs={24}>
-					<Tabs
-						activeKey={activeTab}
-						onChange={setActiveTab}
-						items={[
-							{
-								key: "windows",
-								label: `Windows (${windows.length})`,
-								children: (
-									<Row gutter={[12, 12]}>
-										<Col xs={24}>
-											<Card
-												title="窗口列表"
-												extra={
-													<Space>
-														<Select
-															size="small"
-															value={windowViewMode}
-															onChange={(v) => setWindowViewMode(v as "window" | "device")}
-															options={[
-																{ label: "按 Window", value: "window" },
-																{ label: "按设备", value: "device" },
-															]}
-														/>
-														{manage && (
-															<Button size="small" type="primary" onClick={openWindowCreate}>
-																新建 Window
+					<Row gutter={[12, 12]}>
+						{/* Windows 列表侧边栏 */}
+						<Col xs={24} xl={8}>
+							<Card
+								title="窗口列表"
+								extra={
+									<Space>
+										<Select
+											size="small"
+											value={windowViewMode}
+											onChange={(v) => setWindowViewMode(v as "window" | "device")}
+											options={[
+												{ label: "按 Window", value: "window" },
+												{ label: "按设备", value: "device" },
+											]}
+										/>
+										{manage && (
+											<Button size="small" type="primary" onClick={openWindowCreate}>
+												新建 Window
+											</Button>
+										)}
+									</Space>
+								}
+							>
+								{windowViewMode === "window" ? (
+									<>
+										<Space wrap size="small" style={{ marginBottom: 12 }}>
+											<Text type="secondary">group:</Text>
+											<Select
+												style={{ width: 120 }}
+												allowClear
+												placeholder="全部"
+												value={group}
+												onChange={(v) => setGroup((v as string) ?? null)}
+												options={groupOptions}
+											/>
+											<Text type="secondary" style={{ marginLeft: 8 }}>treatment:</Text>
+											<Select
+												style={{ width: 120 }}
+												allowClear
+												placeholder="全部"
+												value={treatment}
+												onChange={(v) => setTreatment((v as string) ?? null)}
+												options={treatmentOptions}
+											/>
+										</Space>
+										<Divider style={{ margin: "8px 0" }} />
+
+										<Space orientation="vertical" style={{ width: "100%" }} size={8}>
+											<Space wrap size="small">
+												<Text type="secondary">参与设备：</Text>
+												<Tag color="blue">{windowDevices.length} 个</Tag>
+												<Text type="secondary">数据点：</Text>
+												<Tag color="green">{points.length.toLocaleString()}</Tag>
+											</Space>
+											<Divider style={{ margin: "8px 0" }} />
+
+											<div style={{ maxHeight: 400, overflow: "auto" }}>
+												<Row gutter={[8, 8]}>
+													{windows.map((w) => {
+														const devicesForWindow = (w.device_ids || [])
+															.map((did: number) => deviceMap.get(did))
+															.filter(Boolean);
+																return (
+															<Col xs={24} md={12} lg={24} key={w.window_id}>
+																<Card
+																	size="small"
+																	style={{
+																		border: selectedWindowId === w.window_id ? "2px solid #1890ff" : undefined,
+																		cursor: "pointer",
+																	}}
+																	onClick={() => setSelectedWindowId(w.window_id)}
+																	title={
+																		<Space size={4}>
+																			<Tag color="purple">#{w.window_id}</Tag>
+																			{w.group && <Tag color="blue">{w.group}</Tag>}
+																			{w.treatment && <Tag color="orange">{w.treatment}</Tag>}
+																		</Space>
+																	}
+																	extra={
+																		manage ? (
+																			<Space size={4}>
+																				<Button size="small" onClick={(e) => { e.stopPropagation(); openWindowEdit(w); }}>
+																					编辑
+																				</Button>
+																				<Button size="small" danger onClick={(e) => { e.stopPropagation(); confirmDeleteWindow(w); }}>
+																					删除
+																				</Button>
+																			</Space>
+																		) : null
+																	}
+																>
+																	<div style={{ marginBottom: 6 }}>
+																		<Text type="secondary" style={{ fontSize: 11 }}>关联设备</Text>
+																		<div style={{ marginTop: 4 }}>
+																			{devicesForWindow.length > 0 ? (
+																				<Space size={4} wrap>
+																					{devicesForWindow.map((d: any) => (
+																						<Tag key={d.device_id} color="green" style={{ margin: 0, fontSize: 12 }}>
+																							{d.code}
+																						</Tag>
+																					))}
+																				</Space>
+																			) : (
+																				<Text type="secondary" style={{ fontSize: 12 }}>无关联设备</Text>
+																			)}
+																		</div>
+																	</div>
+																</Card>
+															</Col>
+														);
+													})}
+												</Row>
+											</div>
+										</Space>
+									</>
+								) : (
+									<Space orientation="vertical" style={{ width: "100%" }} size={8}>
+										<Space wrap size="small">
+											<Text type="secondary">参与设备：</Text>
+											<Tag color="blue">{windowDevices.length} 个</Tag>
+											<Text type="secondary">Windows：</Text>
+											<Tag color="green">{windows.length} 个</Tag>
+										</Space>
+										<Divider style={{ margin: "8px 0" }} />
+
+										<div style={{ maxHeight: 400, overflow: "auto" }}>
+											<Row gutter={[8, 8]}>
+												{windowDevices.map((d: any) => {
+													const windowsForDevice = windows.filter((w) =>
+														(w.device_ids || []).includes(d.device_id)
+													);
+													return (
+														<Col xs={24} md={12} lg={24} key={d.device_id}>
+															<Card
+																size="small"
+																style={{
+																	border: selectedWindowId === d.device_id ? "2px solid #1890ff" : undefined,
+																	cursor: "pointer",
+																}}
+																onClick={() => setSelectedWindowId(d.device_id)}
+																title={
+																	<Space size={4}>
+																		<Tag color="green">{d.code}</Tag>
+																	</Space>
+																}
+															>
+																<div style={{ marginBottom: 6 }}>
+																	<Text type="secondary" style={{ fontSize: 11 }}>
+																		{d.name || d.code}
+																	</Text>
+																</div>
+																<div>
+																	<Text type="secondary" style={{ fontSize: 11 }}>关联 Windows</Text>
+																	<div style={{ marginTop: 4 }}>
+																		{windowsForDevice.length > 0 ? (
+																			<Space size={4} wrap>
+																				{windowsForDevice.map((w) => (
+																					<Tag
+																						key={w.window_id}
+																						color="purple"
+																						style={{ margin: 0, fontSize: 11 }}
+																					>
+																						#{w.window_id}
+																						{w.group && ` ${w.group}`}
+																						{w.treatment && ` / ${w.treatment}`}
+																					</Tag>
+																				))}
+																			</Space>
+																		) : (
+																			<Text type="secondary" style={{ fontSize: 12 }}>无关联 Window</Text>
+																		)}
+																	</div>
+																</div>
+															</Card>
+														</Col>
+													);
+												})}
+											</Row>
+										</div>
+									</Space>
+								)}
+							</Card>
+						</Col>
+
+						{/* 右侧内容区：图表 */}
+						<Col xs={24} xl={16}>
+							<Card title="数据图表">
+								<Space orientation="vertical" style={{ width: "100%" }} size={12}>
+									<Space wrap>
+										<Text type="secondary">start</Text>
+										<Tag>{run.start_at || "-"}</Tag>
+										<Text type="secondary">end</Text>
+										<Tag>{run.end_at || "-"}</Tag>
+									</Space>
+
+									<Space wrap>
+										<DatePicker.RangePicker
+											showTime
+											value={range as any}
+											onChange={(v) => setRange(v as any)}
+											style={{ width: isMobile ? "100%" : 380 }}
+											presets={[
+												{ label: "最近1小时", value: [dayjs().subtract(1, "hour"), dayjs()] as any },
+												{ label: "今天", value: [dayjs().startOf("day"), dayjs()] as any },
+												{ label: "最近7天", value: [dayjs().subtract(7, "day"), dayjs()] as any },
+												{ label: "最近30天", value: [dayjs().subtract(30, "day"), dayjs()] as any },
+												...(runQ.data?.start_at ? [{ label: "运行全时段", value: [dayjs(runQ.data.start_at), dayjs(runQ.data.end_at || dayjs())] as any }] : [])
+											]}
+										/>
+										<Select
+											style={{ width: 120 }}
+											value={bucket}
+											onChange={setBucket}
+											options={[
+												{ value: "", label: "raw" },
+												{ value: "1m", label: "1m" },
+												{ value: "10m", label: "10m" },
+												{ value: "1h", label: "1h" },
+											]}
+										/>
+									</Space>
+
+									{/* Channel 选择区域 */}
+									{allChannels.length > 0 ? (
+										<div style={{ marginBottom: 12 }}>
+											<Space orientation="vertical" style={{ width: "100%" }} size={8}>
+												{/* Metric 选择 */}
+												<Space align="center" wrap>
+													<Text type="secondary" style={{ marginRight: 8 }}>选择指标：</Text>
+													<Space.Compact>
+														{availableMetrics.map((m) => (
+															<Button
+																key={m}
+																type={activeMetric === m ? "primary" : "default"}
+																size="small"
+																onClick={() => setActiveMetric(m)}
+															>
+																{metricLabel(m)}
 															</Button>
-														)}
-													</Space>
-												}
-											>
-												{windowViewMode === "window" ? (
-													<>
-														<Space wrap size="small" style={{ marginBottom: 12 }}>
-															<Text type="secondary">group:</Text>
-															<Select
-																style={{ width: 120 }}
-																allowClear
-																placeholder="全部"
-																value={group}
-																onChange={(v) => setGroup((v as string) ?? null)}
-																options={groupOptions}
-															/>
-															<Text type="secondary" style={{ marginLeft: 8 }}>treatment:</Text>
-															<Select
-																style={{ width: 120 }}
-																allowClear
-																placeholder="全部"
-																value={treatment}
-																onChange={(v) => setTreatment((v as string) ?? null)}
-																options={treatmentOptions}
-															/>
-														</Space>
-														<Divider style={{ margin: "8px 0" }} />
-
-														<Space orientation="vertical" style={{ width: "100%" }} size={8}>
-															<Space wrap size="small">
-																<Text type="secondary">参与设备：</Text>
-																<Tag color="blue">{windowDevices.length} 个</Tag>
-																<Text type="secondary">数据点：</Text>
-																<Tag color="green">{points.length.toLocaleString()}</Tag>
-															</Space>
-															<Divider style={{ margin: "8px 0" }} />
-
-															<div style={{ maxHeight: 520, overflow: "auto" }}>
-																<Row gutter={[8, 8]}>
-																	{windows.map((w) => {
-																		const devicesForWindow = (w.device_ids || [])
-																			.map((did: number) => deviceMap.get(did))
-																			.filter(Boolean);
-																		return (
-																			<Col xs={24} md={12} key={w.window_id}>
-																				<Card
-																					size="small"
-																					extra={
-																						manage ? (
-																							<Space size={4}>
-																								<Button size="small" onClick={() => openWindowEdit(w)}>
-																									编辑
-																								</Button>
-																								<Button size="small" danger onClick={() => confirmDeleteWindow(w)}>
-																									删除
-																								</Button>
-																							</Space>
-																						) : null
-																					}
-																				>
-																					<div>
-																						<Space size={4} wrap>
-																							<Tag style={{ margin: 0 }}>#{w.window_id}</Tag>
-																							{w.group && <Tag color="purple" style={{ margin: 0 }}>{w.group}</Tag>}
-																							{w.treatment && <Tag color="orange" style={{ margin: 0 }}>{w.treatment}</Tag>}
-																						</Space>
-																					</div>
-																					{devicesForWindow.length > 0 && (
-																						<div style={{ marginTop: 6 }}>
-																							<Space size={4} wrap>
-																								{devicesForWindow.map((d: any) => (
-																									<Tag key={d.device_id} color="blue" style={{ margin: 0 }}>
-																										{d.code}
-																									</Tag>
-																								))}
-																							</Space>
-																						</div>
-																					)}
-																			<div style={{ marginTop: 6 }}>
-																				<Space size={8} separator={<Divider type="vertical" style={{ margin: 0 }} />}>
-																					<Text type="secondary" style={{ fontSize: 11 }}>
-																						{w.start_at || "-"}
-																					</Text>
-																					<Text type="secondary" style={{ fontSize: 11 }}>
-																						{w.end_at || "-"}
-																					</Text>
-																				</Space>
-																			</div>
-																					{w.note && (
-																						<div style={{ marginTop: 6 }}>
-																							<Text type="secondary" style={{ fontSize: 11, fontStyle: "italic" }}>
-																								{w.note}
-																							</Text>
-																						</div>
-																					)}
-																				</Card>
-																			</Col>
-																		);
-																	})}
-																</Row>
-															</div>
-														</Space>
-													</>
-												) : (
-													<Space orientation="vertical" style={{ width: "100%" }} size={8}>
-														<Space wrap size="small">
-															<Text type="secondary">参与设备：</Text>
-															<Tag color="blue">{windowDevices.length} 个</Tag>
-															<Text type="secondary">Windows：</Text>
-															<Tag color="green">{windows.length} 个</Tag>
-														</Space>
-														<Divider style={{ margin: "8px 0" }} />
-
-														<div style={{ maxHeight: 520, overflow: "auto" }}>
-															<Row gutter={[8, 8]}>
-																{windowDevices.map((d: any) => {
-																	const windowsForDevice = windows.filter((w) =>
-																		(w.device_ids || []).includes(d.device_id)
-																	);
-																	return (
-																		<Col xs={24} md={12} key={d.device_id}>
-																			<Card size="small" title={d.code}>
-																				<Space orientation="vertical" style={{ width: "100%" }} size={6}>
-																					<Text type="secondary" style={{ fontSize: 12 }}>
-																						{d.name || d.code}
-																					</Text>
-																					<div>
-																						<Text type="secondary" style={{ fontSize: 11 }}>Windows: </Text>
-																						{windowsForDevice.map((w) => (
-																							<Tag key={w.window_id} style={{ margin: "0 4px 0 0", fontSize: 11 }}>
-																								#{w.window_id}
-																								{w.group && ` ${w.group}`}
-																								{w.treatment && ` / ${w.treatment}`}
-																							</Tag>
-																						))}
-																					</div>
-																				</Space>
-																			</Card>
-																		</Col>
-																	);
-																})}
-															</Row>
-														</div>
-													</Space>
-												)}
-											</Card>
-										</Col>
-									</Row>
-								),
-							},
-							{
-								key: "data",
-								label: "数据图表",
-								children: (
-									<Row gutter={[12, 12]}>
-										<Col xs={24}>
-											<Card>
-												<Space orientation="vertical" style={{ width: "100%" }} size={12}>
-													<Space wrap>
-														<Text type="secondary">start</Text>
-														<Tag>{run.start_at || "-"}</Tag>
-														<Text type="secondary">end</Text>
-														<Tag>{run.end_at || "-"}</Tag>
-													</Space>
-
-													<Space wrap>
-														<DatePicker.RangePicker
-															showTime
-															value={range as any}
-															onChange={(v) => setRange(v as any)}
-															style={{ width: isMobile ? "100%" : 380 }}
-															presets={[
-																{ label: "最近1小时", value: [dayjs().subtract(1, "hour"), dayjs()] as any },
-																{ label: "今天", value: [dayjs().startOf("day"), dayjs()] as any },
-																{ label: "最近7天", value: [dayjs().subtract(7, "day"), dayjs()] as any },
-																{ label: "最近30天", value: [dayjs().subtract(30, "day"), dayjs()] as any },
-																...(runQ.data?.start_at ? [{ label: "运行全时段", value: [dayjs(runQ.data.start_at), dayjs(runQ.data.end_at || dayjs())] as any }] : [])
-															]}
-														/>
-														<Select
-															style={{ width: 120 }}
-															value={bucket}
-															onChange={setBucket}
-															options={[
-																{ value: "", label: "raw" },
-																{ value: "1m", label: "1m" },
-																{ value: "10m", label: "10m" },
-																{ value: "1h", label: "1h" },
-															]}
-														/>
-													</Space>
-
-													{availableMetrics.length ? (
-														<Tabs
-															activeKey={activeMetric}
-															onChange={(k) => setActiveMetric(k as MetricKey)}
-															items={availableMetrics.map((m) => ({ key: m, label: metricLabel(m) }))}
-														/>
-													) : (
-														<Alert type="info" showIcon message="该 Run 的 Window 中暂未检测到可用的通道指标" />
-													)}
-
-													<Space wrap>
-														<Tag>metric: {metricLabel(activeMetric)}</Tag>
-														<Tag>codes: {codesForMetric.length ? codesForMetric.join(", ") : "-"}</Tag>
-														<Tag>devices: {windowDevices.length}</Tag>
-														<Tag>windows: {windows.length}</Tag>
-													</Space>
-
-													<div style={{ height: 420 }}>
-														<ReactECharts
-															key={`${runId}-${activeMetric}-${codesForMetric.join(",")}-${bucket}-${from || ""}-${to || ""}-${group || ""}-${treatment || ""}`}
-															option={chartOption}
-															notMerge
-															lazyUpdate
-															style={{ height: "100%", width: "100%" }}
-														/>
-													</div>
-
-													{telemetryQ.isFetching && <Text type="secondary">加载中...</Text>}
-													{telemetryQ.isError && <Text type="danger">Telemetry 加载失败</Text>}
-													{!telemetryQ.isFetching && !points.length && (
-														<Text type="secondary">暂无数据（检查时间范围 / bucket / group / treatment）</Text>
-													)}
+														))}
+													</Space.Compact>
 												</Space>
-											</Card>
-										</Col>
-									</Row>
-								),
-							},
-						]}
-					/>
+
+												{/* 当前 Metric 的 Channel 选择 */}
+												{channelsByMetric.has(activeMetric) && (
+													<>
+														<Divider style={{ margin: "4px 0" }} />
+														<Space align="center" wrap>
+															<Text type="secondary" style={{ marginRight: 8 }}>通道选择：</Text>
+															<Button size="small" onClick={() => {
+																const channels = channelsByMetric.get(activeMetric) || [];
+																setSelectedChannels(new Set(channels.map(ch => ch.code)));
+															}}>
+																全选
+															</Button>
+															<Button size="small" onClick={() => setSelectedChannels(new Set())}>
+																清空
+															</Button>
+															<Tag color="blue">已选 {selectedChannels.size}</Tag>
+														</Space>
+
+														<div style={{ marginBottom: 8 }}>
+															<Text type="secondary" style={{ fontSize: 12, marginBottom: 4 }}>
+																{metricLabel(activeMetric)} 的通道
+															</Text>
+															<Space size={[4, 8]} wrap>
+																{channelsByMetric.get(activeMetric)?.map((ch) => (
+																	<CheckableTag
+																		key={ch.code}
+																		checked={selectedChannels.has(ch.code)}
+																		onChange={(checked) => {
+																			const newSet = new Set(selectedChannels);
+																			if (checked) {
+																				newSet.add(ch.code);
+																			} else {
+																				newSet.delete(ch.code);
+																			}
+																			setSelectedChannels(newSet);
+																		}}
+																		style={{ fontSize: 11 }}
+																	>
+																		{ch.label}
+																	</CheckableTag>
+																))}
+															</Space>
+														</div>
+													</>
+												)}
+											</Space>
+										</div>
+									) : (
+										<Alert type="info" showIcon message="该 Run 的 Window 中暂未检测到可用的通道" description="" />
+									)}
+
+									<Space wrap>
+										<Tag>已选 Channels: {selectedCodes.length}</Tag>
+										<Tag>总 Channels: {allChannels.length}</Tag>
+										<Tag>devices: {windowDevices.length}</Tag>
+										<Tag>windows: {windows.length}</Tag>
+									</Space>
+
+									<div style={{ height: 420 }}>
+										<ReactECharts
+											key={`${runId}-${selectedCodes.join(",")}-${bucket}-${from || ""}-${to || ""}-${group || ""}-${treatment || ""}`}
+											option={chartOption}
+											notMerge
+											lazyUpdate
+											style={{ height: "100%", width: "100%" }}
+										/>
+									</div>
+
+									{telemetryQ.isFetching && <Text type="secondary">加载中...</Text>}
+									{telemetryQ.isError && <Text type="danger">Telemetry 加载失败</Text>}
+									{!telemetryQ.isFetching && !points.length && (
+										<Text type="secondary">暂无数据（请选择至少一个 Channel）</Text>
+									)}
+								</Space>
+							</Card>
+						</Col>
+					</Row>
 				</Col>
 			</Row>
 
@@ -920,7 +1052,9 @@ export default function RunDetailPage() {
 						<Select
 							mode="multiple"
 							showSearch
-							optionFilterProp="label"
+							filterOption={(input, option) =>
+								String(option?.label ?? '').toLowerCase().includes(String(input).toLowerCase())
+							}
 							placeholder="选择设备（可多选）"
 							options={deviceOptions as any}
 							maxTagCount="responsive"

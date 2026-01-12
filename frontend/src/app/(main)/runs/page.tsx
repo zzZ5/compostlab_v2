@@ -131,13 +131,15 @@ export default function RunsPage() {
 
 	const data = useMemo(() => runs, [runs]);
 
-	const columns = [
+	const columns: any[] = [
 		{
 			title: "Run",
 			key: "run",
-			render: (_: any, r: any) => (
+			dataIndex: "name",
+			width: 220,
+			render: (name: any, r: any) => (
 				<Space orientation="vertical" size={2}>
-					<Link href={`/runs/${r.run_id}`} style={{ fontWeight: 700 }}>
+					<Link href={`/runs/${r.run_id}`} style={{ fontWeight: 600, color: "#1890ff" }}>
 						{r.name || `Run #${r.run_id}`}
 					</Link>
 					<Text type="secondary" style={{ fontSize: 12 }}>
@@ -149,11 +151,11 @@ export default function RunsPage() {
 		{
 			title: "概览",
 			key: "overview",
-			width: 200,
+			width: 160,
 			render: (_: any, r: any) => (
 				<Space orientation="vertical" size={2}>
 					<Space size={4}>
-						<Text type="secondary" style={{ fontSize: 12 }}>Windows:</Text>
+						<Text type="secondary" style={{ fontSize: 12 }}>窗:</Text>
 						<Tag color="blue" style={{ margin: 0, fontSize: 11 }}>
 							{r.window_count ?? 0}
 						</Tag>
@@ -175,7 +177,7 @@ export default function RunsPage() {
 		{
 			title: "状态 / 时长",
 			key: "status",
-			width: 160,
+			width: 140,
 			render: (_: any, r: any) => {
 				const status = getRunStatus(r);
 				return (
@@ -193,48 +195,36 @@ export default function RunsPage() {
 		{
 			title: "时间",
 			key: "time",
-			width: 260,
+			width: 200,
 			render: (_: any, r: any) => (
 				<Space orientation="vertical" size={2}>
-					<Text style={{ fontSize: 12 }}>start: {r.start_at || "-"}</Text>
-					<Text style={{ fontSize: 12 }}>end: {r.end_at || "-"}</Text>
-					<Text style={{ fontSize: 12 }}>created: {r.created_at || "-"}</Text>
+					<Text style={{ fontSize: 12 }}>开始: {r.start_at ? r.start_at.split(" ")[0] : "-"}</Text>
+					<Text style={{ fontSize: 12 }}>结束: {r.end_at ? r.end_at.split(" ")[0] : "-"}</Text>
 				</Space>
 			),
 		},
 		{
-			title: "配方 / 设置",
-			key: "recipe_settings",
-			width: 260,
+			title: "配方",
+			key: "recipe",
+			width: 150,
+			ellipsis: { showTitle: false },
 			render: (_: any, r: any) => (
-				<Space orientation="vertical" size={2}>
-					<Text style={{ fontSize: 12 }}>
-						配方：{getRecipeSummary(r.recipe)}
-					</Text>
-					<Text style={{ fontSize: 12 }}>
-						设置：{getSettingsSummary(r.settings)}
-					</Text>
-				</Space>
+				<Text style={{ fontSize: 12 }} title={getRecipeSummary(r.recipe)}>
+					{getRecipeSummary(r.recipe)}
+				</Text>
 			),
 		},
 		{
 			title: "备注",
 			dataIndex: "note",
 			key: "note",
-			width: 150,
+			width: 120,
 			ellipsis: { showTitle: false },
 			render: (v: any) => (
 				<Text type="secondary" style={{ fontSize: 12 }} title={v || "-"}>
 					{v || "-"}
 				</Text>
 			),
-		},
-		{
-			title: "Updated",
-			dataIndex: "updated_at",
-			key: "updated_at",
-			width: 180,
-			render: (v: any) => <Text style={{ fontSize: 12 }}>{v || "-"}</Text>,
 		},
 	];
 
@@ -243,7 +233,8 @@ export default function RunsPage() {
 		return [...(columns as any[]), {
 			title: "操作",
 			key: "actions",
-			width: 180,
+			width: 120,
+			fixed: "right",
 			render: (_: any, r: any) => (
 				<Space>
 					<Button size="small" onClick={() => openEdit(r)}>编辑</Button>
@@ -379,7 +370,14 @@ export default function RunsPage() {
 					))}
 				</Row>
 			) : (
-				<Table rowKey="run_id" columns={columnsWithActions as any} dataSource={data as any} pagination={{ pageSize: 10 }} />
+				<Table 
+					rowKey="run_id" 
+					columns={columnsWithActions as any} 
+					dataSource={data as any} 
+					pagination={{ pageSize: 10 }}
+					scroll={{ x: 1200 }}
+					size="middle"
+				/>
 			)}
 
 			<RunFormModal
