@@ -400,6 +400,15 @@ export default function DashboardPage() {
                       <Text type="secondary">暂无通道数据</Text>
                     )}
                   </div>
+
+                  {/* last_seen_at */}
+                  {d.last_seen_at && (
+                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid #f0f0f0' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        最后更新：{d.last_seen_at}
+                      </Text>
+                    </div>
+                  )}
                 </Card>
               </Link>
             </Col>

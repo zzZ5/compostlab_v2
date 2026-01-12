@@ -831,6 +831,24 @@ export default function DeviceDetailPage() {
 														value={range as any}
 														onChange={(v) => setRange(v as any)}
 														style={{ width: isMobile ? "100%" : 380 }}
+														presets={[
+															{
+																label: '最近1小时',
+																value: [dayjs().subtract(1, 'hour'), dayjs()],
+															},
+															{
+																label: '今天',
+																value: [dayjs().startOf('day'), dayjs()],
+															},
+															{
+																label: '最近7天',
+																value: [dayjs().subtract(7, 'day'), dayjs()],
+															},
+															{
+																label: '最近30天',
+																value: [dayjs().subtract(30, 'day'), dayjs()],
+															},
+														]}
 													/>
 
 													<Select
