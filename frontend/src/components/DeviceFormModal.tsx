@@ -46,16 +46,22 @@ export default function DeviceFormModal(props: Props) {
 
 	async function handleOk() {
 		const v = await form.validateFields();
-		await onSubmit({
+		const values: any = {
 			...v,
 			code: String(v.code || "").trim(),
 			name: String(v.name || "").trim(),
-			post_topic: (v.post_topic ?? "") ? String(v.post_topic).trim() : "",
-			response_topic: (v.response_topic ?? "") ? String(v.response_topic).trim() : "",
 			note: String(v.note || ""),
 			is_active: !!v.is_active,
 			meta: v.meta || {},
-		});
+		};
+		// topic 为空则不发送，后端会使用默认格式
+		if (v.post_topic && v.post_topic.trim()) {
+			values.post_topic = v.post_topic.trim();
+		}
+		if (v.response_topic && v.response_topic.trim()) {
+			values.response_topic = v.response_topic.trim();
+		}
+		await onSubmit(values);
 	}
 
 	return (

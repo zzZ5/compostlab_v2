@@ -65,6 +65,8 @@ export default function RunDetailPage() {
 	// filters
 	const [group, setGroup] = useState<string | null>(null);
 	const [treatment, setTreatment] = useState<string | null>(null);
+	// windows view mode: "window" | "device"
+	const [windowViewMode, setWindowViewMode] = useState<"window" | "device">("window");
 	// ✅ 管理模式默认开启（Run / Window 面向用户可编辑）
 	const [manage, setManage] = useState(true);
 
@@ -234,6 +236,7 @@ export default function RunDetailPage() {
 	// metric & time
 	const [activeMetric, setActiveMetric] = useState<MetricKey>("temperature");
 	const [range, setRange] = useState<[any, any] | null>(null);
+	const [activeTab, setActiveTab] = useState<string>("windows");
 
 	/**
 	 * bucket：
@@ -288,9 +291,12 @@ export default function RunDetailPage() {
 				if (m && m !== "unknown") present.add(m);
 			}
 		}
+		// 如果没有任何已知指标，返回所有可能的 metric
+		if (present.size === 0) {
+			return ["temperature", "o2", "co2", "moisture"];
+		}
 		const order: MetricKey[] = ["temperature", "o2", "co2", "moisture"];
 		const out = order.filter((m) => present.has(m));
-		// 若只有未知指标，也不要展示空 tabs
 		return out;
 	}, [windowDevices]);
 
@@ -506,148 +512,337 @@ export default function RunDetailPage() {
 			}
 		>
 			<Row gutter={[12, 12]}>
-				<Col xs={24} md={16}>
-					<Card>
-						<Space orientation="vertical" style={{ width: "100%" }} size={12}>
-							<Space wrap>
-								<Text type="secondary">start</Text>
-								<Tag>{run.start_at || "-"}</Tag>
-								<Text type="secondary">end</Text>
-								<Tag>{run.end_at || "-"}</Tag>
-							</Space>
-
-							<Space wrap>
-								<Select
-									style={{ width: 160 }}
-									allowClear
-									placeholder="group"
-									value={group}
-									onChange={(v) => setGroup((v as string) ?? null)}
-									options={groupOptions}
-								/>
-								<Select
-									style={{ width: 160 }}
-									allowClear
-									placeholder="treatment"
-									value={treatment}
-									onChange={(v) => setTreatment((v as string) ?? null)}
-									options={treatmentOptions}
-								/>
-								<DatePicker.RangePicker
-									showTime
-									value={range as any}
-									onChange={(v) => setRange(v as any)}
-									style={{ width: isMobile ? "100%" : 380 }}
-								/>
-								<Select
-									style={{ width: 120 }}
-									value={bucket}
-									onChange={setBucket}
-									options={[
-										{ value: "", label: "raw" }, // ✅ raw：不传 bucket（export_wide 会提示不支持）
-										{ value: "1m", label: "1m" },
-										{ value: "10m", label: "10m" },
-										{ value: "1h", label: "1h" },
-									]}
-								/>
-							</Space>
-
-							{availableMetrics.length ? (
-								<Tabs
-									activeKey={activeMetric}
-									onChange={(k) => setActiveMetric(k as MetricKey)}
-									items={availableMetrics.map((m) => ({ key: m, label: metricLabel(m) }))}
-								/>
-							) : (
-								<Alert type="info" showIcon message="该 Run 的 Window 中暂未检测到可用的通道指标" />
-							)}
-
-							<Space wrap>
-								<Tag>metric: {metricLabel(activeMetric)}</Tag>
-								<Tag>codes: {codesForMetric.length ? codesForMetric.join(", ") : "-"}</Tag>
-								<Tag>devices: {windowDevices.length}</Tag>
-								<Tag>windows: {windows.length}</Tag>
-							</Space>
-
-							<div style={{ height: 420 }}>
-							<ReactECharts
-								key={`${runId}-${activeMetric}-${codesForMetric.join(",")}-${bucket}-${from || ""}-${to || ""}-${group || ""}-${treatment || ""}`}
-								option={chartOption}
-								notMerge
-								lazyUpdate
-								style={{ height: "100%", width: "100%" }}
-							/>
+				<Col xs={24}>
+					<Card size="small">
+						<Space wrap size="large">
+							<div>
+								<Text type="secondary">状态：</Text>
+								{!run.start_at ? (
+									<Tag color="default">未开始</Tag>
+								) : run.end_at ? (
+									<Tag color="success">已结束</Tag>
+								) : (
+									<Tag color="processing">进行中</Tag>
+								)}
 							</div>
-
-							{telemetryQ.isFetching && <Text type="secondary">加载中...</Text>}
-							{telemetryQ.isError && <Text type="danger">Telemetry 加载失败</Text>}
-							{!telemetryQ.isFetching && !points.length && (
-								<Text type="secondary">暂无数据（检查时间范围 / bucket / group / treatment）</Text>
+							<div>
+								<Text type="secondary">时长：</Text>
+								{(() => {
+									if (!run.start_at) return "-";
+									const start = dayjs(run.start_at);
+									const end = run.end_at ? dayjs(run.end_at) : dayjs();
+									const minutes = end.diff(start, "minute");
+									if (minutes <= 0) return "-";
+									const hours = Math.floor(minutes / 60);
+									const mins = minutes % 60;
+									if (hours === 0) return `${mins} 分钟`;
+									if (mins === 0) return `${hours} 小时`;
+									return `${hours} 小时 ${mins} 分钟`;
+								})()}
+							</div>
+							<div>
+								<Text type="secondary">开始：</Text>
+								{run.start_at || "-"}
+							</div>
+							<div>
+								<Text type="secondary">结束：</Text>
+								{run.end_at || "-"}
+							</div>
+							{run.note && (
+								<div>
+									<Text type="secondary">备注：</Text>
+									<Text>{run.note}</Text>
+								</div>
 							)}
 						</Space>
 					</Card>
 				</Col>
-
-				<Col xs={24} md={8}>
-					<Card
-						title="Windows"
-						extra={
-							manage ? (
-								<Button size="small" type="primary" onClick={openWindowCreate}>
-									新建
-								</Button>
-							) : null
-						}
-					>
-						<Space orientation="vertical" style={{ width: "100%" }} size={8}>
-							<Text type="secondary">命中的窗口用于确定参与设备与有效时间段。</Text>
-							<Divider style={{ margin: "8px 0" }} />
-
-							<div style={{ maxHeight: 520, overflow: "auto" }}>
-								<Space orientation="vertical" style={{ width: "100%" }} size={8}>
-									{windows.map((w) => {
-										// ✅ 支持多设备：显示所有绑定的设备
-										const devicesForWindow = (w.device_ids || [])
-											.map((did: number) => deviceMap.get(did))
-											.filter(Boolean);
-										return (
-											<Card
-												key={w.window_id}
-												size="small"
-												extra={
-													manage ? (
-														<Space size={6}>
-															<Button size="small" onClick={() => openWindowEdit(w)}>
-																编辑
-															</Button>
-															<Button size="small" danger onClick={() => confirmDeleteWindow(w)}>
-																删除
-															</Button>
-														</Space>
-													) : null
-												}
-											>
-												<Space orientation="vertical" size={2} style={{ width: "100%" }}>
-													<Space wrap>
-														<Tag>window {w.window_id}</Tag>
-														{devicesForWindow.length > 0 && (
-															<Tag color="blue">
-																{devicesForWindow.map((d: any) => d?.code).join(", ")}
-															</Tag>
-														)}
-													</Space>
-													<Text style={{ fontSize: 12 }}>group: {w.group || "-"}</Text>
-													<Text style={{ fontSize: 12 }}>treatment: {w.treatment || "-"}</Text>
-													<Text style={{ fontSize: 12 }}>start: {w.start_at || "-"}</Text>
-													<Text style={{ fontSize: 12 }}>end: {w.end_at || "-"}</Text>
-												</Space>
-											</Card>
-										);
-									})}
-								</Space>
-							</div>
+				<Col xs={24}>
+					<Card size="small">
+						<Space wrap size="large">
+							<Space size={4}>
+								<Text type="secondary">Windows:</Text>
+								<Tag color="blue" style={{ margin: 0 }}>{windows.length}</Tag>
+							</Space>
+							<Space size={4}>
+								<Text type="secondary">设备:</Text>
+								<Tag color="green" style={{ margin: 0 }}>{windowDevices.length}</Tag>
+							</Space>
+							{windowDevices.length > 0 && (
+								<div>
+									<Text type="secondary">设备列表：</Text>
+									<Space size={4} wrap>
+										{windowDevices.map((d: any) => (
+											<Tag key={d.device_id} color="blue" style={{ margin: 0 }}>
+												{d.code}
+											</Tag>
+										))}
+									</Space>
+								</div>
+							)}
 						</Space>
 					</Card>
+				</Col>
+				<Col xs={24}>
+					<Tabs
+						activeKey={activeTab}
+						onChange={setActiveTab}
+						items={[
+							{
+								key: "windows",
+								label: `Windows (${windows.length})`,
+								children: (
+									<Row gutter={[12, 12]}>
+										<Col xs={24}>
+											<Card
+												title="窗口列表"
+												extra={
+													<Space>
+														<Select
+															size="small"
+															value={windowViewMode}
+															onChange={(v) => setWindowViewMode(v as "window" | "device")}
+															options={[
+																{ label: "按 Window", value: "window" },
+																{ label: "按设备", value: "device" },
+															]}
+														/>
+														{manage && (
+															<Button size="small" type="primary" onClick={openWindowCreate}>
+																新建 Window
+															</Button>
+														)}
+													</Space>
+												}
+											>
+												{windowViewMode === "window" ? (
+													<>
+														<Space wrap size="small" style={{ marginBottom: 12 }}>
+															<Text type="secondary">group:</Text>
+															<Select
+																style={{ width: 120 }}
+																allowClear
+																placeholder="全部"
+																value={group}
+																onChange={(v) => setGroup((v as string) ?? null)}
+																options={groupOptions}
+															/>
+															<Text type="secondary" style={{ marginLeft: 8 }}>treatment:</Text>
+															<Select
+																style={{ width: 120 }}
+																allowClear
+																placeholder="全部"
+																value={treatment}
+																onChange={(v) => setTreatment((v as string) ?? null)}
+																options={treatmentOptions}
+															/>
+														</Space>
+														<Divider style={{ margin: "8px 0" }} />
+
+														<Space orientation="vertical" style={{ width: "100%" }} size={8}>
+															<Space wrap size="small">
+																<Text type="secondary">参与设备：</Text>
+																<Tag color="blue">{windowDevices.length} 个</Tag>
+																<Text type="secondary">数据点：</Text>
+																<Tag color="green">{points.length.toLocaleString()}</Tag>
+															</Space>
+															<Divider style={{ margin: "8px 0" }} />
+
+															<div style={{ maxHeight: 520, overflow: "auto" }}>
+																<Row gutter={[8, 8]}>
+																	{windows.map((w) => {
+																		const devicesForWindow = (w.device_ids || [])
+																			.map((did: number) => deviceMap.get(did))
+																			.filter(Boolean);
+																		return (
+																			<Col xs={24} md={12} key={w.window_id}>
+																				<Card
+																					size="small"
+																					extra={
+																						manage ? (
+																							<Space size={4}>
+																								<Button size="small" onClick={() => openWindowEdit(w)}>
+																									编辑
+																								</Button>
+																								<Button size="small" danger onClick={() => confirmDeleteWindow(w)}>
+																									删除
+																								</Button>
+																							</Space>
+																						) : null
+																					}
+																				>
+																					<div>
+																						<Space size={4} wrap>
+																							<Tag style={{ margin: 0 }}>#{w.window_id}</Tag>
+																							{w.group && <Tag color="purple" style={{ margin: 0 }}>{w.group}</Tag>}
+																							{w.treatment && <Tag color="orange" style={{ margin: 0 }}>{w.treatment}</Tag>}
+																						</Space>
+																					</div>
+																					{devicesForWindow.length > 0 && (
+																						<div style={{ marginTop: 6 }}>
+																							<Space size={4} wrap>
+																								{devicesForWindow.map((d: any) => (
+																									<Tag key={d.device_id} color="blue" style={{ margin: 0 }}>
+																										{d.code}
+																									</Tag>
+																								))}
+																							</Space>
+																						</div>
+																					)}
+																			<div style={{ marginTop: 6 }}>
+																				<Space size={8} separator={<Divider type="vertical" style={{ margin: 0 }} />}>
+																					<Text type="secondary" style={{ fontSize: 11 }}>
+																						{w.start_at || "-"}
+																					</Text>
+																					<Text type="secondary" style={{ fontSize: 11 }}>
+																						{w.end_at || "-"}
+																					</Text>
+																				</Space>
+																			</div>
+																					{w.note && (
+																						<div style={{ marginTop: 6 }}>
+																							<Text type="secondary" style={{ fontSize: 11, fontStyle: "italic" }}>
+																								{w.note}
+																							</Text>
+																						</div>
+																					)}
+																				</Card>
+																			</Col>
+																		);
+																	})}
+																</Row>
+															</div>
+														</Space>
+													</>
+												) : (
+													<Space orientation="vertical" style={{ width: "100%" }} size={8}>
+														<Space wrap size="small">
+															<Text type="secondary">参与设备：</Text>
+															<Tag color="blue">{windowDevices.length} 个</Tag>
+															<Text type="secondary">Windows：</Text>
+															<Tag color="green">{windows.length} 个</Tag>
+														</Space>
+														<Divider style={{ margin: "8px 0" }} />
+
+														<div style={{ maxHeight: 520, overflow: "auto" }}>
+															<Row gutter={[8, 8]}>
+																{windowDevices.map((d: any) => {
+																	const windowsForDevice = windows.filter((w) =>
+																		(w.device_ids || []).includes(d.device_id)
+																	);
+																	return (
+																		<Col xs={24} md={12} key={d.device_id}>
+																			<Card size="small" title={d.code}>
+																				<Space orientation="vertical" style={{ width: "100%" }} size={6}>
+																					<Text type="secondary" style={{ fontSize: 12 }}>
+																						{d.name || d.code}
+																					</Text>
+																					<div>
+																						<Text type="secondary" style={{ fontSize: 11 }}>Windows: </Text>
+																						{windowsForDevice.map((w) => (
+																							<Tag key={w.window_id} style={{ margin: "0 4px 0 0", fontSize: 11 }}>
+																								#{w.window_id}
+																								{w.group && ` ${w.group}`}
+																								{w.treatment && ` / ${w.treatment}`}
+																							</Tag>
+																						))}
+																					</div>
+																				</Space>
+																			</Card>
+																		</Col>
+																	);
+																})}
+															</Row>
+														</div>
+													</Space>
+												)}
+											</Card>
+										</Col>
+									</Row>
+								),
+							},
+							{
+								key: "data",
+								label: "数据图表",
+								children: (
+									<Row gutter={[12, 12]}>
+										<Col xs={24}>
+											<Card>
+												<Space orientation="vertical" style={{ width: "100%" }} size={12}>
+													<Space wrap>
+														<Text type="secondary">start</Text>
+														<Tag>{run.start_at || "-"}</Tag>
+														<Text type="secondary">end</Text>
+														<Tag>{run.end_at || "-"}</Tag>
+													</Space>
+
+													<Space wrap>
+														<DatePicker.RangePicker
+															showTime
+															value={range as any}
+															onChange={(v) => setRange(v as any)}
+															style={{ width: isMobile ? "100%" : 380 }}
+															presets={[
+																{ label: "最近1小时", value: [dayjs().subtract(1, "hour"), dayjs()] as any },
+																{ label: "今天", value: [dayjs().startOf("day"), dayjs()] as any },
+																{ label: "最近7天", value: [dayjs().subtract(7, "day"), dayjs()] as any },
+																{ label: "最近30天", value: [dayjs().subtract(30, "day"), dayjs()] as any },
+																...(runQ.data?.start_at ? [{ label: "运行全时段", value: [dayjs(runQ.data.start_at), dayjs(runQ.data.end_at || dayjs())] as any }] : [])
+															]}
+														/>
+														<Select
+															style={{ width: 120 }}
+															value={bucket}
+															onChange={setBucket}
+															options={[
+																{ value: "", label: "raw" },
+																{ value: "1m", label: "1m" },
+																{ value: "10m", label: "10m" },
+																{ value: "1h", label: "1h" },
+															]}
+														/>
+													</Space>
+
+													{availableMetrics.length ? (
+														<Tabs
+															activeKey={activeMetric}
+															onChange={(k) => setActiveMetric(k as MetricKey)}
+															items={availableMetrics.map((m) => ({ key: m, label: metricLabel(m) }))}
+														/>
+													) : (
+														<Alert type="info" showIcon message="该 Run 的 Window 中暂未检测到可用的通道指标" />
+													)}
+
+													<Space wrap>
+														<Tag>metric: {metricLabel(activeMetric)}</Tag>
+														<Tag>codes: {codesForMetric.length ? codesForMetric.join(", ") : "-"}</Tag>
+														<Tag>devices: {windowDevices.length}</Tag>
+														<Tag>windows: {windows.length}</Tag>
+													</Space>
+
+													<div style={{ height: 420 }}>
+														<ReactECharts
+															key={`${runId}-${activeMetric}-${codesForMetric.join(",")}-${bucket}-${from || ""}-${to || ""}-${group || ""}-${treatment || ""}`}
+															option={chartOption}
+															notMerge
+															lazyUpdate
+															style={{ height: "100%", width: "100%" }}
+														/>
+													</div>
+
+													{telemetryQ.isFetching && <Text type="secondary">加载中...</Text>}
+													{telemetryQ.isError && <Text type="danger">Telemetry 加载失败</Text>}
+													{!telemetryQ.isFetching && !points.length && (
+														<Text type="secondary">暂无数据（检查时间范围 / bucket / group / treatment）</Text>
+													)}
+												</Space>
+											</Card>
+										</Col>
+									</Row>
+								),
+							},
+						]}
+					/>
 				</Col>
 			</Row>
 

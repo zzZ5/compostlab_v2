@@ -324,15 +324,19 @@ class DeviceCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
         _set_if_exists(d, DEVICE_CODE_FIELD, code)
         _set_if_exists(d, "name", (body.get("name") or "").strip())
 
-        # ✅ 保存 post_topic / response_topic / note（如果模型字段存在）
+        # ✅ 保存 post_topic / response_topic，如果为空则使用默认格式
         if "post_topic" in body:
-            _set_if_exists(
-                d, "post_topic", (body.get("post_topic") or "").strip() or None
-            )
+            post_topic = (body.get("post_topic") or "").strip() or None
+            if post_topic is None:
+                # 默认格式: compostlab/v2/{code}/telemetry
+                post_topic = f"compostlab/v2/{code}/telemetry"
+            _set_if_exists(d, "post_topic", post_topic)
         if "response_topic" in body:
-            _set_if_exists(
-                d, "response_topic", (body.get("response_topic") or "").strip() or None
-            )
+            response_topic = (body.get("response_topic") or "").strip() or None
+            if response_topic is None:
+                # 默认格式: compostlab/v2/{code}/response
+                response_topic = f"compostlab/v2/{code}/response"
+            _set_if_exists(d, "response_topic", response_topic)
         if "note" in body:
             _set_if_exists(d, "note", (body.get("note") or "").strip())
 
@@ -370,15 +374,21 @@ class DeviceUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
                 return _json_400("code cannot be empty.")
             _set_if_exists(d, DEVICE_CODE_FIELD, code)
 
-        # ✅ 支持更新 post_topic / response_topic / note
+        # ✅ 支持更新 post_topic / response_topic，如果为空则使用默认格式
         if "post_topic" in body:
-            _set_if_exists(
-                d, "post_topic", (body.get("post_topic") or "").strip() or None
-            )
+            post_topic = (body.get("post_topic") or "").strip() or None
+            if post_topic is None:
+                # 默认格式: compostlab/v2/{code}/telemetry
+                code = getattr(d, DEVICE_CODE_FIELD, "")
+                post_topic = f"compostlab/v2/{code}/telemetry"
+            _set_if_exists(d, "post_topic", post_topic)
         if "response_topic" in body:
-            _set_if_exists(
-                d, "response_topic", (body.get("response_topic") or "").strip() or None
-            )
+            response_topic = (body.get("response_topic") or "").strip() or None
+            if response_topic is None:
+                # 默认格式: compostlab/v2/{code}/response
+                code = getattr(d, DEVICE_CODE_FIELD, "")
+                response_topic = f"compostlab/v2/{code}/response"
+            _set_if_exists(d, "response_topic", response_topic)
         if "note" in body:
             _set_if_exists(d, "note", (body.get("note") or "").strip())
 

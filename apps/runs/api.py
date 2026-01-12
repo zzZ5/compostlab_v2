@@ -70,7 +70,7 @@ def _safe_code(code: str) -> bool:
     return bool(re.fullmatch(r"[A-Z0-9_]{1,64}", code or ""))
 
 
-def _run_to_dict(run: Run) -> dict:
+def _run_to_dict(run: Run, include_stats: bool = False) -> dict:
     """
     Run -> dict（对外输出）
     时间字段统一输出为："YYYY-MM-DD HH:MM:SS"
@@ -88,6 +88,21 @@ def _run_to_dict(run: Run) -> dict:
         "updated_at": _dt_local_str(getattr(run, "updated_at", None)),
         "note": getattr(run, "note", "") or "",
     }
+    if include_stats:
+        # 计算 Windows 统计
+        windows = RunWindow.objects.filter(run=run)
+        window_count = windows.count()
+        device_ids = list(set(
+            did
+            for w in windows
+            for did in w.devices.values_list("id", flat=True)
+        ))
+        device_count = len(device_ids)
+        out["window_count"] = window_count
+        out["device_count"] = device_count
+        if device_ids:
+            devices = Device.objects.filter(id__in=device_ids)
+            out["device_list"] = [d.code for d in devices]
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -217,7 +232,8 @@ class RunListView(BasicAuthMixin, View):
 
     def get(self, request):
         qs = Run.objects.all().order_by("-id")
-        data = [_run_to_dict(r) for r in qs]
+        # 列表页需要统计信息
+        data = [_run_to_dict(r, include_stats=True) for r in qs]
         return JsonResponse({"count": len(data), "data": data}, status=200)
 
 

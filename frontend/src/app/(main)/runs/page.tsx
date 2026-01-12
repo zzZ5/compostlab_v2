@@ -19,9 +19,9 @@ const { Text } = Typography;
 const { useBreakpoint } = Grid;
 
 function getRunStatus(r: any) {
-	if (!r.start_at) return "未开始";
-	if (r.end_at) return "已结束";
-	return "进行中";
+	if (!r.start_at) return { text: "未开始", color: "default" };
+	if (r.end_at) return { text: "已结束", color: "success" };
+	return { text: "进行中", color: "processing" };
 }
 
 function getRunDuration(r: any) {
@@ -147,20 +147,48 @@ export default function RunsPage() {
 			),
 		},
 		{
-			title: "状态 / 时长",
-			key: "status",
+			title: "概览",
+			key: "overview",
 			width: 200,
 			render: (_: any, r: any) => (
 				<Space orientation="vertical" size={2}>
-					<Text>
-						状态：
-						{getRunStatus(r)}
-					</Text>
-					<Text type="secondary" style={{ fontSize: 12 }}>
-						时长：{getRunDuration(r)}
-					</Text>
+					<Space size={4}>
+						<Text type="secondary" style={{ fontSize: 12 }}>Windows:</Text>
+						<Tag color="blue" style={{ margin: 0, fontSize: 11 }}>
+							{r.window_count ?? 0}
+						</Tag>
+					</Space>
+					<Space size={4}>
+						<Text type="secondary" style={{ fontSize: 12 }}>设备:</Text>
+						<Tag color="green" style={{ margin: 0, fontSize: 11 }}>
+							{r.device_count ?? 0}
+						</Tag>
+					</Space>
+					{r.device_list && r.device_list.length > 0 && (
+						<Text type="secondary" style={{ fontSize: 11 }} ellipsis title={r.device_list.join(", ")}>
+							{r.device_list.join(", ")}
+						</Text>
+					)}
 				</Space>
 			),
+		},
+		{
+			title: "状态 / 时长",
+			key: "status",
+			width: 160,
+			render: (_: any, r: any) => {
+				const status = getRunStatus(r);
+				return (
+					<Space orientation="vertical" size={2}>
+						<Space size={4}>
+							<Tag color={status.color}>{status.text}</Tag>
+						</Space>
+						<Text type="secondary" style={{ fontSize: 12 }}>
+							{getRunDuration(r)}
+						</Text>
+					</Space>
+				);
+			},
 		},
 		{
 			title: "时间",
@@ -190,10 +218,16 @@ export default function RunsPage() {
 			),
 		},
 		{
-			title: "Note",
+			title: "备注",
 			dataIndex: "note",
 			key: "note",
-			render: (v: any) => <Text type="secondary">{v || "-"}</Text>,
+			width: 150,
+			ellipsis: { showTitle: false },
+			render: (v: any) => (
+				<Text type="secondary" style={{ fontSize: 12 }} title={v || "-"}>
+					{v || "-"}
+				</Text>
+			),
 		},
 		{
 			title: "Updated",
@@ -272,11 +306,47 @@ export default function RunsPage() {
 								</div>
 
 								<div style={{ marginTop: 8, fontSize: 13 }}>
-									<div>状态：{getRunStatus(r)}（{getRunDuration(r)}）</div>
-									<div style={{ marginTop: 4 }}>start: {r.start_at || "-"}</div>
-									<div>end: {r.end_at || "-"}</div>
-									<div>created: {r.created_at || "-"}</div>
-									<Text type="secondary">{r.note || "-"}</Text>
+									{(() => {
+										const status = getRunStatus(r);
+										return (
+											<>
+												<Space size={12} wrap>
+													<Space size={4}>
+														<Text type="secondary" style={{ fontSize: 12 }}>状态:</Text>
+														<Tag color={status.color} style={{ margin: 0, fontSize: 11 }}>{status.text}</Tag>
+													</Space>
+													<Space size={4}>
+														<Text type="secondary" style={{ fontSize: 12 }}>时长:</Text>
+														<Text style={{ fontSize: 11 }}>{getRunDuration(r)}</Text>
+													</Space>
+												</Space>
+												<Space size={12} wrap style={{ marginTop: 6 }}>
+													<Space size={4}>
+														<Text type="secondary" style={{ fontSize: 12 }}>Windows:</Text>
+														<Tag color="blue" style={{ margin: 0, fontSize: 11 }}>{r.window_count ?? 0}</Tag>
+													</Space>
+													<Space size={4}>
+														<Text type="secondary" style={{ fontSize: 12 }}>设备:</Text>
+														<Tag color="green" style={{ margin: 0, fontSize: 11 }}>{r.device_count ?? 0}</Tag>
+													</Space>
+												</Space>
+												{r.device_list && r.device_list.length > 0 && (
+													<div style={{ marginTop: 6 }}>
+														<Text type="secondary" style={{ fontSize: 11 }} ellipsis title={r.device_list.join(", ")}>
+															设备: {r.device_list.join(", ")}
+														</Text>
+													</div>
+												)}
+												{r.note && (
+													<div style={{ marginTop: 4 }}>
+														<Text type="secondary" ellipsis style={{ fontSize: 12 }}>
+															{r.note}
+														</Text>
+													</div>
+												)}
+											</>
+										);
+									})()}
 								</div>
 
 								{manage && (
