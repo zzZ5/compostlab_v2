@@ -390,8 +390,6 @@ export default function DevicesPage() {
 						const oA = evalO2(o2V);
 						const ov = overallSev(tA.sev, oA.sev);
 
-						const featured = pickFeaturedChannels(d.channels || [], 5);
-
 						const ovTagColor = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
 						const ovText = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
 
