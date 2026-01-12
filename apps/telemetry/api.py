@@ -172,7 +172,7 @@ class DeviceTelemetryView(BasicAuthMixin, View):
             cursor_field="ts",
             page_size=limit,
             max_page_size=10000,
-            ordering="asc",
+            ordering="desc",  # 降序，返回最新的数据
         )
         
         # 解析游标（时间戳字符串）
@@ -315,7 +315,7 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
             cursor_field="ts",
             page_size=limit,
             max_page_size=10000,
-            ordering="asc",
+            ordering="desc",  # 降序，返回最新的数据
         )
         
         # 解析游标
@@ -631,7 +631,7 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
             cursor_field="ts",
             page_size=limit,
             max_page_size=10000,
-            ordering="asc",
+            ordering="desc",  # 降序，返回最新的数据
         )
         
         # 解析游标

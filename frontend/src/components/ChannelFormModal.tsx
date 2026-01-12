@@ -65,7 +65,7 @@ export function ChannelFormModal({
 			confirmLoading={loading}
 			onCancel={onCancel}
 			onOk={() => form.submit()}
-			destroyOnClose
+			destroyOnHidden
 		>
 			<Form
 				form={form}          // ✅ 关键：绑定 form

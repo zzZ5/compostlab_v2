@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
 import { MetricKey, metricLabel, normalizeMetric, getChannelDisplayName } from "@/lib/metrics";
-import { pickFeaturedChannels } from "@/lib/channelGroups";
+import { groupChannelsByMetric, sortChannels } from "@/lib/channelGroups";
 
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
@@ -297,12 +297,11 @@ export default function DashboardPage() {
 			const ovTagColor = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
 			const ovText = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
 
-			const featured = pickFeaturedChannels(d.channels || []);
+			// 按metric分组
+			const metricGroups = groupChannelsByMetric(d.channels || []);
 
-			// show metrics present
-          const ms = Array.from(
-            new Set((d.channels || []).map((c: any) => normalizeMetric(c.metric)))
-          ).filter((m) => m !== "unknown") as MetricKey[];
+			// show metrics present - 使用metricGroups的顺序，确保与下方显示一致
+          const ms = metricGroups.map((g) => g.key).filter((m) => m !== "unknown") as MetricKey[];
 
           return (
             <Col key={d.device_id} xs={24} md={12} lg={8}>
@@ -333,61 +332,70 @@ export default function DashboardPage() {
 
                           {/* values (dynamic) */}
                   <div style={{ marginTop: 8 }}>
-                    {featured.length ? (
-                      featured.map((ch: any) => {
-                        const mk = normalizeMetric(ch.metric) as MetricKey;
-                        const v = latestNumber(ch);
-                        const isTemp = mk === "temperature";
-                        const isO2 = mk === "o2";
-                        const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-                        const qualityInfo = getQualityInfo(ch);
-                        const tag = ch?.latest
-                          ? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
-                          : "-";
-                        const displayName = getChannelDisplayName(ch);
-                        return (
-                          <div
-                            key={ch.code}
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              padding: "6px 0",
-                            }}
-                          >
-                            <Text type="secondary" style={{ fontSize: 13 }}>
-                              {displayName}
-                            </Text>
-                            <Space size={6}>
-                              <Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
-                              <Tag color={qualityInfo.color} style={{ fontSize: 11 }}>
-                                {qualityInfo.quality}
-                              </Tag>
-                              {a && a.sev !== "ok" && a.sev !== "none" && !qualityInfo.isBad && (
-                                <Tooltip title={a.tip}>
-                                  {a.sev === "danger" ? (
-                                    <ExclamationCircleOutlined
-                                      style={{
-                                        color: "#ff4d4f",
-                                        fontSize: 15,
-                                        cursor: "help"
-                                      }}
-                                    />
-                                  ) : (
-                                    <InfoCircleOutlined
-                                      style={{
-                                        color: "#faad14",
-                                        fontSize: 15,
-                                        cursor: "help"
-                                      }}
-                                    />
-                                  )}
-                                </Tooltip>
-                              )}
-                            </Space>
+                    {metricGroups.length ? (
+                      <div>
+                        {metricGroups.map((group, idx) => (
+                          <div key={group.key}>
+                            {/* 不同metric分组之间加分隔线 */}
+                            {idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '8px 0' }} />}
+                            {/* 该metric下的所有channels */}
+                            {sortChannels(group.channels).map((ch: any) => {
+                              const mk = normalizeMetric(ch.metric) as MetricKey;
+                              const v = latestNumber(ch);
+                              const isTemp = mk === "temperature";
+                              const isO2 = mk === "o2";
+                              const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
+                              const qualityInfo = getQualityInfo(ch);
+                              const tag = ch?.latest
+                                ? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
+                                : "-";
+                              const displayName = getChannelDisplayName(ch);
+                              return (
+                                <div
+                                  key={ch.code}
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    padding: "3px 0",
+                                  }}
+                                >
+                                  <Text type="secondary" style={{ fontSize: 13 }}>
+                                    {displayName}
+                                  </Text>
+                                  <Space size={6}>
+                                    <Tag color={a ? sevToColor(a.sev) : undefined} style={{ fontSize: 12 }}>{tag}</Tag>
+                                    <Tag color={qualityInfo.color} style={{ fontSize: 11 }}>
+                                      {qualityInfo.quality}
+                                    </Tag>
+                                    {a && a.sev !== "ok" && a.sev !== "none" && !qualityInfo.isBad && (
+                                      <Tooltip title={a.tip}>
+                                        {a.sev === "danger" ? (
+                                          <ExclamationCircleOutlined
+                                            style={{
+                                              color: "#ff4d4f",
+                                              fontSize: 15,
+                                              cursor: "help"
+                                            }}
+                                          />
+                                        ) : (
+                                          <InfoCircleOutlined
+                                            style={{
+                                              color: "#faad14",
+                                              fontSize: 15,
+                                              cursor: "help"
+                                            }}
+                                          />
+                                        )}
+                                      </Tooltip>
+                                    )}
+                                    </Space>
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })
+                        ))}
+                      </div>
                     ) : (
                       <Text type="secondary">暂无通道数据</Text>
                     )}

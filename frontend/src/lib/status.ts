@@ -9,9 +9,9 @@ export function getOnlineState(lastSeen?: string | null): OnlineState {
 	const diffMs = Date.now() - t.getTime();
 	const diffMin = diffMs / 60000;
 
-	// 约束：半小时内有数据视为 Online
-	if (diffMin <= 30) return "online";
-	if (diffMin <= 120) return "idle";
+	// 约束：15分钟内有数据视为 Online
+	if (diffMin <= 15) return "online";
+	if (diffMin <= 60) return "idle";
 	return "offline";
 }
 

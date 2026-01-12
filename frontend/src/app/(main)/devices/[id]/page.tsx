@@ -49,7 +49,7 @@ import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
 import { emptyObjectToUndefined } from "@/lib/kv";
 import { channelByMetric } from "@/lib/channel";
 import { MetricKey, getChannelDisplayName } from "@/lib/metrics";
-import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey } from "@/lib/channelGroups";
+import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey, sortChannels } from "@/lib/channelGroups";
 
 import type { Channel } from "@/types/api";
 
@@ -130,7 +130,7 @@ export default function DeviceDetailPage() {
 
 	const metricChannels = useMemo(() => {
 		const g = metricGroups.find((x) => x.key === activeMetric);
-		return (g?.channels || []).slice().sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
+		return sortChannels(g?.channels || []);
 	}, [metricGroups, activeMetric]);
 
 	const primaryChannel = useMemo(() => {
@@ -589,7 +589,13 @@ export default function DeviceDetailPage() {
 	}
 
 	// === Channels table ===
-	const channelRows = channels;
+	const channelRows = useMemo(() => {
+		// 先按 metric 分组，然后对每个组内的通道进行排序
+		const groups = groupChannelsByMetric(channels);
+		// 展平所有分组，每个组内的通道已排序
+		const sortedChannels = groups.flatMap((g) => sortChannels(g.channels));
+		return sortedChannels;
+	}, [channels]);
 	const channelColumns: any[] = [
 		{
 			title: "Code",
@@ -747,13 +753,13 @@ export default function DeviceDetailPage() {
 														style={{
 															marginTop: 8,
 															display: "grid",
-															gap: 6,
+															gap: 3,
 															maxHeight: 160,
-															overflowY: g.channels.length > 5 ? "auto" : "visible",
-															paddingRight: g.channels.length > 5 ? 4 : 0,
+															overflowY: g.channels.length > 6 ? "auto" : "visible",
+															paddingRight: g.channels.length > 6 ? 4 : 0,
 														}}
 													>
-														{g.channels.map((ch) => {
+														{sortChannels(g.channels).map((ch) => {
 															const l = getLatest(ch);
 															const v =
 																l && l.value !== undefined
@@ -768,6 +774,7 @@ export default function DeviceDetailPage() {
 																		display: "flex",
 																		justifyContent: "space-between",
 																		gap: 10,
+																		alignItems: "center",
 																	}}
 																>
 																	<Text
@@ -775,6 +782,7 @@ export default function DeviceDetailPage() {
 																		style={{
 																			fontSize: 12,
 																			minWidth: 0,
+																			flex: 1,
 																			overflow: "hidden",
 																			textOverflow: "ellipsis",
 																			whiteSpace: "nowrap",
@@ -782,7 +790,7 @@ export default function DeviceDetailPage() {
 																	>
 																		{getChannelDisplayName(ch)}
 																	</Text>
-																	<span style={{ fontWeight: 700 }}>
+																	<span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
 																		{v !== undefined && v !== null ? v : "-"}{" "}
 																		{u}
 																	</span>

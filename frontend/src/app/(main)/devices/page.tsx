@@ -35,7 +35,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
 import { MetricKey, metricLabel, normalizeMetric } from "@/lib/metrics";
-import { pickFeaturedChannels } from "@/lib/channelGroups";
+import { groupChannelsByMetric, sortChannels } from "@/lib/channelGroups";
 
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
@@ -232,9 +232,8 @@ export default function DevicesPage() {
 				title: "Metrics",
 				key: "metrics",
 				render: (_: any, d: any) => {
-					const ms = Array.from(
-						new Set((d.channels || []).map((c: any) => normalizeMetric(c.metric)))
-					).filter((m) => m !== "unknown") as MetricKey[];
+					const metricGroups = groupChannelsByMetric(d.channels || []);
+					const ms = metricGroups.map((g) => g.key).filter((m) => m !== "unknown") as MetricKey[];
 
 					return ms.length ? (
 						<Space wrap size={6}>
@@ -250,30 +249,43 @@ export default function DevicesPage() {
 			{
 				title: "Latest",
 				key: "latest",
-				width: 280,
+				width: 320,
 				render: (_: any, d: any) => {
-					const featured = pickFeaturedChannels(d.channels || [], 4);
-					if (!featured.length) return <Tag>-</Tag>;
+					const metricGroups = groupChannelsByMetric(d.channels || []);
+					if (!metricGroups.length) return <Tag>-</Tag>;
 
 					return (
-						<Space orientation="vertical" size={4}>
-							{featured.map((ch: any) => {
-								const mk = normalizeMetric(ch.metric) as MetricKey;
-								const v = latestNumber(ch);
-								const isTemp = mk === "temperature";
-								const isO2 = mk === "o2";
-								const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-								const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
-								return (
-									<Space key={ch.code} wrap>
-										<Text type="secondary" style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-											{ch.display_name || ch.code}
-										</Text>
-										<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
-									</Space>
-								);
-							})}
-						</Space>
+						<div>
+							{metricGroups.slice(0, 3).map((group, idx) => (
+								<div key={group.key}>
+									{idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '6px 0' }} />}
+									{sortChannels(group.channels).slice(0, 4).map((ch: any) => {
+										const mk = normalizeMetric(ch.metric) as MetricKey;
+										const v = latestNumber(ch);
+										const isTemp = mk === "temperature";
+										const isO2 = mk === "o2";
+										const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
+										const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
+										return (
+											<div
+												key={ch.code}
+												style={{
+													display: "flex",
+													justifyContent: "space-between",
+													alignItems: "center",
+													padding: "2px 0",
+												}}
+											>
+												<Text type="secondary" style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>
+													{ch.display_name || ch.code}
+												</Text>
+												<Tag color={a ? sevToColor(a.sev) : undefined} style={{ fontSize: 12 }}>{tag}</Tag>
+											</div>
+										);
+									})}
+								</div>
+							))}
+						</div>
 					);
 				},
 			},
@@ -383,6 +395,8 @@ export default function DevicesPage() {
 						const ovTagColor = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
 						const ovText = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
 
+						const metricGroups = groupChannelsByMetric(d.channels || []);
+
 						return (
 							<Col xs={24} key={d.device_id}>
 								<Card hoverable onClick={() => router.push(`/devices/${d.device_id}`)}>
@@ -403,32 +417,37 @@ export default function DevicesPage() {
 										</Space>
 									</div>
 
-									{featured.length > 0 && (
+									{metricGroups.length > 0 && (
 										<div style={{ marginTop: 8 }}>
-											{featured.map((ch: any) => {
-												const mk = normalizeMetric(ch.metric) as MetricKey;
-												const v = latestNumber(ch);
-												const isTemp = mk === "temperature";
-												const isO2 = mk === "o2";
-												const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-												const tag = ch?.latest
-													? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
-													: "-";
-												return (
-													<div
-														key={ch.code}
-														style={{
-															display: "flex",
-															justifyContent: "space-between",
-															padding: "3px 0",
-															fontSize: 13,
-														}}
-													>
-														<Text type="secondary">{ch.display_name || ch.code}</Text>
-														<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
-													</div>
-												);
-											})}
+											{metricGroups.slice(0, 3).map((group, idx) => (
+												<div key={group.key}>
+													{idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '6px 0' }} />}
+													{sortChannels(group.channels).slice(0, 5).map((ch: any) => {
+														const mk = normalizeMetric(ch.metric) as MetricKey;
+														const v = latestNumber(ch);
+														const isTemp = mk === "temperature";
+														const isO2 = mk === "o2";
+														const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
+														const tag = ch?.latest
+															? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
+															: "-";
+														return (
+															<div
+																key={ch.code}
+																style={{
+																	display: "flex",
+																	justifyContent: "space-between",
+																	padding: "3px 0",
+																	fontSize: 13,
+																}}
+															>
+																<Text type="secondary">{ch.display_name || ch.code}</Text>
+																<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
+															</div>
+														);
+													})}
+												</div>
+											))}
 										</div>
 									)}
 

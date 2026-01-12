@@ -2,12 +2,59 @@
 
 import { useState } from "react";
 
-const COMMAND_EXAMPLE = '[{"command": "pump", "action": "on"}]';
-const COMMAND_TEMPLATE_EXAMPLE = `示例：开启水泵
-{"commands": [{"command": "pump", "action": "on"}]}
+const COMMAND_EXAMPLE = `{"commands": [{"command": "pump", "action": "on", "duration": 60000}]}`;
+const COMMAND_TEMPLATE_EXAMPLE = `示例1：开启水泵60秒
+{
+  "commands": [
+    {
+      "command": "pump",
+      "action": "on",
+      "duration": 60000
+    }
+  ]
+}
 
-示例：组合控制
-{"commands": [{"command": "pump", "action": "on"}, {"command": "fan", "action": "on"}]}`;
+示例2：开启风扇运行2分钟
+{
+  "commands": [
+    {
+      "command": "fan",
+      "action": "on",
+      "duration": 120000
+    }
+  ]
+}
+
+示例3：组合控制（水泵+风扇+阀门）
+{
+  "commands": [
+    {
+      "command": "pump",
+      "action": "on",
+      "duration": 30000
+    },
+    {
+      "command": "fan",
+      "action": "on",
+      "duration": 60000
+    },
+    {
+      "command": "valve",
+      "action": "on",
+      "duration": 30000
+    }
+  ]
+}
+
+支持的命令类型（纯开关控制）：
+• pump: 水泵
+• fan: 风扇
+• valve: 阀门
+• heater: 加热器
+• light: 照明
+• mixer: 搅拌器
+
+注意：所有命令都是简单的 on/off 开关，无需额外参数`;
 
 // 类型辅助：将 Form.Item 的 name 属性转为任意类型以绕过 TypeScript 检查
 type FormName<T extends string> = T;
@@ -100,7 +147,7 @@ function ScriptModal({ open, script, devices, onClose, onSubmit, loading }: Scri
             onCancel={onClose}
             onOk={() => form.submit()}
             width={800}
-            destroyOnClose
+            destroyOnHidden
         >
             <Form
                 form={form}
@@ -181,7 +228,7 @@ function ScriptModal({ open, script, devices, onClose, onSubmit, loading }: Scri
                     <>
                         <Title level={5}>阈值配置</Title>
                         <Alert
-                            message="阈值触发说明"
+                            title="阈值触发说明"
                             description="当设备监测的指标达到设定的阈值时，系统会自动执行下方配置的命令模板。例如：温度≥75℃时自动开启降温设备。"
                             type="info"
                             showIcon
@@ -212,7 +259,7 @@ function ScriptModal({ open, script, devices, onClose, onSubmit, loading }: Scri
                     <>
                         <Title level={5}>定时配置</Title>
                         <Alert
-                            message="定时执行说明"
+                            title="定时执行说明"
                             description="使用 cron 表达式定义脚本执行时间，系统会按照设定的时间周期自动执行命令。"
                             type="info"
                             showIcon
@@ -231,7 +278,7 @@ function ScriptModal({ open, script, devices, onClose, onSubmit, loading }: Scri
                     <>
                         <Title level={5}>Python脚本</Title>
                         <Alert
-                            message="Python脚本说明"
+                            title="Python脚本说明"
                             description="编写自定义 Python 代码实现复杂的控制逻辑。可以使用预定义的函数获取设备数据，并返回要执行的命令列表。"
                             type="info"
                             showIcon
@@ -243,19 +290,36 @@ function ScriptModal({ open, script, devices, onClose, onSubmit, loading }: Scri
                             rules={[{ required: true, message: "请输入Python代码" }]}
                         >
                             <Input.TextArea
-                                rows={10}
-                                placeholder={`示例代码：
-# 获取最新温度值
+                                rows={16}
+                                placeholder={`# 获取最新温度值
 temp = get_latest_value("temperature")
+humidity = get_latest_value("humidity")
+
+# 初始化命令列表
+commands = []
 
 # 根据温度控制设备
 if temp > 75:
-    commands = [{"command": "pump", "action": "on"}]
-elif temp < 60:
-    commands = [{"command": "pump", "action": "off"}]
+    # 高温：开启风扇和水泵
+    commands = [
+        {"command": "fan", "action": "on", "duration": 300000},
+        {"command": "pump", "action": "on", "duration": 120000}
+    ]
+elif temp < 50:
+    # 低温：开启加热器
+    commands = [
+        {"command": "heater", "action": "on"}
+    ]
 else:
-    commands = []`}
-                                style={{ fontFamily: "monospace" }}
+    # 温度合适：定时开启搅拌器
+    commands = [
+        {"command": "mixer", "action": "on", "duration": 60000}
+    ]
+
+# 湿度过高时加强通风
+if humidity > 80:
+    commands.append({"command": "fan", "action": "on", "duration": 600000})`}
+                                style={{ fontFamily: "monospace", fontSize: 12 }}
                             />
                         </Form.Item>
                         <Text type="secondary">
@@ -268,18 +332,50 @@ else:
 
                 <Title level={5}>命令模板</Title>
                 <Alert
-                    message="命令模板说明"
-                    description="定义当脚本触发时要发送给设备的控制命令。使用 JSON 格式配置，支持多个命令组合。"
+                    title="命令模板说明"
+                    description={
+                        <div>
+                            <p>定义当脚本触发时要发送给设备的控制命令。使用 JSON 格式配置，支持多个命令组合。</p>
+                            <p style={{ marginTop: 8 }}>
+                                <strong>命令格式：</strong>
+                                <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 3 }}>
+                                    {`{"commands": [{"command": "pump", "action": "on", "duration": 60000}]}`}
+                                </code>
+                            </p>
+                            <p style={{ marginTop: 8 }}>
+                                <strong>参数说明：</strong>
+                            </p>
+                            <ul style={{ fontSize: 12, marginTop: 4 }}>
+                                <li><code>command</code>: 命令类型（pump/fan/valve/heater/light/mixer）</li>
+                                <li><code>action</code>: 动作类型（on=开启，off=关闭）</li>
+                                <li><code>duration</code>: 持续时间（毫秒，可选，不指定则永久开启）</li>
+                            </ul>
+                            <p style={{ marginTop: 8, fontWeight: 500 }}>
+                                <strong>支持的命令类型：</strong>
+                            </p>
+                            <ul style={{ fontSize: 12, marginTop: 4 }}>
+                                <li><code>pump</code>: 水泵</li>
+                                <li><code>fan</code>: 风扇</li>
+                                <li><code>valve</code>: 阀门</li>
+                                <li><code>heater</code>: 加热器</li>
+                                <li><code>light</code>: 照明</li>
+                                <li><code>mixer</code>: 搅拌器</li>
+                            </ul>
+                            <p style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+                                💡 提示：所有命令都是简单的 on/off 开关，无需额外参数
+                            </p>
+                        </div>
+                    }
                     type="info"
                     showIcon
                     style={{ marginBottom: 16 }}
                 />
                 <Form.Item label="命令JSON" name="command_template">
-                    <Input.TextArea
-                        rows={5}
-                        placeholder={COMMAND_TEMPLATE_EXAMPLE}
-                        style={{ fontFamily: "monospace" }}
-                    />
+                        <Input.TextArea
+                                rows={12}
+                                placeholder={COMMAND_TEMPLATE_EXAMPLE}
+                                style={{ fontFamily: "monospace", fontSize: 12 }}
+                            />
                 </Form.Item>
             </Form>
         </Modal>
@@ -379,7 +475,7 @@ export default function ScriptsPage() {
         >
             <Card style={{ marginBottom: 16 }}>
                 <Alert
-                    message="脚本说明"
+                    title="脚本说明"
                     description={
                         <div style={{ marginTop: 8 }}>
                             <p style={{ marginBottom: 8, fontWeight: 500 }}>脚本类型说明：</p>
@@ -403,12 +499,30 @@ export default function ScriptsPage() {
                             </div>
                             <Divider style={{ margin: '12px 0' }} />
                             <p style={{ marginBottom: 8, fontWeight: 500 }}>使用建议：</p>
-                            <ul style={{ marginLeft: 20, marginBottom: 0 }}>
+                            <ul style={{ marginLeft: 20, marginBottom: 8 }}>
                                 <li>优先级：数字越大越优先执行，用于解决多个脚本同时触发时的执行顺序</li>
                                 <li>关联设备：留空表示脚本应用到所有设备，也可以指定特定设备</li>
                                 <li>命令模板：使用 JSON 格式定义要发送给设备的控制命令</li>
                                 <li>执行历史：可以在执行记录中查看脚本的执行情况和结果</li>
                             </ul>
+                            <p style={{ marginBottom: 8, fontWeight: 500 }}>命令格式示例：</p>
+                            <pre style={{
+                                background: '#f5f5f5',
+                                padding: '8px 12px',
+                                borderRadius: 4,
+                                fontSize: 12,
+                                overflowX: 'auto'
+                            }}>
+{`{
+  "commands": [
+    {
+      "command": "pump",
+      "action": "on",
+      "duration": 60000
+    }
+  ]
+}`}
+                            </pre>
                         </div>
                     }
                     type="info"
