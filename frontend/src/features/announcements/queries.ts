@@ -2,10 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 import type {
-	Announcement,
 	AnnouncementListItem,
 	MyAnnouncement,
-	MyAnnouncementsResp,
+	PaginatedResp,
 	UnreadCountResp,
 } from "@/types/api";
 
@@ -38,7 +37,7 @@ export function useAnnouncementsList(params?: {
 
 			const queryString = searchParams.toString();
 			const response = await api.get(`/announcements${queryString ? `?${queryString}` : ""}`);
-			return response.data as MyAnnouncementsResp;
+			return response.data as PaginatedResp<AnnouncementListItem>;
 		},
 	});
 }
@@ -73,7 +72,7 @@ export function useMyAnnouncements(params?: {
 
 			const queryString = searchParams.toString();
 			const response = await api.get(`/announcements/my${queryString ? `?${queryString}` : ""}`);
-			return response.data as MyAnnouncementsResp;
+			return response.data as PaginatedResp<MyAnnouncement> & { unread_count: number };
 		},
 	});
 }

@@ -1,15 +1,15 @@
-import { Badge, Button, Dropdown, message, Space, Typography } from "antd";
+import { Badge, Button, Dropdown, Space, Typography } from "antd";
 import { BellOutlined } from "@ant-design/icons";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { useMyAnnouncements, useMarkAnnouncementAsRead } from "@/features/announcements/queries";
+import { useMyAnnouncements } from "@/features/announcements/queries";
+import { useMarkAnnouncementAsRead } from "@/features/announcements/mutations";
 import type { MyAnnouncement } from "@/types/api";
 
 const { Text } = Typography;
 
 export default function AnnouncementBadge() {
 	const [open, setOpen] = useState(false);
-	const [viewedAnnouncements, setViewedAnnouncements] = useState<Set<number>>(new Set());
 
 	// 获取未读公告（最多显示5条）
 	const { data: myAnnouncementsData, isLoading } = useMyAnnouncements({
@@ -24,21 +24,8 @@ export default function AnnouncementBadge() {
 	const unreadCount = myAnnouncementsData?.unread_count || 0;
 	const unreadAnnouncements = myAnnouncementsData?.data || [];
 
-	// 重置查看记录（当下拉菜单打开时）
-	useEffect(() => {
-		if (open) {
-			setViewedAnnouncements(new Set());
-		}
-	}, [open]);
-
 	// 点击查看公告
 	async function handleViewAnnouncement(announcement: MyAnnouncement) {
-		// 记录已查看（本地状态）
-		setViewedAnnouncements((prev) => new Set([...prev, announcement.id]));
-
-		// 显示公告详情（使用 Modal 或跳转）
-		message.info(announcement.content, 5);
-
 		// 标记为已读
 		if (!announcement.is_read) {
 			try {
@@ -47,6 +34,9 @@ export default function AnnouncementBadge() {
 				console.error("标记已读失败:", error);
 			}
 		}
+
+		// 显示公告详情（使用 alert 或跳转）
+		alert(announcement.content);
 	}
 
 	// 查看全部
@@ -68,7 +58,7 @@ export default function AnnouncementBadge() {
 				}}
 				onClick={() => handleViewAnnouncement(announcement)}
 			>
-				<Space direction="vertical" size={4} style={{ width: "100%" }}>
+				<Space orientation="vertical" size={4} style={{ width: "100%" }}>
 					<div
 						style={{
 							display: "flex",
@@ -101,7 +91,7 @@ export default function AnnouncementBadge() {
 	// 添加"查看全部"选项
 	if (unreadAnnouncements.length > 0) {
 		menuItems.push({
-			key: "view-all",
+			key: "view-all" as any,
 			label: (
 				<div
 					style={{
@@ -112,7 +102,7 @@ export default function AnnouncementBadge() {
 					}}
 					onClick={handleViewAll}
 				>
-					<Text type="primary" style={{ fontSize: 12 }}>
+					<Text style={{ fontSize: 12, color: "#1890ff", cursor: "pointer" }}>
 						查看全部公告
 					</Text>
 				</div>
@@ -127,7 +117,6 @@ export default function AnnouncementBadge() {
 			placement="bottomRight"
 			open={open}
 			onOpenChange={setOpen}
-			overlayStyle={{ maxHeight: 400, overflowY: "auto" }}
 		>
 			<Badge count={unreadCount} overflowCount={99}>
 				<Button

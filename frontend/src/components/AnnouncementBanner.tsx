@@ -2,7 +2,8 @@ import { Alert, Button, Space, Typography } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { useState } from "react";
 
-import { useMyAnnouncements, useMarkAnnouncementAsRead } from "@/features/announcements/queries";
+import { useMyAnnouncements } from "@/features/announcements/queries";
+import { useMarkAnnouncementAsRead } from "@/features/announcements/mutations";
 import type { MyAnnouncement } from "@/types/api";
 
 const { Text } = Typography;
@@ -52,7 +53,7 @@ export default function AnnouncementBanner({ maxVisible = 3 }: AnnouncementBanne
 				<Alert
 					key={announcement.id}
 					message={
-						<Space direction="vertical" size={4} style={{ width: "100%" }}>
+						<>
 							<div
 								style={{
 									display: "flex",
@@ -99,7 +100,7 @@ export default function AnnouncementBanner({ maxVisible = 3 }: AnnouncementBanne
 									</Button>
 								)}
 							</div>
-						</Space>
+						</>
 					}
 					type={
 						announcement.priority === "urgent"

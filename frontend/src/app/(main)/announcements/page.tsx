@@ -23,7 +23,7 @@ import { useAnnouncementsList } from "@/features/announcements/queries";
 import { useCreateAnnouncement, useUpdateAnnouncement, useDeleteAnnouncement } from "@/features/announcements/mutations";
 import type { AnnouncementCategory, AnnouncementPriority, AnnouncementTargetRole, AnnouncementListItem } from "@/types/api";
 
-const { TextArea, Text } = Typography;
+const { Text } = Typography;
 const { Option } = Select;
 
 const categoryLabels: Record<AnnouncementCategory, string> = {
@@ -67,7 +67,7 @@ export default function AnnouncementsPage() {
 	const [priority, setPriority] = useState<AnnouncementPriority | "">("");
 	const [targetRole, setTargetRole] = useState<AnnouncementTargetRole | "">("");
 	const [isActive, setIsActive] = useState<"">("");
-	const [isPinned, setIsPinned] = useState<"">("");
+	const [isPinned] = useState<"">("");
 
 	const { data: listData, isLoading } = useAnnouncementsList({
 		page,
@@ -150,7 +150,7 @@ export default function AnnouncementsPage() {
 			dataIndex: "title",
 			key: "title",
 			render: (title: string, record: AnnouncementListItem) => (
-				<Space direction="vertical" size={0}>
+				<Space orientation="vertical" size={0}>
 					<Text strong>{title}</Text>
 					{record.is_pinned && <Tag color="blue">置顶</Tag>}
 					{record.is_expired && <Tag color="red">已过期</Tag>}
@@ -285,9 +285,7 @@ export default function AnnouncementsPage() {
 					pagination={{
 						current: page,
 						pageSize,
-						total: listData?.pagination?.total || 0,
 						showSizeChanger: true,
-						showTotal: (total) => `共 ${total} 条`,
 						onChange: setPage,
 						onShowSizeChange: (_, size) => {
 							setPageSize(size);
@@ -314,7 +312,7 @@ export default function AnnouncementsPage() {
 						<Input placeholder="请输入公告标题" />
 					</Form.Item>
 					<Form.Item label="内容" name="content" rules={[{ required: true, message: "请输入内容" }]}>
-						<TextArea rows={6} placeholder="请输入公告内容" />
+						<Input.TextArea rows={6} placeholder="请输入公告内容" />
 					</Form.Item>
 					<Row gutter={16}>
 						<Col span={8}>

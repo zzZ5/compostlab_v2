@@ -15,7 +15,6 @@ import {
     MenuFoldOutlined,
     MenuUnfoldOutlined,
     LogoutOutlined,
-    SettingOutlined,
     ControlOutlined,
     BellOutlined,
 } from "@ant-design/icons";
