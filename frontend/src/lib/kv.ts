@@ -111,3 +111,10 @@ export function emptyObjectToUndefined(obj: any): any | undefined {
 	if (Array.isArray(obj)) return obj;
 	return Object.keys(obj).length ? obj : undefined;
 }
+
+// 新增：将空对象转换为null，用于需要清空meta等字段的场景
+export function emptyObjectToNull(obj: any): any | null {
+	if (!obj || typeof obj !== "object") return obj;
+	if (Array.isArray(obj)) return obj;
+	return Object.keys(obj).length ? obj : null;
+}

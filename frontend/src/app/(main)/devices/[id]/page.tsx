@@ -224,6 +224,11 @@ export default function DeviceDetailPage() {
 		// group by code
 		const byCode = new Map<string, Array<[string, number]>>();
 		for (const p of points as any[]) {
+			// 质量控制：筛掉无效质量的数据
+			if (p.quality && ['ERR', 'NULL', 'INVALID', 'BAD'].includes(String(p.quality).toUpperCase())) {
+				continue;
+			}
+
 			const code = p.code || "UNKNOWN";
 			const v = typeof p.value === "number" ? p.value : Number(p.value);
 			if (!Number.isFinite(v)) continue;
@@ -356,8 +361,12 @@ export default function DeviceDetailPage() {
 				note: (v.note || "").trim() || "",
 				is_active: v.is_active !== false,
 			};
-			const meta = emptyObjectToUndefined(v.meta);
-			if (meta !== undefined) body.meta = meta;
+			// 当meta为空时，显式设置为null以清空服务器端的meta
+			if (!v.meta || Object.keys(v.meta).length === 0) {
+				body.meta = null;
+			} else {
+				body.meta = v.meta;
+			}
 
 			await updateDevice.mutateAsync(body);
 			message.success("设备已保存");
@@ -457,8 +466,12 @@ export default function DeviceDetailPage() {
 				unit: (v.unit || "").trim() || null,
 				is_active: v.is_active !== false,
 			};
-			const meta = emptyObjectToUndefined(v.meta);
-			if (meta !== undefined) body.meta = meta;
+			// 当meta为空时，显式设置为null以清空服务器端的meta
+			if (!v.meta || Object.keys(v.meta).length === 0) {
+				body.meta = null;
+			} else {
+				body.meta = v.meta;
+			}
 
 			if (editingChannel) {
 				await updateChannel.mutateAsync(body);
@@ -764,61 +777,53 @@ export default function DeviceDetailPage() {
 		>
 			{/* 设备信息展示区 */}
 			{device && (
-				<Card style={{ marginBottom: 16 }}>
-					<Descriptions
-						title="设备信息"
-						bordered
-						column={{ xs: 1, sm: 2, md: 3 }}
-						size="small"
-					>
-						<Descriptions.Item label="设备名称">{device.name || '-'}</Descriptions.Item>
-						<Descriptions.Item label="设备代码">
-							<Tag color="blue">{device.code}</Tag>
-						</Descriptions.Item>
-						<Descriptions.Item label="状态">
-							<Tag color={device.is_active === false ? 'red' : 'green'}>
-								{device.is_active === false ? '未激活' : '已激活'}
-							</Tag>
-						</Descriptions.Item>
-						<Descriptions.Item label="发布主题">{device.post_topic || '-'}</Descriptions.Item>
-						<Descriptions.Item label="响应主题">{device.response_topic || '-'}</Descriptions.Item>
-						<Descriptions.Item label="通道数量">{channels.length}</Descriptions.Item>
-					</Descriptions>
+				<Card size="small" style={{ marginBottom: 12 }}>
+					<Row gutter={[16, 12]}>
+						{/* 基本信息 */}
+						<Col xs={24} sm={12} md={8}>
+							<Space direction="vertical" size={6} style={{ width: '100%' }}>
+								<Space wrap size={8}>
+									<Text strong style={{ fontSize: 14 }}>{device.name || '-'}</Text>
+									<Tag color="blue">{device.code}</Tag>
+									<Tag color={device.is_active === false ? 'red' : 'green'}>
+										{device.is_active === false ? '未激活' : '已激活'}
+									</Tag>
+								</Space>
+								<Text type="secondary">通道: {channels.length}</Text>
+							</Space>
+						</Col>
 
-					{/* Note 和 Meta 折叠区域 */}
-					{(device.note || (device.meta && Object.keys(device.meta).length > 0)) && (
-						<Collapse
-							size="small"
-							style={{ marginTop: 12 }}
-							items={[
-								...(device.note ? [{
-									key: 'note',
-									label: <Text strong>备注</Text>,
-									children: (
-										<Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
-											{device.note}
-										</Text>
-									),
-								}] : []),
-								...(device.meta && Object.keys(device.meta).length > 0 ? [{
-									key: 'meta',
-									label: <Text strong>元数据</Text>,
-									children: (
-										<Space direction="vertical" size={4} style={{ width: '100%' }}>
-											{Object.entries(device.meta).map(([key, value]) => (
-												<div key={key} style={{ display: 'flex', gap: 8 }}>
-													<Text strong style={{ minWidth: 100 }}>{key}:</Text>
-													<Text type="secondary">
-														{typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
-													</Text>
-												</div>
-											))}
-										</Space>
-									),
-								}] : []),
-							]}
-						/>
-					)}
+						{/* 备注 */}
+						{device.note && (
+							<Col xs={24} sm={12} md={8}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 12 }}>备注</Text>
+									<Text type="secondary" style={{ display: 'block', marginTop: 4, whiteSpace: 'pre-wrap', fontSize: 13 }}>
+										{device.note}
+									</Text>
+								</div>
+							</Col>
+						)}
+
+						{/* 元数据 */}
+						{device.meta && Object.keys(device.meta).length > 0 && (
+							<Col xs={24} sm={12} md={8}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 12 }}>元数据</Text>
+									<Space direction="vertical" size={2} style={{ width: '100%', marginTop: 4 }}>
+										{Object.entries(device.meta).map(([key, value]) => (
+											<div key={key} style={{ display: 'flex', gap: 8 }}>
+												<Text style={{ fontSize: 12, minWidth: 80 }}>{key}:</Text>
+												<Text type="secondary" style={{ fontSize: 12 }}>
+													{typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+												</Text>
+											</div>
+										))}
+									</Space>
+								</div>
+							</Col>
+						)}
+					</Row>
 				</Card>
 			)}
 
@@ -830,8 +835,8 @@ export default function DeviceDetailPage() {
 						label: "Telemetry",
 						children: (
 							<>
-								{/* KPI */}
-								<Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+								{/* KPI - 紧凑布局 */}
+								<Row gutter={[8, 8]} style={{ marginBottom: 8 }}>
 									{kpiGroups.map((g) => {
 										const latestTs = g.channels
 											.map((c) => getLatest(c)?.ts)
@@ -845,6 +850,7 @@ export default function DeviceDetailPage() {
 										return (
 											<Col xs={24} sm={12} md={6} key={g.key}>
 												<Card
+													size="small"
 													hoverable
 													onClick={() => {
 														// 只切换 metric，不重置 selectedCodes
@@ -855,25 +861,26 @@ export default function DeviceDetailPage() {
 													style={{
 														cursor: "pointer",
 														border: isSelected ? `2px solid ${metricColor}` : "1px solid #f0f0f0",
-														borderRadius: 8,
+														borderRadius: 6,
 														transition: "all 0.3s",
 														background: isSelected ? "rgba(22,119,255,0.02)" : undefined,
 													}}
-													bodyStyle={{ padding: "12px 16px" }}
+													bodyStyle={{ padding: "8px 12px" }}
 												>
 													<Space
-														style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}
+														style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}
+														size={4}
 													>
 														<Text style={{
-															fontSize: 14,
+															fontSize: 13,
 															fontWeight: 600,
 															color: isSelected ? metricColor : undefined
 														}}>
 															{g.label}
 														</Text>
-														<Space size={4}>
-															<Tag color={isSelected ? metricColor : "default"} style={{ margin: 0 }}>
-																{g.channels.length} 通道
+														<Space size={2}>
+															<Tag color={isSelected ? metricColor : "default"} style={{ margin: 0, fontSize: 11, padding: '0 4px' }}>
+																{g.channels.length}
 															</Tag>
 															<Button
 																size="small"
@@ -907,8 +914,8 @@ export default function DeviceDetailPage() {
 													<div
 														style={{
 															display: "grid",
-															gap: 4,
-															maxHeight: 180,
+															gap: 2,
+															maxHeight: 140,
 															overflowY: g.channels.length > 6 ? "auto" : "visible",
 															paddingRight: g.channels.length > 6 ? 4 : 0,
 														}}
@@ -936,10 +943,10 @@ export default function DeviceDetailPage() {
 																	style={{
 																		display: "flex",
 																		justifyContent: "space-between",
-																		gap: 8,
+																		gap: 6,
 																		alignItems: "center",
-																		padding: "6px 8px",
-																		borderRadius: 4,
+																		padding: "4px 6px",
+																		borderRadius: 3,
 																		background: isCodeSelected ? `rgba(${parseInt(metricColor.slice(1, 3), 16)}, ${parseInt(metricColor.slice(3, 5), 16)}, ${parseInt(metricColor.slice(5, 7), 16)}, 0.1)` : "#fafafa",
 																		border: isCodeSelected ? `1px solid ${metricColor}` : "1px solid transparent",
 																		transition: "all 0.2s",
@@ -955,7 +962,7 @@ export default function DeviceDetailPage() {
 																	<Text
 																		type="secondary"
 																		style={{
-																			fontSize: 12,
+																			fontSize: 11,
 																			minWidth: 0,
 																			flex: 1,
 																			overflow: "hidden",
@@ -967,13 +974,13 @@ export default function DeviceDetailPage() {
 																		{getChannelDisplayName(ch)}
 																	</Text>
 																	<Text style={{
-																		fontSize: 13,
+																		fontSize: 12,
 																		fontWeight: 600,
 																		color: "#262626",
 																		whiteSpace: "nowrap",
 																	}}>
 																		{v !== undefined && v !== null ? v : "-"}{" "}
-																		<Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>
+																		<Text type="secondary" style={{ fontSize: 10, fontWeight: 400 }}>
 																			{u}
 																		</Text>
 																	</Text>
@@ -982,11 +989,11 @@ export default function DeviceDetailPage() {
 														})}
 													</div>
 
-													<div style={{ width: "100%", marginTop: 8, paddingTop: 8, borderTop: "1px solid #f0f0f0" }}>
+													<div style={{ width: "100%", marginTop: 6, paddingTop: 4, borderTop: "1px solid #f0f0f0" }}>
 														<Text
 															type="secondary"
 															style={{
-																fontSize: 11,
+																fontSize: 10,
 																color: "#999",
 																whiteSpace: "nowrap",
 															}}
@@ -1000,23 +1007,25 @@ export default function DeviceDetailPage() {
 									})}
 								</Row>
 
-								<Row gutter={[12, 12]}>
+								<Row gutter={[8, 8]}>
 									{/* Chart */}
 									<Col xs={24} md={24}>
-										<Card>
-											<Space orientation="vertical" style={{ width: "100%" }} size={12}>
+										<Card size="small">
+											<Space orientation="vertical" style={{ width: "100%" }} size={8}>
 												<Tabs
 													activeKey={activeMetric}
 													onChange={(k) => setActiveMetric(k)}
 													items={metricGroups.map((g) => ({ key: g.key, label: g.label }))}
+													size="small"
 												/>
 
-												<Space wrap>
+												<Space wrap size={8}>
 													<DatePicker.RangePicker
+														size="small"
 														showTime
 														value={range as any}
 														onChange={(v) => setRange(v as any)}
-														style={{ width: isMobile ? "100%" : 380 }}
+														style={{ width: isMobile ? "100%" : 340 }}
 														presets={[
 															{
 																label: '最近1小时',
@@ -1038,7 +1047,8 @@ export default function DeviceDetailPage() {
 													/>
 
 													<Select
-														style={{ width: 120 }}
+														size="small"
+														style={{ width: 100 }}
 														value={bucket}
 														onChange={setBucket}
 														options={[
@@ -1049,8 +1059,9 @@ export default function DeviceDetailPage() {
 														]}
 													/>
 
-												<Space.Compact style={{ width: isMobile ? "100%" : 420 }}>
+												<Space.Compact size="small" style={{ width: isMobile ? "100%" : 360 }}>
 													<Select
+														size="small"
 														style={{ width: "100%" }}
 														mode="multiple"
 														value={selectedCodes}
@@ -1064,12 +1075,14 @@ export default function DeviceDetailPage() {
 														maxTagCount="responsive"
 													/>
 													<Button
+														size="small"
 														onClick={() => setSelectedCodes(metricChannels.map((c) => c.code))}
 														disabled={!metricChannels.length}
 													>
 														全选
 													</Button>
 													<Button
+														size="small"
 														onClick={() => setSelectedCodes(primaryChannel?.code ? [primaryChannel.code] : [])}
 														disabled={!primaryChannel?.code}
 													>
@@ -1077,12 +1090,12 @@ export default function DeviceDetailPage() {
 													</Button>
 												</Space.Compact>
 
-											<Tag>
+											<Tag color="blue" style={{ fontSize: 12 }}>
 												当前：{effectiveCodes.length ? `${effectiveCodes.length} 个通道` : "-"}（{activeMetricLabel}）
 											</Tag>
 												</Space>
 
-									<div style={{ height: 420 }}>
+									<div style={{ height: 520 }}>
 										<ReactECharts
 											key={`${deviceId}-${activeMetric}-${effectiveCodes.join(",")}-${bucket}-${from || ""}-${to || ""}`}
 											option={chartOption}
@@ -1098,7 +1111,7 @@ export default function DeviceDetailPage() {
 												<Text type="secondary">暂无数据（检查时间范围 / bucket / 通道）</Text>
 											)}
 
-											<Divider style={{ margin: "8px 0" }} />
+											<Divider style={{ margin: "4px 0" }} />
 											<Text type="secondary">数据表（{points.length}）</Text>
 											<Tabs
 												activeKey={activeDataTableTab}
