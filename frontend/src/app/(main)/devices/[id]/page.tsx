@@ -71,6 +71,10 @@ function getMetricColor(metric: MetricKey): string {
 		voltage: "#fa8c16",       // 橙色 - 电压
 		current: "#722ed1",       // 紫色 - 电流
 		power: "#eb2f96",        // 粉色 - 功率
+		wind_speed: "#1890ff",    // 蓝色 - 风速
+		wind_direction: "#52c41a", // 绿色 - 风向
+		switch: "#fa8c16",       // 橙色 - 开关
+		level: "#eb2f96",        // 粉色 - 液位
 		unknown: "#d9d9d9",
 	};
 	return colors[metric] || colors.unknown;
