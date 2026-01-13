@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     "apps.devices",
     "apps.runs",
     "apps.telemetry",
-    "apps.announcements",
     "corsheaders",
 ]
 

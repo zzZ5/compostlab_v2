@@ -15,12 +15,10 @@ import {
     MenuFoldOutlined,
     MenuUnfoldOutlined,
     LogoutOutlined,
+    SettingOutlined,
     ControlOutlined,
-    BellOutlined,
 } from "@ant-design/icons";
 import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser } from "@/lib/auth";
-import AnnouncementBanner from "@/components/AnnouncementBanner";
-import AnnouncementBadge from "@/components/AnnouncementBadge";
 
 const { Text } = Typography;
 
@@ -32,7 +30,6 @@ function getSelectedKey(pathname: string) {
     if (pathname.startsWith("/runs")) return "/runs";
     if (pathname.startsWith("/telemetry")) return "/telemetry";
     if (pathname.startsWith("/scripts")) return "/scripts";
-    if (pathname.startsWith("/announcements")) return "/announcements";
     if (pathname.startsWith("/users")) return "/users";
     if (pathname.startsWith("/profile")) return "/profile";
     if (pathname.startsWith("/audit-logs")) return "/audit-logs";
@@ -136,7 +133,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             { type: "divider" },
             ...(currentUser?.role === "admin" || currentUser?.is_staff || currentUser?.is_superuser
               ? [
-                  { key: "/announcements", icon: <BellOutlined />, label: <Link href="/announcements">公告管理</Link> },
                   { key: "/users", icon: <TeamOutlined />, label: <Link href="/users">用户管理</Link> },
                   { key: "/audit-logs", icon: <AuditOutlined />, label: <Link href="/audit-logs">操作日志</Link> },
                 ]
@@ -165,7 +161,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           />
 
           <Space size="middle">
-            <AnnouncementBadge />
             {currentUser && (
               <>
                 {!isMobile && (
@@ -222,10 +217,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         </Header>
 
         <Content style={{ padding: isMobile ? 16 : 24 }}>
-          <div style={{ maxWidth: 1400, margin: "0 auto" }}>
-            <AnnouncementBanner />
-            {children}
-          </div>
+          <div style={{ maxWidth: 1400, margin: "0 auto" }}>{children}</div>
         </Content>
       </Layout>
     </Layout>
