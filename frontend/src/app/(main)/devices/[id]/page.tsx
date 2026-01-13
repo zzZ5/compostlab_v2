@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
@@ -168,8 +168,15 @@ export default function DeviceDetailPage() {
 		return metricChannels[0] || null;
 	}, [channels, metricChannels, activeMetric]);
 
+	// 避免首次渲染时的多重状态更新
+	const isInitializedRef = useRef(false);
+
 	// 当 metric 切换 / 通道加载完成时：默认勾选该 metric 下前几个通道，便于直接对比
 	useEffect(() => {
+		if (!isInitializedRef.current) {
+			isInitializedRef.current = true;
+			return;
+		}
 		if (!metricChannels.length) {
 			setSelectedCodes([]);
 			return;
@@ -181,7 +188,7 @@ export default function DeviceDetailPage() {
 	const effectiveCodes = useMemo(() => {
 		if (selectedCodes.length) return selectedCodes;
 		return [];
-	}, [selectedCodes, primaryChannel, metricChannels]);
+	}, [selectedCodes]);
 
 	// time range
 	const [range, setRange] = useState<[any, any] | null>(null);
@@ -638,23 +645,6 @@ export default function DeviceDetailPage() {
 		}
 	}
 
-	// === Loading / Not found ===
-	if (devicesQ.isLoading) {
-		return (
-			<div style={{ padding: 48 }}>
-				<Spin />
-			</div>
-		);
-	}
-
-	if (!device) {
-		return (
-			<div style={{ padding: 24 }}>
-				<Text type="secondary">Device not found.</Text>
-			</div>
-		);
-	}
-
 	// === Channels table ===
 	const channelRows = useMemo(() => {
 		// 先按 metric 分组，然后对每个组内的通道进行排序
@@ -746,6 +736,23 @@ export default function DeviceDetailPage() {
 	// === 分开的数据表tab管理 ===
 	const [activeDataTableTab, setActiveDataTableTab] = useState<string>("all");
 
+	// === Loading / Not found ===
+	if (devicesQ.isLoading) {
+		return (
+			<div style={{ padding: 48 }}>
+				<Spin />
+			</div>
+		);
+	}
+
+	if (!device) {
+		return (
+			<div style={{ padding: 24 }}>
+				<Text type="secondary">Device not found.</Text>
+			</div>
+		);
+	}
+
 	return (
 		<Page
 			title={device.name || device.code}
@@ -780,18 +787,18 @@ export default function DeviceDetailPage() {
 				<Card size="small" style={{ marginBottom: 12 }}>
 					<Row gutter={[16, 12]}>
 						{/* 基本信息 */}
-						<Col xs={24} sm={12} md={8}>
-							<Space direction="vertical" size={6} style={{ width: '100%' }}>
-								<Space wrap size={8}>
-									<Text strong style={{ fontSize: 14 }}>{device.name || '-'}</Text>
-									<Tag color="blue">{device.code}</Tag>
-									<Tag color={device.is_active === false ? 'red' : 'green'}>
-										{device.is_active === false ? '未激活' : '已激活'}
-									</Tag>
+							<Col xs={24} sm={12} md={8}>
+								<Space orientation="vertical" size={6} style={{ width: '100%' }}>
+									<Space wrap size={8}>
+										<Text strong style={{ fontSize: 14 }}>{device.name || '-'}</Text>
+										<Tag color="blue">{device.code}</Tag>
+										<Tag color={device.is_active === false ? 'red' : 'green'}>
+											{device.is_active === false ? '未激活' : '已激活'}
+										</Tag>
+									</Space>
+									<Text type="secondary">通道: {channels.length}</Text>
 								</Space>
-								<Text type="secondary">通道: {channels.length}</Text>
-							</Space>
-						</Col>
+							</Col>
 
 						{/* 备注 */}
 						{device.note && (
@@ -810,7 +817,7 @@ export default function DeviceDetailPage() {
 							<Col xs={24} sm={12} md={8}>
 								<div>
 									<Text type="secondary" style={{ fontSize: 12 }}>元数据</Text>
-									<Space direction="vertical" size={2} style={{ width: '100%', marginTop: 4 }}>
+									<Space orientation="vertical" size={2} style={{ width: '100%', marginTop: 4 }}>
 										{Object.entries(device.meta).map(([key, value]) => (
 											<div key={key} style={{ display: 'flex', gap: 8 }}>
 												<Text style={{ fontSize: 12, minWidth: 80 }}>{key}:</Text>
@@ -865,7 +872,7 @@ export default function DeviceDetailPage() {
 														transition: "all 0.3s",
 														background: isSelected ? "rgba(22,119,255,0.02)" : undefined,
 													}}
-													bodyStyle={{ padding: "8px 12px" }}
+													styles={{ body: { padding: "8px 12px" } }}
 												>
 													<Space
 														style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}
@@ -1472,7 +1479,7 @@ export default function DeviceDetailPage() {
 				onCancel={() => setDeviceModalOpen(false)}
 				onOk={submitDevice}
 				okText="保存"
-				destroyOnClose
+				destroyOnHidden
 				confirmLoading={updateDevice.isPending}
 				maskClosable={!updateDevice.isPending}
 			>
@@ -1519,7 +1526,7 @@ export default function DeviceDetailPage() {
 				onCancel={() => setChannelModalOpen(false)}
 				onOk={submitChannel}
 				okText={editingChannel ? "保存" : "创建"}
-				destroyOnClose
+				destroyOnHidden
 				confirmLoading={createChannel.isPending || updateChannel.isPending}
 				maskClosable={!(createChannel.isPending || updateChannel.isPending)}
 			>
@@ -1606,7 +1613,7 @@ export default function DeviceDetailPage() {
 				onCancel={() => setTemplateModalOpen(false)}
 				onOk={submitTemplate}
 				okText={editingTemplate ? "保存" : "创建"}
-				destroyOnClose
+				destroyOnHidden
 				confirmLoading={templateSubmitting || createTemplate.isPending}
 				maskClosable={!(templateSubmitting || createTemplate.isPending)}
 				width={600}
