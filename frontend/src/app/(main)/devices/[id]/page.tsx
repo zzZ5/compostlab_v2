@@ -8,7 +8,9 @@ import {
 	Button,
 	Card,
 	Col,
+	Collapse,
 	DatePicker,
+	Descriptions,
 	Divider,
 	Form,
 	Grid,
@@ -178,8 +180,6 @@ export default function DeviceDetailPage() {
 
 	const effectiveCodes = useMemo(() => {
 		if (selectedCodes.length) return selectedCodes;
-		if (primaryChannel?.code) return [primaryChannel.code];
-		if (metricChannels.length) return [metricChannels[0].code];
 		return [];
 	}, [selectedCodes, primaryChannel, metricChannels]);
 
@@ -199,7 +199,7 @@ export default function DeviceDetailPage() {
 		channels: effectiveCodes.length ? effectiveCodes : null,
 	});
 
-	const points = telemetryQ.data?.data || [];
+	const points = (telemetryQ.isSuccess && effectiveCodes.length > 0) ? (telemetryQ.data?.data || []) : [];
 
 	// ✅ 按时间倒序排列（最新的在前），用于数据表展示
 	const pointsDesc = useMemo(() => {
@@ -652,16 +652,15 @@ export default function DeviceDetailPage() {
 	}, [channels]);
 	const channelColumns: any[] = [
 		{
-			title: "Code",
-			dataIndex: "code",
-			key: "code",
-			render: (v: string, r: Channel) => {
+			title: "名称",
+			key: "name",
+			render: (_: any, r: Channel) => {
 				const displayName = getChannelDisplayName(r);
 				return (
 					<Space orientation="vertical" size={0}>
-						<Text strong>{v}</Text>
+						<Text strong>{displayName}</Text>
 						<Text type="secondary" style={{ fontSize: 12 }}>
-							{displayName}
+							{r.code}
 						</Text>
 					</Space>
 				);
@@ -763,6 +762,66 @@ export default function DeviceDetailPage() {
 				</Space>
 			}
 		>
+			{/* 设备信息展示区 */}
+			{device && (
+				<Card style={{ marginBottom: 16 }}>
+					<Descriptions
+						title="设备信息"
+						bordered
+						column={{ xs: 1, sm: 2, md: 3 }}
+						size="small"
+					>
+						<Descriptions.Item label="设备名称">{device.name || '-'}</Descriptions.Item>
+						<Descriptions.Item label="设备代码">
+							<Tag color="blue">{device.code}</Tag>
+						</Descriptions.Item>
+						<Descriptions.Item label="状态">
+							<Tag color={device.is_active === false ? 'red' : 'green'}>
+								{device.is_active === false ? '未激活' : '已激活'}
+							</Tag>
+						</Descriptions.Item>
+						<Descriptions.Item label="发布主题">{device.post_topic || '-'}</Descriptions.Item>
+						<Descriptions.Item label="响应主题">{device.response_topic || '-'}</Descriptions.Item>
+						<Descriptions.Item label="通道数量">{channels.length}</Descriptions.Item>
+					</Descriptions>
+
+					{/* Note 和 Meta 折叠区域 */}
+					{(device.note || (device.meta && Object.keys(device.meta).length > 0)) && (
+						<Collapse
+							size="small"
+							style={{ marginTop: 12 }}
+							items={[
+								...(device.note ? [{
+									key: 'note',
+									label: <Text strong>备注</Text>,
+									children: (
+										<Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>
+											{device.note}
+										</Text>
+									),
+								}] : []),
+								...(device.meta && Object.keys(device.meta).length > 0 ? [{
+									key: 'meta',
+									label: <Text strong>元数据</Text>,
+									children: (
+										<Space direction="vertical" size={4} style={{ width: '100%' }}>
+											{Object.entries(device.meta).map(([key, value]) => (
+												<div key={key} style={{ display: 'flex', gap: 8 }}>
+													<Text strong style={{ minWidth: 100 }}>{key}:</Text>
+													<Text type="secondary">
+														{typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+													</Text>
+												</div>
+											))}
+										</Space>
+									),
+								}] : []),
+							]}
+						/>
+					)}
+				</Card>
+			)}
+
 			<Tabs
 				defaultActiveKey="telemetry"
 				items={[
@@ -788,8 +847,10 @@ export default function DeviceDetailPage() {
 												<Card
 													hoverable
 													onClick={() => {
-														setActiveMetric(g.key);
-														setSelectedCodes([]);
+														// 只切换 metric，不重置 selectedCodes
+														if (activeMetric !== g.key) {
+															setActiveMetric(g.key);
+														}
 													}}
 													style={{
 														cursor: "pointer",
@@ -810,16 +871,44 @@ export default function DeviceDetailPage() {
 														}}>
 															{g.label}
 														</Text>
-														<Tag color={isSelected ? metricColor : "default"} style={{ margin: 0 }}>
-															{g.channels.length} 通道
-														</Tag>
+														<Space size={4}>
+															<Tag color={isSelected ? metricColor : "default"} style={{ margin: 0 }}>
+																{g.channels.length} 通道
+															</Tag>
+															<Button
+																size="small"
+																type="text"
+																onClick={(e) => {
+																	e.stopPropagation();
+																	// 判断当前是否已全选
+																	const allCodes = g.channels.map(c => c.code);
+																	const allSelected = allCodes.every(code => selectedCodes.includes(code));
+																	if (allSelected) {
+																		// 全不选
+																		setSelectedCodes(selectedCodes.filter(c => !allCodes.includes(c)));
+																	} else {
+																		// 全选
+																		const newCodes = new Set(selectedCodes);
+																		allCodes.forEach(code => newCodes.add(code));
+																		setSelectedCodes(Array.from(newCodes));
+																	}
+																}}
+																style={{ padding: "0 4px", fontSize: 11, height: "auto", lineHeight: "20px" }}
+															>
+																{(() => {
+																	const allCodes = g.channels.map(c => c.code);
+																	const allSelected = allCodes.every(code => selectedCodes.includes(code));
+																	return allSelected ? "全不选" : "全选";
+																})()}
+															</Button>
+														</Space>
 													</Space>
 
 													<div
 														style={{
 															display: "grid",
 															gap: 4,
-															maxHeight: 160,
+															maxHeight: 180,
 															overflowY: g.channels.length > 6 ? "auto" : "visible",
 															paddingRight: g.channels.length > 6 ? 4 : 0,
 														}}
@@ -831,10 +920,19 @@ export default function DeviceDetailPage() {
 																	? l.value
 																	: ch.latest?.value;
 															const u = ch.unit || l?.unit || "";
+															const isCodeSelected = selectedCodes.includes(ch.code);
 
 															return (
 																<div
 																	key={ch.code}
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		// 切换 channel 选中状态（多选）
+																		const newCodes = selectedCodes.includes(ch.code)
+																			? selectedCodes.filter(c => c !== ch.code)
+																			: [...selectedCodes, ch.code];
+																		setSelectedCodes(newCodes);
+																	}}
 																	style={{
 																		display: "flex",
 																		justifyContent: "space-between",
@@ -842,14 +940,16 @@ export default function DeviceDetailPage() {
 																		alignItems: "center",
 																		padding: "6px 8px",
 																		borderRadius: 4,
-																		background: "#fafafa",
+																		background: isCodeSelected ? `rgba(${parseInt(metricColor.slice(1, 3), 16)}, ${parseInt(metricColor.slice(3, 5), 16)}, ${parseInt(metricColor.slice(5, 7), 16)}, 0.1)` : "#fafafa",
+																		border: isCodeSelected ? `1px solid ${metricColor}` : "1px solid transparent",
 																		transition: "all 0.2s",
+																		cursor: "pointer",
 																	}}
 																	onMouseEnter={(e) => {
 																		e.currentTarget.style.background = "#f0f5ff";
 																	}}
 																	onMouseLeave={(e) => {
-																		e.currentTarget.style.background = "#fafafa";
+																		e.currentTarget.style.background = isCodeSelected ? `rgba(${parseInt(metricColor.slice(1, 3), 16)}, ${parseInt(metricColor.slice(3, 5), 16)}, ${parseInt(metricColor.slice(5, 7), 16)}, 0.1)` : "#fafafa";
 																	}}
 																>
 																	<Text
@@ -882,18 +982,18 @@ export default function DeviceDetailPage() {
 														})}
 													</div>
 
-													<Space style={{ width: "100%", marginTop: 8 }}>
-														<div style={{ flex: 1 }} />
+													<div style={{ width: "100%", marginTop: 8, paddingTop: 8, borderTop: "1px solid #f0f0f0" }}>
 														<Text
 															type="secondary"
 															style={{
 																fontSize: 11,
 																color: "#999",
+																whiteSpace: "nowrap",
 															}}
 														>
 															{latestQ.isFetching ? "加载中..." : latestTs ? `更新: ${latestTs}` : "暂无数据"}
 														</Text>
-													</Space>
+													</div>
 												</Card>
 											</Col>
 										);
@@ -1021,7 +1121,16 @@ export default function DeviceDetailPage() {
 																scroll={{ x: 900 }}
 																columns={[
 																	{ title: "时间", dataIndex: "ts", key: "ts", width: 180 },
-																	{ title: "通道", dataIndex: "code", key: "code", width: 160 },
+																	{
+																		title: "通道",
+																		dataIndex: "code",
+																		key: "code",
+																		width: 160,
+																		render: (code: string) => {
+																			const ch = channels.find(c => c.code === code);
+																			return ch ? getChannelDisplayName(ch) : code;
+																		},
+																	},
 																	{
 																		title: "数值",
 																		dataIndex: "value",
@@ -1053,10 +1162,13 @@ export default function DeviceDetailPage() {
 															/>
 														),
 													},
-													...effectiveCodes.map((code) => ({
-														key: code,
-														label: `${code} (${pointsDesc.filter((p: any) => p.code === code).length})`,
-														children: (
+													...effectiveCodes.map((code) => {
+														const ch = channels.find(c => c.code === code);
+														const displayName = ch ? getChannelDisplayName(ch) : code;
+														return {
+															key: code,
+															label: `${displayName} (${pointsDesc.filter((p: any) => p.code === code).length})`,
+															children: (
 															<Table
 																size="small"
 																rowKey={(r: any) => `${r.code}-${r.ts}-${r.value}`}
@@ -1100,7 +1212,8 @@ export default function DeviceDetailPage() {
 																]}
 															/>
 														),
-													})),
+													};
+													}),
 												]}
 											/>
 											</Space>
@@ -1346,7 +1459,7 @@ export default function DeviceDetailPage() {
 				onCancel={() => setDeviceModalOpen(false)}
 				onOk={submitDevice}
 				okText="保存"
-				destroyOnHidden
+				destroyOnClose
 				confirmLoading={updateDevice.isPending}
 				maskClosable={!updateDevice.isPending}
 			>
@@ -1380,7 +1493,7 @@ export default function DeviceDetailPage() {
 
 					<Divider style={{ margin: "8px 0" }} />
 					<Text strong>meta（Key-Value）</Text>
-					<Form.Item name="meta" style={{ marginTop: 8 }}>
+					<Form.Item name="meta" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 					</Form.Item>
 				</Form>
@@ -1393,7 +1506,7 @@ export default function DeviceDetailPage() {
 				onCancel={() => setChannelModalOpen(false)}
 				onOk={submitChannel}
 				okText={editingChannel ? "保存" : "创建"}
-				destroyOnHidden
+				destroyOnClose
 				confirmLoading={createChannel.isPending || updateChannel.isPending}
 				maskClosable={!(createChannel.isPending || updateChannel.isPending)}
 			>
@@ -1467,7 +1580,7 @@ export default function DeviceDetailPage() {
 
 					<Divider style={{ margin: "8px 0" }} />
 					<Text strong>meta（Key-Value）</Text>
-					<Form.Item name="meta" style={{ marginTop: 8 }}>
+					<Form.Item name="meta" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 					</Form.Item>
 				</Form>
@@ -1480,7 +1593,7 @@ export default function DeviceDetailPage() {
 				onCancel={() => setTemplateModalOpen(false)}
 				onOk={submitTemplate}
 				okText={editingTemplate ? "保存" : "创建"}
-				destroyOnHidden
+				destroyOnClose
 				confirmLoading={templateSubmitting || createTemplate.isPending}
 				maskClosable={!(templateSubmitting || createTemplate.isPending)}
 				width={600}
