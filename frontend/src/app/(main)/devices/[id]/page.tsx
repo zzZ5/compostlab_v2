@@ -24,6 +24,7 @@ import {
 	Tag,
 	Typography,
 	message,
+	Statistic,
 } from "antd";
 import dayjs from "dayjs";
 
@@ -52,6 +53,28 @@ import { MetricKey, getChannelDisplayName } from "@/lib/metrics";
 import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey, sortChannels } from "@/lib/channelGroups";
 
 import type { Channel } from "@/types/api";
+
+// Metric 颜色映射（简洁配色）
+function getMetricColor(metric: MetricKey): string {
+	const colors: Record<MetricKey, string> = {
+		temperature: "#1890ff",  // 蓝色 - 温度
+		o2: "#52c41a",          // 绿色 - 氧气
+		co2: "#fa8c16",         // 橙色 - CO2
+		ch4: "#eb2f96",          // 粉色 - 甲烷
+		nh3: "#722ed1",          // 紫色 - 氨气
+		moisture: "#13c2c2",     // 青色 - 水分
+		humidity: "#13c2c2",     // 青色 - 湿度
+		ph: "#faad14",           // 黄色 - pH
+		pressure: "#fadb14",      // 黄色 - 压力
+		flow: "#52c41a",          // 绿色 - 流量
+		speed: "#1890ff",         // 蓝色 - 速度
+		voltage: "#fa8c16",       // 橙色 - 电压
+		current: "#722ed1",       // 紫色 - 电流
+		power: "#eb2f96",        // 粉色 - 功率
+		unknown: "#d9d9d9",
+	};
+	return colors[metric] || colors.unknown;
+}
 
 const { Text } = Typography;
 
@@ -183,6 +206,16 @@ export default function DeviceDetailPage() {
 		});
 	}, [points]);
 
+	// 创建 code -> displayName 的映射
+	const channelDisplayNameMap = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const ch of channels) {
+			const displayName = getChannelDisplayName(ch);
+			map.set(ch.code, displayName);
+		}
+		return map;
+	}, [channels]);
+
 	const chartOption = useMemo(() => {
 		// group by code
 		const byCode = new Map<string, Array<[string, number]>>();
@@ -206,10 +239,11 @@ export default function DeviceDetailPage() {
 		const enableSlider = uniqueTs.size >= 6;
 
 		const series = Array.from(byCode.entries()).map(([code, data]) => ({
-			name: code,
+			name: channelDisplayNameMap.get(code) || code,
 			type: "line",
-			// 只有一个点时显示 symbol，避免"什么都没有"
+			smooth: true,
 			showSymbol: data.length <= 1,
+			symbolSize: 4,
 			data,
 		}));
 
@@ -224,7 +258,23 @@ export default function DeviceDetailPage() {
 			: [];
 
 		return {
-			tooltip: { trigger: "axis" },
+			tooltip: {
+				trigger: "axis",
+				formatter: (params: any) => {
+					if (!Array.isArray(params) || params.length === 0) return '';
+					const time = params[0].axisValue;
+					let html = `<div style="margin-bottom: 4px; font-weight: bold;">${time}</div>`;
+					params.forEach((p: any) => {
+						const value = typeof p.value === 'number' ? p.value.toFixed(2) : p.value;
+						html += `<div style="display: flex; align-items: center; margin: 2px 0;">
+							<span style="display: inline-block; width: 10px; height: 10px; background: ${p.color}; border-radius: 50%; margin-right: 8px;"></span>
+							<span style="flex: 1;">${p.seriesName}</span>
+							<span style="font-weight: bold; margin-left: 12px;">${value}</span>
+						</div>`;
+					});
+					return html;
+				},
+			},
 			legend: { type: "scroll", top: 8, left: 0, right: 0 },
 			grid: {
 				left: 56,
@@ -239,7 +289,7 @@ export default function DeviceDetailPage() {
 			series,
 			dataZoom: dz,
 		};
-	}, [points, isMobile]);
+	}, [points, isMobile, channelDisplayNameMap]);
 
 	// 顶部 KPI：不再预设 4 个传感器，而是按设备实际通道分组展示（温度可多路）
 	const kpiGroups = useMemo(() => {
@@ -726,6 +776,9 @@ export default function DeviceDetailPage() {
 											.sort()
 											.pop();
 
+										const metricColor = getMetricColor(g.key as MetricKey);
+										const isSelected = g.key === activeMetric;
+
 										return (
 											<Col xs={24} sm={12} md={6} key={g.key}>
 												<Card
@@ -736,24 +789,32 @@ export default function DeviceDetailPage() {
 													}}
 													style={{
 														cursor: "pointer",
-														border:
-															g.key === activeMetric
-																? "1px solid rgba(22,119,255,.6)"
-																: undefined,
+														border: isSelected ? `2px solid ${metricColor}` : "1px solid #f0f0f0",
+														borderRadius: 8,
+														transition: "all 0.3s",
+														background: isSelected ? "rgba(22,119,255,0.02)" : undefined,
 													}}
+													bodyStyle={{ padding: "12px 16px" }}
 												>
 													<Space
-														style={{ width: "100%", justifyContent: "space-between" }}
+														style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}
 													>
-														<Text type="secondary">{g.label}</Text>
-														<Tag>{g.channels.length} 通道</Tag>
+														<Text style={{
+															fontSize: 14,
+															fontWeight: 600,
+															color: isSelected ? metricColor : undefined
+														}}>
+															{g.label}
+														</Text>
+														<Tag color={isSelected ? metricColor : "default"} style={{ margin: 0 }}>
+															{g.channels.length} 通道
+														</Tag>
 													</Space>
 
 													<div
 														style={{
-															marginTop: 8,
 															display: "grid",
-															gap: 3,
+															gap: 4,
 															maxHeight: 160,
 															overflowY: g.channels.length > 6 ? "auto" : "visible",
 															paddingRight: g.channels.length > 6 ? 4 : 0,
@@ -773,8 +834,18 @@ export default function DeviceDetailPage() {
 																	style={{
 																		display: "flex",
 																		justifyContent: "space-between",
-																		gap: 10,
+																		gap: 8,
 																		alignItems: "center",
+																		padding: "6px 8px",
+																		borderRadius: 4,
+																		background: "#fafafa",
+																		transition: "all 0.2s",
+																	}}
+																	onMouseEnter={(e) => {
+																		e.currentTarget.style.background = "#f0f5ff";
+																	}}
+																	onMouseLeave={(e) => {
+																		e.currentTarget.style.background = "#fafafa";
 																	}}
 																>
 																	<Text
@@ -786,28 +857,39 @@ export default function DeviceDetailPage() {
 																			overflow: "hidden",
 																			textOverflow: "ellipsis",
 																			whiteSpace: "nowrap",
+																			color: "#666",
 																		}}
 																	>
 																		{getChannelDisplayName(ch)}
 																	</Text>
-																	<span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+																	<Text style={{
+																		fontSize: 13,
+																		fontWeight: 600,
+																		color: "#262626",
+																		whiteSpace: "nowrap",
+																	}}>
 																		{v !== undefined && v !== null ? v : "-"}{" "}
-																		{u}
-																	</span>
+																		<Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>
+																			{u}
+																		</Text>
+																	</Text>
 																</div>
 															);
 														})}
 													</div>
 
-													<div
-														style={{
-															fontSize: 12,
-															color: "rgba(0,0,0,.45)",
-															marginTop: 6,
-														}}
-													>
-														{latestTs || (latestQ.isFetching ? "加载中..." : "-")}
-													</div>
+													<Space style={{ width: "100%", marginTop: 8 }}>
+														<div style={{ flex: 1 }} />
+														<Text
+															type="secondary"
+															style={{
+																fontSize: 11,
+																color: "#999",
+															}}
+														>
+															{latestQ.isFetching ? "加载中..." : latestTs ? `更新: ${latestTs}` : "暂无数据"}
+														</Text>
+													</Space>
 												</Card>
 											</Col>
 										);

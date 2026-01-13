@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Button, Input, InputNumber, Select, Space, Switch, Tag, Tooltip, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 
@@ -30,29 +30,17 @@ export default function KeyValueEditor({
 }: Props) {
 	const [rows, setRows] = useState<KVRow[]>(() => objectToKVPairs(value));
 	const [warnings, setWarnings] = useState<string[]>([]);
+	const isInternalUpdateRef = useRef(false);
 
 	// sync when external value changes (modal open / edit switch)
 	useEffect(() => {
-		setRows(objectToKVPairs(value));
-		setWarnings([]);
+		if (!isInternalUpdateRef.current) {
+			setRows(objectToKVPairs(value));
+			setWarnings([]);
+		}
+		isInternalUpdateRef.current = false;
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [JSON.stringify(value || {})]);
-
-	// keep at least minRows empty rows
-	useEffect(() => {
-		if (minRows <= 0) return;
-		setRows((prev) => {
-			const p = prev || [];
-			if (p.length >= minRows) return p;
-			const fill = Array.from({ length: minRows - p.length }).map(() => ({
-				id: uid(),
-				key: "",
-				type: "string" as KVType,
-				value: "",
-			}));
-			return [...p, ...fill];
-		});
-	}, [minRows]);
+	}, [value]);
 
 	const preview = useMemo(() => {
 		const { obj, warnings } = kvPairsToObject(rows);
@@ -61,6 +49,7 @@ export default function KeyValueEditor({
 
 	useEffect(() => {
 		setWarnings(preview.warnings);
+		isInternalUpdateRef.current = true;
 		onChange?.(preview.obj);
 	}, [preview.obj, preview.warnings, onChange]);
 

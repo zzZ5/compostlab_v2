@@ -44,7 +44,7 @@ export function useRunTelemetry(args: {
 			const qs = buildQuery({
 				from,
 				to,
-				channels: channels && channels.length ? channels : null,
+				channels: channels && channels.length > 0 ? channels : null,
 				bucket,
 				group,
 				treatment,
@@ -52,6 +52,6 @@ export function useRunTelemetry(args: {
 			const res = await api.get<RunTelemetryResp>(`/runs/${runId}/telemetry${qs}`);
 			return res.data;
 		},
-		enabled: Number.isFinite(runId),
+		enabled: Number.isFinite(runId) && (channels === undefined || channels === null || channels.length > 0),
 	});
 }

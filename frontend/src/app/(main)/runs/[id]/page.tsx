@@ -235,7 +235,7 @@ export default function RunDetailPage() {
 	}
 
 	// metric & time
-	const [activeMetric, setActiveMetric] = useState<MetricKey>("temperature");
+	const [activeMetrics, setActiveMetrics] = useState<Set<MetricKey>>(new Set(["temperature"]));
 	const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
 	const [selectedWindowId, setSelectedWindowId] = useState<number | null>(null);
 	const [range, setRange] = useState<[any, any] | null>(null);
@@ -307,25 +307,15 @@ export default function RunDetailPage() {
 
 	// 按 metric 分组的 channels
 	const channelsByMetric = useMemo(() => {
-		const map = new Map<MetricKey, typeof allChannels>();
-		const metricOrder: MetricKey[] = ["temperature", "o2", "co2", "ch4", "nh3", "moisture", "humidity", "ph", "pressure", "flow", "speed", "voltage", "current", "power"];
+		const map = new Map<string, typeof allChannels>();
 
-		// 初始化所有 metric
-		for (const m of metricOrder) {
-			map.set(m, []);
-		}
-
-		// 分配 channels
+		// 分配 channels（包括 switch 等所有 metric）
 		for (const ch of allChannels) {
-			const metric = normalizeMetric(ch.metric) as MetricKey;
-			if (metric !== "unknown" && map.has(metric)) {
-				map.get(metric)!.push(ch);
+			const metric = ch.metric || "unknown";
+			if (!map.has(metric)) {
+				map.set(metric, []);
 			}
-		}
-
-		// 移除空的 metric
-		for (const [key, val] of map) {
-			if (val.length === 0) map.delete(key);
+			map.get(metric)!.push(ch);
 		}
 
 		return map;
@@ -345,26 +335,17 @@ export default function RunDetailPage() {
 
 	// 可用的 metrics
 	const availableMetrics = useMemo(() => {
-		return Array.from(channelsByMetric.keys());
+		return Array.from(channelsByMetric.keys()).sort();
 	}, [channelsByMetric]);
 
-	// 初始化 selectedChannels（第一次加载时默认选中当前 metric 的所有 channels）
+	// 当选中 Window 时，自动选中该 Window 的所有 channels
+	// 当 activeMetrics 变化时，仅清空 selectedChannels，不自动选中
 	useEffect(() => {
-		if (selectedChannels.size === 0 && allChannels.length > 0 && availableMetrics.length > 0) {
-			const firstMetric = availableMetrics[0];
-			const channelsForMetric = channelsByMetric.get(firstMetric) || [];
-			setSelectedChannels(new Set(channelsForMetric.map(ch => ch.code)));
-			setActiveMetric(firstMetric);
+		// activeMetrics 变化时清空通道选择，让用户自己选择
+		if (activeMetrics.size > 0) {
+			// 不自动选中，保持手动选择
 		}
-	}, [allChannels, availableMetrics, channelsByMetric]);
-
-	// 当切换 metric 时，清空并选中该 metric 的所有 channels
-	useEffect(() => {
-		if (availableMetrics.includes(activeMetric)) {
-			const channelsForMetric = channelsByMetric.get(activeMetric) || [];
-			setSelectedChannels(new Set(channelsForMetric.map(ch => ch.code)));
-		}
-	}, [activeMetric, channelsByMetric, availableMetrics]);
+	}, [activeMetrics]);
 
 	// 当前选中的 codes
 	const selectedCodes = useMemo(() => {
@@ -373,15 +354,15 @@ export default function RunDetailPage() {
 
 	const telemetryQ = useRunTelemetry({
 		runId,
-		from,
-		to,
+		from: selectedWindowId ? null : from, // 选中 Window 时使用 Window 的时间范围
+		to: selectedWindowId ? null : to,
 		bucket: bucket ? bucket : null, // raw -> null
-		group,
-		treatment,
-		channels: selectedCodes.length ? selectedCodes : null,
+		group: selectedWindowId ? null : group, // 选中 Window 时忽略 group 筛选
+		treatment: selectedWindowId ? null : treatment,
+		channels: selectedCodes.length > 0 ? selectedCodes : [],
 	});
 
-	const points = telemetryQ.data?.data || [];
+	const points = (telemetryQ.isSuccess && telemetryQ.data?.data && selectedCodes.length > 0) ? telemetryQ.data.data : [];
 
 	// options from windows (不受当前筛选限制)
 	const groupOptions: Opt[] = useMemo(() => {
@@ -402,19 +383,24 @@ export default function RunDetailPage() {
 
 	const chartOption = useMemo(() => {
 		// ✅ 支持多设备：按 "device_id:code" 分组，避免不同设备的相同 code 混在一起
-		const byKey = new Map<string, { name: string; data: Array<[string, number]> }>();
+		const byKey = new Map<string, { name: string; data: Array<[string, number]>; metric: string }>();
 		for (const p of points as any[]) {
 			const code = p.code || "UNKNOWN";
-			const deviceId = (p as any).device_id || "unknown";
-			const key = `${deviceId}:${code}`;
+			const deviceId = p.device_id;
+			if (deviceId == null) continue;
+			const key = `${Number(deviceId)}:${code}`;
 			const v = typeof p.value === "number" ? p.value : Number(p.value);
 			if (!Number.isFinite(v)) continue;
 
 			// 从预先构建的映射中获取显示名称（使用 displayName）
 			const label = channelDisplayNameMap.get(key) || `${deviceId}:${code}`;
 
+			// 获取该 channel 的 metric
+			const channel = allChannels.find((ch) => ch.deviceId === deviceId && ch.code === code);
+			const metric = channel?.metric || "unknown";
+
 			if (!byKey.has(key)) {
-				byKey.set(key, { name: label, data: [] });
+				byKey.set(key, { name: label, data: [], metric });
 			}
 			byKey.get(key)!.data.push([p.ts, v]);
 		}
@@ -430,7 +416,18 @@ export default function RunDetailPage() {
 		// 数据点太少时 slider 容易把布局挤乱（尤其是只有 1-2 个点/不成线时）；设更稳阈值
 		const enableSlider = uniqueTs.size >= 6;
 
-		const series = Array.from(byKey.values());
+		const series = Array.from(byKey.values()).map((s) => {
+			// 根据 metric 类型决定图表类型
+			const isSwitch = s.metric === "switch";
+			return {
+				name: s.name,
+				type: isSwitch ? "bar" : "line",
+				smooth: !isSwitch,
+				showSymbol: s.data.length <= 1,
+				symbolSize: 4,
+				data: s.data,
+			};
+		});
 
 		// 说明：默认 slider dataZoom 会占用底部空间，若 grid.bottom 太小，
 		// 会造成 x 轴时间标签与 dataZoom/legend 视觉重叠。
@@ -468,15 +465,10 @@ export default function RunDetailPage() {
 			},
 			xAxis: { type: "time", axisLabel: { hideOverlap: true, margin: 6 } },
 			yAxis: { type: "value" },
-			series: series.map((s) => ({
-				name: s.name,
-				type: "line",
-				showSymbol: s.data.length <= 1,
-				data: s.data,
-			})),
+			series,
 			dataZoom: dz,
 		};
-	}, [points, isMobile, channelDisplayNameMap]);
+	}, [points, isMobile, channelDisplayNameMap, allChannels]);
 
 	async function exportRunRaw() {
 		try {
@@ -584,102 +576,127 @@ export default function RunDetailPage() {
 			<Row gutter={[12, 12]}>
 				<Col xs={24}>
 					<Card size="small" title="Run 信息">
-						<Row gutter={[16, 12]}>
-							<Col xs={12} sm={6} md={4}>
-								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>ID</Text>
-									<div style={{ marginTop: 2 }}>
-										<Tag color="blue">{runId}</Tag>
-									</div>
+						<Space size="middle" wrap style={{ width: "100%" }}>
+							{/* ID */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>ID</Text>
+								<div style={{ marginTop: 2 }}>
+									<Tag color="blue">{runId}</Tag>
 								</div>
-							</Col>
-							<Col xs={12} sm={6} md={4}>
-								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>状态</Text>
-									<div style={{ marginTop: 2 }}>
-										{!run.start_at ? (
-											<Tag color="default">未开始</Tag>
-										) : run.end_at ? (
-											<Tag color="success">已结束</Tag>
-										) : (
-											<Tag color="processing">进行中</Tag>
-										)}
-									</div>
+							</div>
+
+							{/* 名称 */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>名称</Text>
+								<div style={{ marginTop: 2, fontSize: 13, fontWeight: 500 }}>
+									{run.name || "-"}
 								</div>
-							</Col>
-							<Col xs={12} sm={6} md={4}>
-								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>时长</Text>
-									<div style={{ marginTop: 2 }}>
-										{(() => {
-											if (!run.start_at) return "-";
-											const start = dayjs(run.start_at);
-											const end = run.end_at ? dayjs(run.end_at) : dayjs();
-											const minutes = end.diff(start, "minute");
-											if (minutes <= 0) return "-";
-											const hours = Math.floor(minutes / 60);
-											const mins = minutes % 60;
-											if (hours === 0) return `${mins} 分钟`;
-											if (mins === 0) return `${hours} 小时`;
-											return `${hours} 小时 ${mins} 分钟`;
-										})()}
-									</div>
+							</div>
+
+							{/* 状态 */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>状态</Text>
+								<div style={{ marginTop: 2 }}>
+									{!run.start_at ? (
+										<Tag color="default">未开始</Tag>
+									) : run.end_at ? (
+										<Tag color="success">已结束</Tag>
+									) : (
+										<Tag color="processing">进行中</Tag>
+									)}
 								</div>
-							</Col>
-							<Col xs={12} sm={6} md={4}>
-								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>开始</Text>
-									<div style={{ marginTop: 2, fontSize: 13 }}>{run.start_at || "-"}</div>
+							</div>
+
+							{/* 时长 */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>时长</Text>
+								<div style={{ marginTop: 2, fontSize: 13 }}>
+									{(() => {
+										if (!run.start_at) return "-";
+										const start = dayjs(run.start_at);
+										const end = run.end_at ? dayjs(run.end_at) : dayjs();
+										const minutes = end.diff(start, "minute");
+										if (minutes <= 0) return "-";
+										const hours = Math.floor(minutes / 60);
+										const mins = minutes % 60;
+										if (hours === 0) return `${mins} 分钟`;
+										if (mins === 0) return `${hours} 小时`;
+										return `${hours} 小时 ${mins} 分钟`;
+									})()}
 								</div>
-							</Col>
-							<Col xs={12} sm={6} md={4}>
-								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>结束</Text>
-									<div style={{ marginTop: 2, fontSize: 13 }}>{run.end_at || "-"}</div>
+							</div>
+
+							{/* 时间范围 */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>时间范围</Text>
+								<div style={{ marginTop: 2, fontSize: 12 }}>
+									{run.start_at || "-"} ~ {run.end_at || "-"}
 								</div>
-							</Col>
-							{run.note && (
-								<Col xs={24} md={4}>
-									<div>
-										<Text type="secondary" style={{ fontSize: 11 }}>备注</Text>
-										<div style={{ marginTop: 2, fontSize: 12 }}>{run.note}</div>
-									</div>
-								</Col>
-							)}
-						</Row>
-					</Card>
-				</Col>
-				<Col xs={24}>
-					<Card size="small" title="Run 与 Window/设备关联">
-						<Row gutter={[16, 12]}>
-							<Col xs={8} sm={6} md={4}>
-								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>Windows</Text>
-									<div style={{ marginTop: 2 }}>
-										<Tag color="purple" style={{ fontSize: 14, padding: "2px 8px" }}>
-											{windows.length} 个
-										</Tag>
-									</div>
+							</div>
+
+							{/* Windows 数量 */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>Windows</Text>
+								<div style={{ marginTop: 2 }}>
+									<Tag color="green">{windows.length} 个</Tag>
 								</div>
-							</Col>
-							<Col xs={16} sm={18} md={20}>
+							</div>
+
+							{/* 设备数量 */}
+							<div>
+								<Text type="secondary" style={{ fontSize: 11 }}>设备</Text>
+								<div style={{ marginTop: 2 }}>
+									<Tag color="purple">{windowDevices.length} 个</Tag>
+								</div>
+							</div>
+
+							{/* Recipe */}
+							{run.recipe && Object.keys(run.recipe).length > 0 && (
 								<div>
-									<Text type="secondary" style={{ fontSize: 11 }}>设备</Text>
+									<Text type="secondary" style={{ fontSize: 11 }}>Recipe</Text>
 									<div style={{ marginTop: 2 }}>
 										<Space size={4} wrap>
-											<Tag color="green" style={{ fontSize: 14, padding: "2px 8px" }}>
-												{windowDevices.length} 个
-											</Tag>
-											{windowDevices.map((d: any) => (
-												<Tag key={d.device_id} color="blue" style={{ margin: 0, fontSize: 12 }}>
-													{d.code}
+											{Object.entries(run.recipe).map(([key, value]) => (
+												<Tag key={key} color="cyan" style={{ fontSize: 11 }}>
+													{key}: {String(value)}
 												</Tag>
 											))}
 										</Space>
 									</div>
 								</div>
-							</Col>
-						</Row>
+							)}
+
+							{/* Settings */}
+							{run.settings && Object.keys(run.settings).length > 0 && (
+								<div>
+									<Text type="secondary" style={{ fontSize: 11 }}>Settings</Text>
+									<div style={{ marginTop: 2 }}>
+										<Space size={4} wrap>
+											{Object.entries(run.settings).slice(0, 5).map(([key, value]) => (
+												<Tag key={key} color="orange" style={{ fontSize: 11 }}>
+													{key}: {String(value)}
+												</Tag>
+											))}
+											{Object.keys(run.settings).length > 5 && (
+												<Tag color="orange" style={{ fontSize: 11 }}>
+													+{Object.keys(run.settings).length - 5} more
+												</Tag>
+											)}
+										</Space>
+									</div>
+								</div>
+							)}
+
+							{/* 备注 */}
+							{run.note && (
+								<div style={{ flex: 1, minWidth: 200 }}>
+									<Text type="secondary" style={{ fontSize: 11 }}>备注</Text>
+									<div style={{ marginTop: 2, fontSize: 12, color: "#595959" }}>
+										{run.note}
+									</div>
+								</div>
+							)}
+						</Space>
 					</Card>
 				</Col>
 				<Col xs={24}>
@@ -718,6 +735,7 @@ export default function RunDetailPage() {
 												value={group}
 												onChange={(v) => setGroup((v as string) ?? null)}
 												options={groupOptions}
+												disabled={selectedWindowId !== null}
 											/>
 											<Text type="secondary" style={{ marginLeft: 8 }}>treatment:</Text>
 											<Select
@@ -727,7 +745,13 @@ export default function RunDetailPage() {
 												value={treatment}
 												onChange={(v) => setTreatment((v as string) ?? null)}
 												options={treatmentOptions}
+												disabled={selectedWindowId !== null}
 											/>
+											{selectedWindowId && (
+												<Button size="small" onClick={() => setSelectedWindowId(null)}>
+													清除选中 Window
+												</Button>
+											)}
 										</Space>
 										<Divider style={{ margin: "8px 0" }} />
 
@@ -746,13 +770,15 @@ export default function RunDetailPage() {
 														const devicesForWindow = (w.device_ids || [])
 															.map((did: number) => deviceMap.get(did))
 															.filter(Boolean);
-																return (
+														return (
 															<Col xs={24} md={12} lg={24} key={w.window_id}>
 																<Card
 																	size="small"
 																	style={{
 																		border: selectedWindowId === w.window_id ? "2px solid #1890ff" : undefined,
 																		cursor: "pointer",
+																		transition: "all 0.3s",
+																		background: selectedWindowId === w.window_id ? "rgba(24, 144, 255, 0.03)" : undefined,
 																	}}
 																	onClick={() => setSelectedWindowId(w.window_id)}
 																	title={
@@ -774,15 +800,17 @@ export default function RunDetailPage() {
 																			</Space>
 																		) : null
 																	}
+																	bodyStyle={{ padding: "8px 12px" }}
 																>
-																	<div style={{ marginBottom: 6 }}>
-																		<Text type="secondary" style={{ fontSize: 11 }}>关联设备</Text>
+																	{/* 关联设备信息 */}
+																	<div style={{ marginBottom: 8 }}>
+																		<Text type="secondary" style={{ fontSize: 11 }}>关联设备 ({devicesForWindow.length})</Text>
 																		<div style={{ marginTop: 4 }}>
 																			{devicesForWindow.length > 0 ? (
 																				<Space size={4} wrap>
 																					{devicesForWindow.map((d: any) => (
 																						<Tag key={d.device_id} color="green" style={{ margin: 0, fontSize: 12 }}>
-																							{d.code}
+																							{d.code}{d.name ? ` · ${d.name}` : ""}
 																						</Tag>
 																					))}
 																				</Space>
@@ -791,6 +819,16 @@ export default function RunDetailPage() {
 																			)}
 																		</div>
 																	</div>
+
+																	{/* 备注信息 */}
+																	{w.note && (
+																		<div>
+																			<Text type="secondary" style={{ fontSize: 11 }}>备注</Text>
+																			<div style={{ marginTop: 2, fontSize: 12, color: "#595959" }}>
+																				{w.note}
+																			</div>
+																		</div>
+																	)}
 																</Card>
 															</Col>
 														);
@@ -822,21 +860,21 @@ export default function RunDetailPage() {
 																style={{
 																	border: selectedWindowId === d.device_id ? "2px solid #1890ff" : undefined,
 																	cursor: "pointer",
+																	transition: "all 0.3s",
+																	background: selectedWindowId === d.device_id ? "rgba(24, 144, 255, 0.03)" : undefined,
 																}}
 																onClick={() => setSelectedWindowId(d.device_id)}
 																title={
 																	<Space size={4}>
 																		<Tag color="green">{d.code}</Tag>
+																		{d.name && <Text type="secondary" style={{ fontSize: 12 }}>· {d.name}</Text>}
 																	</Space>
 																}
+																bodyStyle={{ padding: "8px 12px" }}
 															>
-																<div style={{ marginBottom: 6 }}>
-																	<Text type="secondary" style={{ fontSize: 11 }}>
-																		{d.name || d.code}
-																	</Text>
-																</div>
+																{/* 关联 Windows 信息 */}
 																<div>
-																	<Text type="secondary" style={{ fontSize: 11 }}>关联 Windows</Text>
+																	<Text type="secondary" style={{ fontSize: 11 }}>关联 Windows ({windowsForDevice.length})</Text>
 																	<div style={{ marginTop: 4 }}>
 																		{windowsForDevice.length > 0 ? (
 																			<Space size={4} wrap>
@@ -857,6 +895,16 @@ export default function RunDetailPage() {
 																		)}
 																	</div>
 																</div>
+
+																{/* 设备备注 */}
+																{d.note && (
+																	<div style={{ marginTop: 8 }}>
+																		<Text type="secondary" style={{ fontSize: 11 }}>备注</Text>
+																		<div style={{ marginTop: 2, fontSize: 12, color: "#595959" }}>
+																			{d.note}
+																		</div>
+																	</div>
+																)}
 															</Card>
 														</Col>
 													);
@@ -870,8 +918,41 @@ export default function RunDetailPage() {
 
 						{/* 右侧内容区：图表 */}
 						<Col xs={24} xl={16}>
-							<Card title="数据图表">
+							<Card
+								title={selectedWindowId ? `数据图表 - Window #${selectedWindowId}` : "数据图表"}
+								extra={
+									selectedWindowId && (
+										<Space>
+											<Button size="small" onClick={() => setSelectedWindowId(null)}>
+												显示全部
+											</Button>
+										</Space>
+									)
+								}
+							>
 								<Space orientation="vertical" style={{ width: "100%" }} size={12}>
+									{selectedWindowId && (() => {
+										const w = windows.find((win) => win.window_id === selectedWindowId);
+										if (!w) return null;
+										return (
+											<Alert
+												title={
+													<Space>
+														<Text strong>当前选中 Window</Text>
+														<Tag color="purple">#{w.window_id}</Tag>
+														{w.group && <Tag color="blue">{w.group}</Tag>}
+														{w.treatment && <Tag color="orange">{w.treatment}</Tag>}
+													</Space>
+												}
+												description={`时间范围: ${w.start_at || "-"} ~ ${w.end_at || "-"}`}
+												type="info"
+												showIcon
+												closable
+												onClose={() => setSelectedWindowId(null)}
+											/>
+										);
+									})()}
+
 									<Space wrap>
 										<Text type="secondary">start</Text>
 										<Tag>{run.start_at || "-"}</Tag>
@@ -885,6 +966,8 @@ export default function RunDetailPage() {
 											value={range as any}
 											onChange={(v) => setRange(v as any)}
 											style={{ width: isMobile ? "100%" : 380 }}
+											disabled={selectedWindowId !== null}
+											allowEmpty
 											presets={[
 												{ label: "最近1小时", value: [dayjs().subtract(1, "hour"), dayjs()] as any },
 												{ label: "今天", value: [dayjs().startOf("day"), dayjs()] as any },
@@ -904,40 +987,55 @@ export default function RunDetailPage() {
 												{ value: "1h", label: "1h" },
 											]}
 										/>
+										{selectedWindowId && (
+											<Text type="secondary" style={{ fontSize: 11 }}>（已选中 Window，使用 Window 时间范围）</Text>
+										)}
 									</Space>
 
 									{/* Channel 选择区域 */}
 									{allChannels.length > 0 ? (
 										<div style={{ marginBottom: 12 }}>
 											<Space orientation="vertical" style={{ width: "100%" }} size={8}>
-												{/* Metric 选择 */}
+												{/* Metric 选择 - 支持多选 */}
 												<Space align="center" wrap>
-													<Text type="secondary" style={{ marginRight: 8 }}>选择指标：</Text>
-													<Space.Compact>
+													<Text type="secondary" style={{ marginRight: 8 }}>选择指标（可多选）：</Text>
+													<Space wrap>
 														{availableMetrics.map((m) => (
-															<Button
+															<CheckableTag
 																key={m}
-																type={activeMetric === m ? "primary" : "default"}
-																size="small"
-																onClick={() => setActiveMetric(m)}
+																checked={activeMetrics.has(m as MetricKey)}
+																onChange={(checked) => {
+																	const newSet = new Set(activeMetrics);
+																	if (checked) {
+																		newSet.add(m as MetricKey);
+																	} else {
+																		newSet.delete(m as MetricKey);
+																	}
+																	setActiveMetrics(newSet);
+																}}
+																style={{ fontSize: 12 }}
 															>
-																{metricLabel(m)}
-															</Button>
+																{m}
+															</CheckableTag>
 														))}
-													</Space.Compact>
+													</Space>
 												</Space>
 
-												{/* 当前 Metric 的 Channel 选择 */}
-												{channelsByMetric.has(activeMetric) && (
+												{/* Channel 选择 - 显示所有选中 metric 的通道 */}
+												{activeMetrics.size > 0 ? (
 													<>
 														<Divider style={{ margin: "4px 0" }} />
 														<Space align="center" wrap>
 															<Text type="secondary" style={{ marginRight: 8 }}>通道选择：</Text>
 															<Button size="small" onClick={() => {
-																const channels = channelsByMetric.get(activeMetric) || [];
-																setSelectedChannels(new Set(channels.map(ch => ch.code)));
+																const allMetricChannels: string[] = [];
+																for (const m of activeMetrics) {
+																	const channels = channelsByMetric.get(m) || [];
+																	allMetricChannels.push(...channels.map(ch => ch.code));
+																}
+																setSelectedChannels(new Set(allMetricChannels));
 															}}>
-																全选
+																全选所有指标
 															</Button>
 															<Button size="small" onClick={() => setSelectedChannels(new Set())}>
 																清空
@@ -946,31 +1044,43 @@ export default function RunDetailPage() {
 														</Space>
 
 														<div style={{ marginBottom: 8 }}>
-															<Text type="secondary" style={{ fontSize: 12, marginBottom: 4 }}>
-																{metricLabel(activeMetric)} 的通道
-															</Text>
 															<Space size={[4, 8]} wrap>
-																{channelsByMetric.get(activeMetric)?.map((ch) => (
-																	<CheckableTag
-																		key={ch.code}
-																		checked={selectedChannels.has(ch.code)}
-																		onChange={(checked) => {
-																			const newSet = new Set(selectedChannels);
-																			if (checked) {
-																				newSet.add(ch.code);
-																			} else {
-																				newSet.delete(ch.code);
-																			}
-																			setSelectedChannels(newSet);
-																		}}
-																		style={{ fontSize: 11 }}
-																	>
-																		{ch.label}
-																	</CheckableTag>
-																))}
+																{Array.from(activeMetrics).map((m) => {
+																	const channels = channelsByMetric.get(m) || [];
+																	if (channels.length === 0) return null;
+																	return (
+																		<div key={m} style={{ marginRight: 12 }}>
+																			<Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+																				{m} ({channels.length})
+																			</Text>
+																			<Space size={[4, 8]} wrap>
+																				{channels.map((ch) => (
+																					<CheckableTag
+																						key={ch.code}
+																						checked={selectedChannels.has(ch.code)}
+																						onChange={(checked) => {
+																							const newSet = new Set(selectedChannels);
+																							if (checked) {
+																								newSet.add(ch.code);
+																							} else {
+																								newSet.delete(ch.code);
+																							}
+																							setSelectedChannels(newSet);
+																						}}
+																						style={{ fontSize: 11 }}
+																					>
+																						{ch.label}
+																					</CheckableTag>
+																				))}
+																			</Space>
+																		</div>
+																	);
+																})}
 															</Space>
 														</div>
 													</>
+												) : (
+													<Text type="secondary" style={{ fontSize: 12 }}>请先选择至少一个指标</Text>
 												)}
 											</Space>
 										</div>
@@ -987,7 +1097,7 @@ export default function RunDetailPage() {
 
 									<div style={{ height: 420 }}>
 										<ReactECharts
-											key={`${runId}-${selectedCodes.join(",")}-${bucket}-${from || ""}-${to || ""}-${group || ""}-${treatment || ""}`}
+											key={`${runId}-${selectedCodes.join(",")}-${bucket}-${from || ""}-${to || ""}-${group || ""}-${treatment || ""}-${selectedWindowId || ""}`}
 											option={chartOption}
 											notMerge
 											lazyUpdate
@@ -1014,7 +1124,7 @@ export default function RunDetailPage() {
 				onCancel={() => setRunModalOpen(false)}
 				onOk={submitRun}
 				okText="保存"
-				destroyOnHidden
+				destroyOnClose
 				confirmLoading={updateRun.isPending}
 			>
 				<Form layout="vertical" form={runForm}>
@@ -1038,12 +1148,13 @@ export default function RunDetailPage() {
 					</Form.Item>
 
 					<Collapse
+						forceRender
 						items={[
 							{
 								key: "recipe",
 								label: "高级：recipe（Key-Value）",
 								children: (
-									<Form.Item name="recipe" noStyle>
+									<Form.Item name="recipe">
 										<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 									</Form.Item>
 								),
@@ -1052,7 +1163,7 @@ export default function RunDetailPage() {
 								key: "settings",
 								label: "高级：settings（Key-Value）",
 								children: (
-									<Form.Item name="settings" noStyle>
+									<Form.Item name="settings">
 										<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 									</Form.Item>
 								),
@@ -1069,7 +1180,7 @@ export default function RunDetailPage() {
 				onCancel={() => setWindowModalOpen(false)}
 				onOk={submitWindow}
 				okText={editingWindow ? "保存" : "创建"}
-				destroyOnHidden
+				destroyOnClose
 				confirmLoading={createWindow.isPending || updateWindow.isPending}
 			>
 				<Form layout="vertical" form={windowForm}>
@@ -1132,12 +1243,13 @@ export default function RunDetailPage() {
 					</Form.Item>
 
 					<Collapse
+						forceRender
 						items={[
 							{
 								key: "settings",
 								label: "高级：settings（Key-Value）",
 								children: (
-									<Form.Item name="settings" noStyle>
+									<Form.Item name="settings">
 										<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 									</Form.Item>
 								),
@@ -1146,7 +1258,7 @@ export default function RunDetailPage() {
 								key: "meta",
 								label: "高级：meta（Key-Value）",
 								children: (
-									<Form.Item name="meta" noStyle>
+									<Form.Item name="meta">
 										<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 									</Form.Item>
 								),
