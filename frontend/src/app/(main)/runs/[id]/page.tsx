@@ -1148,7 +1148,6 @@ export default function RunDetailPage() {
 					</Form.Item>
 
 					<Collapse
-						forceRender
 						items={[
 							{
 								key: "recipe",
@@ -1243,7 +1242,6 @@ export default function RunDetailPage() {
 					</Form.Item>
 
 					<Collapse
-						forceRender
 						items={[
 							{
 								key: "settings",
