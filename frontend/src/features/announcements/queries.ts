@@ -68,6 +68,7 @@ export function useMyAnnouncements(params?: {
 	page?: number;
 	page_size?: number;
 	unread_only?: boolean;
+	enabled?: boolean;
 }) {
 	return useQuery({
 		queryKey: ["announcements", "my", params],
@@ -81,6 +82,7 @@ export function useMyAnnouncements(params?: {
 			const response = await api.get(`/announcements/my${queryString ? `?${queryString}` : ""}`);
 			return response.data as PaginatedResp<MyAnnouncement> & { unread_count: number };
 		},
+		enabled: params?.enabled !== undefined ? params.enabled : true,
 	});
 }
 
@@ -100,6 +102,7 @@ export function useMyHistory(params?: {
 	page_size?: number;
 	category?: string;
 	priority?: string;
+	enabled?: boolean;
 }) {
 	return useQuery({
 		queryKey: ["announcements", "my", "history", params],
@@ -114,5 +117,6 @@ export function useMyHistory(params?: {
 			const response = await api.get(`/announcements/my/history${queryString ? `?${queryString}` : ""}`);
 			return response.data as MyHistoryResp;
 		},
+		enabled: params?.enabled !== undefined ? params.enabled : true,
 	});
 }
