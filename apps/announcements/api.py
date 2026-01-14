@@ -212,15 +212,24 @@ class AnnouncementDetailView(JWTAuthMixin, JsonBodyMixin, View):
     """公告详情"""
 
     def get(self, request, announcement_id):
-        if not request.user.is_staff:
-            return JsonResponse(
-                {"detail": "权限不足"}, status=403
-            )
-
         try:
             announcement = Announcement.objects.get(id=announcement_id)
         except Announcement.DoesNotExist:
             return JsonResponse({"detail": "公告不存在"}, status=404)
+
+        # 权限检查：只允许查看针对自己角色或更低角色的公告
+        try:
+            profile = request.user.profile
+        except UserProfile.DoesNotExist:
+            return JsonResponse({"detail": "权限不足"}, status=403)
+
+        role_levels = {"all": 0, "readonly": 1, "operator": 2, "admin": 3}
+        user_level = role_levels.get(profile.role, 0)
+        target_level = role_levels.get(announcement.target_role, 0)
+
+        # 如果公告的目标角色比用户角色高，则不允许查看
+        if target_level > user_level and not request.user.is_superuser:
+            return JsonResponse({"detail": "权限不足，无权查看此公告"}, status=403)
 
         # 统计已读人数
         read_count = announcement.read_records.count()
