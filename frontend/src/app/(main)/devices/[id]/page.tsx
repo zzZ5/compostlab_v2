@@ -551,7 +551,9 @@ export default function DeviceDetailPage() {
 			templateForm.setFieldsValue({
 				name: editingTemplate.name,
 				description: editingTemplate.description || "",
-				payload: editingTemplate.payload,
+				payload: typeof editingTemplate.payload === 'string'
+					? editingTemplate.payload
+					: JSON.stringify(editingTemplate.payload, null, 2),
 				is_active: editingTemplate.is_active,
 				is_global: editingTemplate.device_id === null,
 			});

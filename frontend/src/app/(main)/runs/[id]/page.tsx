@@ -800,7 +800,7 @@ export default function RunDetailPage() {
 																			</Space>
 																		) : null
 																	}
-																	bodyStyle={{ padding: "8px 12px" }}
+																	styles={{ body: { padding: "8px 12px" } }}
 																>
 																	{/* 关联设备信息 */}
 																	<div style={{ marginBottom: 8 }}>
@@ -870,7 +870,7 @@ export default function RunDetailPage() {
 																		{d.name && <Text type="secondary" style={{ fontSize: 12 }}>· {d.name}</Text>}
 																	</Space>
 																}
-																bodyStyle={{ padding: "8px 12px" }}
+																styles={{ body: { padding: "8px 12px" } }}
 															>
 																{/* 关联 Windows 信息 */}
 																<div>
