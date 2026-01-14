@@ -18,7 +18,7 @@ import {
     ControlOutlined,
     BellOutlined,
 } from "@ant-design/icons";
-import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser } from "@/lib/auth";
+import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser, fetchFullUserInfo } from "@/lib/auth";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 import AnnouncementBadge from "@/components/AnnouncementBadge";
 
@@ -49,6 +49,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [fullUserInfo, setFullUserInfo] = useState<any>(null);
 
   const selectedKey = useMemo(() => getSelectedKey(pathname), [pathname]);
 
@@ -70,10 +71,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.replace(`/login?next=${next}`);
       return;
     }
-    // 加载用户信息
+    // 加载基本信息（用于显示）
     if (typeof window !== "undefined") {
       setCurrentUser(getUser());
     }
+    // 加载完整用户信息（包含权限字段，用于权限判断）
+    fetchFullUserInfo().then(setFullUserInfo);
     setReady(true);
   }, [pathname, router]);
 
@@ -136,7 +139,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             { key: "/telemetry", icon: <LineChartOutlined />, label: <Link href="/telemetry">数据探索</Link> },
             { type: "divider" },
             { key: "/announcements/history", icon: <BellOutlined />, label: <Link href="/announcements/history">公告历史</Link> },
-            ...(currentUser?.role === "admin" || currentUser?.is_staff || currentUser?.is_superuser
+            // 使用 fullUserInfo 进行权限判断（包含 role 字段）
+            ...(fullUserInfo?.role === "admin" || fullUserInfo?.is_staff || fullUserInfo?.is_superuser
               ? [
                   { key: "/announcements", icon: <BellOutlined />, label: <Link href="/announcements">公告管理</Link> },
                   { key: "/users", icon: <TeamOutlined />, label: <Link href="/users">用户管理</Link> },
@@ -175,17 +179,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                     <Text type="secondary" style={{ fontSize: 13 }}>
                       {currentUser.real_name || currentUser.username}
                     </Text>
-                    {currentUser.role && (
+                    {/* 使用 fullUserInfo 显示角色标签 */}
+                    {fullUserInfo?.role && (
                       <Tag
                         color={
-                          currentUser.role === "admin"
+                          fullUserInfo.role === "admin"
                             ? "red"
-                            : currentUser.role === "operator"
+                            : fullUserInfo.role === "operator"
                             ? "blue"
                             : "default"
                         }
                       >
-                        {currentUser.role_display || currentUser.role}
+                        {fullUserInfo.role_display || fullUserInfo.role}
                       </Tag>
                     )}
                   </Space>
