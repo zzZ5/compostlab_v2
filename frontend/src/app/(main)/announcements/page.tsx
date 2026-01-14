@@ -261,7 +261,7 @@ export default function AnnouncementsPage() {
 				</Space>
 			),
 			width: 200,
-			fixed: "right",
+			fixed: "right" as const,
 		},
 	];
 
