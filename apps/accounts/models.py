@@ -85,6 +85,11 @@ class AuditLog(models.Model):
         USER_DELETE = "user_delete", "删除用户"
         USER_ENABLE = "user_enable", "启用用户"
         USER_DISABLE = "user_disable", "禁用用户"
+
+        # 公告相关
+        ANNOUNCEMENT_CREATE = "announcement_create", "创建公告"
+        ANNOUNCEMENT_UPDATE = "announcement_update", "更新公告"
+        ANNOUNCEMENT_DELETE = "announcement_delete", "删除公告"
     
     # 操作者
     user = models.ForeignKey(
