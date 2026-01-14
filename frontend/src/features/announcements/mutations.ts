@@ -49,6 +49,7 @@ export function useUpdateAnnouncement(id: number) {
 			target_role: AnnouncementTargetRole;
 			is_active: boolean;
 			is_pinned: boolean;
+			expiry_at: string | null;
 		}>) => {
 			const response = await api.put(`/announcements/${id}/update`, data);
 			return response.data;

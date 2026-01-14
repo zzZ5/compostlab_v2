@@ -131,6 +131,12 @@ export default function AnnouncementsPage() {
 	async function handleSubmit() {
 		try {
 			const values = await form.validateFields();
+			// 转换 expiry_at 为 ISO 字符串格式
+			if (values.expiry_at) {
+				values.expiry_at = (values.expiry_at as Dayjs).format("YYYY-MM-DD HH:mm:ss");
+			} else {
+				values.expiry_at = null;
+			}
 			if (editingAnnouncement) {
 				await updateMutation.mutateAsync(values);
 				message.success("公告更新成功");

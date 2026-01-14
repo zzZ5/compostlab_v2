@@ -302,6 +302,17 @@ class AnnouncementUpdateView(JWTAuthMixin, AdminRequiredMixin, JsonBodyMixin, Vi
                     "new": body["is_pinned"],
                 }
                 announcement.is_pinned = body["is_pinned"]
+            if "expiry_at" in body:
+                old_expiry = announcement.expiry_at
+                new_expiry = body["expiry_at"]
+                if new_expiry:
+                    from datetime import datetime
+                    new_expiry = datetime.strptime(new_expiry, "%Y-%m-%d %H:%M:%S")
+                changes["expiry_at"] = {
+                    "old": old_expiry.strftime("%Y-%m-%d %H:%M:%S") if old_expiry else None,
+                    "new": new_expiry.strftime("%Y-%m-%d %H:%M:%S") if new_expiry else None,
+                }
+                announcement.expiry_at = new_expiry
 
             announcement.save()
 
