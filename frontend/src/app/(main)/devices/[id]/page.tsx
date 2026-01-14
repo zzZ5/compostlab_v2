@@ -541,11 +541,14 @@ export default function DeviceDetailPage() {
 		if (!ip || ipLocationLoading) return;
 		setIpLocationLoading(true);
 		try {
-			const response = await fetch(`http://ip-api.com/json/${ip}?lang=zh-CN`);
+			const response = await fetch(`https://v2.xxapi.cn/api/ip?ip=${ip}`, {
+				headers: {
+					'User-Agent': 'xiaoxiaoapi/1.0.0'
+				}
+			});
 			const data = await response.json();
-			if (data.status === 'success') {
-				const location = `${data.country || ''} ${data.regionName || ''} ${data.city || ''}`.trim();
-				setIpLocation(location);
+			if (data.code === 200 && data.data?.address) {
+				setIpLocation(data.data.address);
 			} else {
 				setIpLocation("未知位置");
 			}

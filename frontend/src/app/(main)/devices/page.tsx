@@ -29,7 +29,6 @@ import { useCreateDevice } from "@/features/devices/mutations";
 import { useUpdateDevice } from "@/features/devices/mutations";
 import { useDeleteDevice } from "@/features/devices/mutations";
 
-import { emptyObjectToUndefined } from "@/lib/kv";
 import { getErrorMessage } from "@/lib/errors";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
@@ -119,8 +118,14 @@ export default function DevicesPage() {
 				note: (values.note || "").trim(),
 				is_active: !!values.is_active,
 			};
-			const meta = emptyObjectToUndefined(values.meta);
-			if (meta !== undefined) body.meta = meta;
+			// meta: 空对象时发送null来清空服务器端的meta
+			if (values.meta !== undefined) {
+				if (!values.meta || Object.keys(values.meta).length === 0) {
+					body.meta = null;
+				} else {
+					body.meta = values.meta;
+				}
+			}
 
 			if (editing) {
 				await updateDevice.mutateAsync(body);
