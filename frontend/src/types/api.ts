@@ -476,6 +476,8 @@ export type AnnouncementListItem = Announcement & {
 
 export type MyAnnouncement = Announcement & {
 	is_read: boolean;
+	is_expired?: boolean;
+	read_at?: LocalDateTimeString | null;
 };
 
 export type MyAnnouncementsResp = PaginatedResp<MyAnnouncement> & {
