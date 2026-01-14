@@ -166,12 +166,14 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),  # Access token 有效期 8 小时
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),  # Refresh token 有效期 7 天
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": False,
+    "BLACKLIST_AFTER_ROTATION": True,  # 启用黑名单（通过 TokenBlacklist 实现）
+    "UPDATE_LAST_LOGIN": True,  # 更新用户最后登录时间
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
     "AUTH_HEADER_TYPES": ("Bearer",),
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
+    "JTI_CLAIM": "jti",  # JWT Token ID，用于黑名单机制
 }
 
 # REST Framework 配置

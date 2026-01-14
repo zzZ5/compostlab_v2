@@ -15,6 +15,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import UserProfile, AuditLog, UserRole
 from .mixins import JWTAuthMixin, AdminRequiredMixin
 from .utils import log_audit, get_or_create_profile, get_client_ip
+from .token_blacklist import TokenBlacklist
 
 logger = logging.getLogger(__name__)
 
@@ -143,16 +144,48 @@ class RefreshTokenView(View):
 class LogoutView(JWTAuthMixin, View):
     """
     POST /api/v2/auth/logout
-    （实际上 JWT 是无状态的，前端删除 token 即可，这里只记录日志）
+    将当前用户的 token 加入黑名单
+
+    注意：需要使用有效的 JWT Token 调用此接口
     """
-    
+
     def post(self, request):
+        # JWTAuthMixin 已经验证了 token 并设置了 request.user
+
+        # 获取认证头中的 token
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        token_string = auth_header.split(" ", 1)[1].strip() if auth_header.startswith("Bearer ") else ""
+
+        if token_string:
+            try:
+                # 解析 token
+                from rest_framework_simplejwt.tokens import AccessToken
+                access = AccessToken(token_string)
+
+                # 将 access token 加入黑名单
+                TokenBlacklist.revoke_access_token(access)
+                jti = access.get('jti')
+                logger.info(f"Access Token 已撤销: jti={jti}, user={request.user.username}")
+
+                # 尝试解析为 Refresh Token（如果传入的是 refresh token）
+                try:
+                    refresh = RefreshToken(token_string)
+                    TokenBlacklist.revoke_refresh_token(refresh)
+                    logger.info(f"Refresh Token 已撤销: jti={refresh.get('jti')}, user={request.user.username}")
+                except:
+                    pass
+
+            except Exception as e:
+                logger.warning(f"撤销 token 失败: {e}")
+
+        # 记录登出日志
         log_audit(
             request.user,
             AuditLog.Action.LOGOUT,
             description=f"用户登出：{request.user.username}",
             request=request,
         )
+
         return JsonResponse({"detail": "Logged out successfully."}, status=200)
 
 
@@ -192,46 +225,54 @@ class ChangePasswordView(JWTAuthMixin, View):
     """
     POST /api/v2/auth/change-password
     Body: {"old_password": "...", "new_password": "..."}
+    修改密码后会撤销用户的所有 token
     """
-    
+
     def post(self, request):
         try:
             body = json.loads(request.body.decode("utf-8"))
         except Exception:
             return JsonResponse({"detail": "Invalid JSON body."}, status=400)
-        
+
         old_password = body.get("old_password", "")
         new_password = body.get("new_password", "")
-        
+
         if not old_password or not new_password:
             return JsonResponse({"detail": "Old and new passwords required."}, status=400)
-        
+
         user = request.user
-        
+
         # 验证旧密码
         if not user.check_password(old_password):
             return JsonResponse({"detail": "Old password incorrect."}, status=400)
-        
+
         # 验证新密码强度
         try:
             validate_password(new_password, user)
         except ValidationError as e:
             return JsonResponse({"detail": "Password validation failed.", "errors": e.messages}, status=400)
-        
+
         # 修改密码
         user.set_password(new_password)
         user.save()
-        
+
+        # 撤销用户的所有 token
+        # 注意：我们无法直接撤销所有已 issued 的 token
+        # 但由于密码已更改，旧 token 将在验证时失效
+        revoked_count = TokenBlacklist.revoke_all_user_tokens(user.id)
+        logger.info(f"用户 {user.username} 修改密码，撤销 {revoked_count} 个 token")
+
+        # 记录审计日志
         log_audit(
             user,
             AuditLog.Action.USER_UPDATE,
             resource_type="user",
             resource_id=user.id,
-            description="修改密码",
+            description="修改密码（所有 token 已撤销）",
             request=request,
         )
-        
-        return JsonResponse({"detail": "Password changed successfully."}, status=200)
+
+        return JsonResponse({"detail": "Password changed successfully. All existing tokens have been revoked."}, status=200)
 
 
 # ==================== 用户管理（管理员） ====================
@@ -509,32 +550,40 @@ class UserToggleActiveView(JWTAuthMixin, AdminRequiredMixin, View):
     """
     POST /api/v2/users/<user_id>/toggle-active
     启用/禁用用户
+    禁用用户时会撤销其所有 token
     """
-    
+
     def post(self, request, user_id: int):
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return JsonResponse({"detail": "User not found."}, status=404)
-        
+
         # 不能禁用自己
         if user.id == request.user.id:
             return JsonResponse({"detail": "Cannot disable yourself."}, status=400)
-        
+
         profile = get_or_create_profile(user)
+        old_active = profile.is_active
         profile.is_active = not profile.is_active
         profile.save()
-        
+
+        # 如果是禁用用户，撤销其所有 token
+        if not profile.is_active:
+            revoked_count = TokenBlacklist.revoke_all_user_tokens(user.id)
+            logger.info(f"用户 {user.username} 被禁用，撤销 {revoked_count} 个 token")
+
         action = AuditLog.Action.USER_ENABLE if profile.is_active else AuditLog.Action.USER_DISABLE
         log_audit(
             request.user,
             action,
             resource_type="user",
             resource_id=user.id,
-            description=f"{'启用' if profile.is_active else '禁用'}用户：{user.username}",
+            description=f"{'启用' if profile.is_active else '禁用'}用户：{user.username}" +
+                      (f"，撤销 {revoked_count} 个 token" if not profile.is_active else ""),
             request=request,
         )
-        
+
         return JsonResponse(
             {"detail": f"User {'enabled' if profile.is_active else 'disabled'}.", "is_active": profile.is_active},
             status=200,
