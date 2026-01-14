@@ -117,37 +117,47 @@ def get_or_create_profile(user):
 def has_permission(user, required_role):
     """
     检查用户是否有足够权限
-    
+
     Args:
         user: User 对象
         required_role: 需要的最低角色（readonly/operator/admin）
-    
+
     Returns:
         bool: 是否有权限
+
+    角色权限等级：
+    - readonly (1): 只读权限
+    - operator (2): 操作权限
+    - admin (3): 管理权限
+
+    权限规则：
+    - is_superuser: 超级管理员，拥有所有权限
+    - 其他用户: 完全依赖 UserProfile.role 判断权限
+      - is_staff 不再自动赋予 admin 权限
+      - is_staff 用户也必须有对应的 UserProfile.role
     """
     if not user or not user.is_authenticated:
         return False
-    
+
     # 超级用户总是有权限
     if user.is_superuser:
         return True
-    
-    # 管理员（Django staff）也算 admin 角色
-    if user.is_staff and required_role in ["readonly", "operator", "admin"]:
-        return True
-    
+
+    # 检查用户是否有 UserProfile
     try:
         profile = user.profile
     except UserProfile.DoesNotExist:
-        # 没有 profile 的视为 readonly
+        # 没有 profile 的用户，默认被视为 readonly
+        # is_staff 用户如果没有 profile，也没有角色信息，不能有高级权限
         return required_role == "readonly"
-    
+
+    # 检查用户是否启用
     if not profile.is_active:
         return False
-    
+
     # 角色等级：readonly < operator < admin
     role_levels = {"readonly": 1, "operator": 2, "admin": 3}
     user_level = role_levels.get(profile.role, 0)
     required_level = role_levels.get(required_role, 999)
-    
+
     return user_level >= required_level
