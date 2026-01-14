@@ -104,6 +104,11 @@ export type Device = {
 	note?: string;
 
 	meta?: JSONObject;
+
+	/** 设备注册信息 */
+	ip_address?: string;
+	register_at?: LocalDateTimeString | null;
+	configuration?: JSONObject;
 };
 
 export type ChannelLatest = {

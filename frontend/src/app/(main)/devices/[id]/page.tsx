@@ -789,7 +789,7 @@ export default function DeviceDetailPage() {
 				<Card size="small" style={{ marginBottom: 12 }}>
 					<Row gutter={[16, 12]}>
 						{/* 基本信息 */}
-							<Col xs={24} sm={12} md={8}>
+							<Col xs={24} sm={12} md={6}>
 								<Space orientation="vertical" size={6} style={{ width: '100%' }}>
 									<Space wrap size={8}>
 										<Text strong style={{ fontSize: 14 }}>{device.name || '-'}</Text>
@@ -799,12 +799,36 @@ export default function DeviceDetailPage() {
 										</Tag>
 									</Space>
 									<Text type="secondary">通道: {channels.length}</Text>
+									{device.ip_address && (
+										<Text type="secondary">IP: {device.ip_address}</Text>
+									)}
 								</Space>
 							</Col>
 
+						{/* 注册信息 */}
+						{(device.register_at || device.last_seen_at) && (
+							<Col xs={24} sm={12} md={6}>
+								<div>
+									<Text type="secondary" style={{ fontSize: 12 }}>注册信息</Text>
+									<Space orientation="vertical" size={2} style={{ width: '100%', marginTop: 4 }}>
+										{device.register_at && (
+											<Text type="secondary" style={{ fontSize: 12 }}>
+												注册: {device.register_at}
+											</Text>
+										)}
+										{device.last_seen_at && (
+											<Text type="secondary" style={{ fontSize: 12 }}>
+												上线: {device.last_seen_at}
+											</Text>
+										)}
+									</Space>
+								</div>
+							</Col>
+						)}
+
 						{/* 备注 */}
 						{device.note && (
-							<Col xs={24} sm={12} md={8}>
+							<Col xs={24} sm={12} md={6}>
 								<div>
 									<Text type="secondary" style={{ fontSize: 12 }}>备注</Text>
 									<Text type="secondary" style={{ display: 'block', marginTop: 4, whiteSpace: 'pre-wrap', fontSize: 13 }}>
@@ -816,7 +840,7 @@ export default function DeviceDetailPage() {
 
 						{/* 元数据 */}
 						{device.meta && Object.keys(device.meta).length > 0 && (
-							<Col xs={24} sm={12} md={8}>
+							<Col xs={24} sm={12} md={6}>
 								<div>
 									<Text type="secondary" style={{ fontSize: 12 }}>元数据</Text>
 									<Space orientation="vertical" size={2} style={{ width: '100%', marginTop: 4 }}>
@@ -1481,7 +1505,11 @@ export default function DeviceDetailPage() {
 				onCancel={() => setDeviceModalOpen(false)}
 				onOk={submitDevice}
 				okText="保存"
-				destroyOnHidden
+				afterOpenChange={(open) => {
+					if (!open) {
+						deviceForm.resetFields();
+					}
+				}}
 				confirmLoading={updateDevice.isPending}
 				maskClosable={!updateDevice.isPending}
 			>
@@ -1528,7 +1556,11 @@ export default function DeviceDetailPage() {
 				onCancel={() => setChannelModalOpen(false)}
 				onOk={submitChannel}
 				okText={editingChannel ? "保存" : "创建"}
-				destroyOnHidden
+				afterOpenChange={(open) => {
+					if (!open) {
+						channelForm.resetFields();
+					}
+				}}
 				confirmLoading={createChannel.isPending || updateChannel.isPending}
 				maskClosable={!(createChannel.isPending || updateChannel.isPending)}
 			>
@@ -1615,7 +1647,11 @@ export default function DeviceDetailPage() {
 				onCancel={() => setTemplateModalOpen(false)}
 				onOk={submitTemplate}
 				okText={editingTemplate ? "保存" : "创建"}
-				destroyOnHidden
+				afterOpenChange={(open) => {
+					if (!open) {
+						templateForm.resetFields();
+					}
+				}}
 				confirmLoading={templateSubmitting || createTemplate.isPending}
 				maskClosable={!(templateSubmitting || createTemplate.isPending)}
 				width={600}
