@@ -37,7 +37,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.db.models import F
 
-from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
+from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, DeviceJWTAuthMixin
 from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate, ScriptTemplate, ScriptExecution
 from apps.devices.services.mqtt_pub import publish_json
 from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
@@ -1268,15 +1268,22 @@ class ControlTemplateDetailView(
 # Device Registration (MQTT)
 # -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
-class DeviceRegisterView(BasicAuthMixin, JsonBodyMixin, View):
+class DeviceRegisterView(DeviceJWTAuthMixin, JsonBodyMixin, View):
     """
     POST /api/v2/devices/register
 
     设备上线注册接口（可通过 MQTT 或 HTTP 调用）
     MQTT topic: compostlab/v2/{device_code}/register
 
+    认证要求：
+    1. 设备自注册：使用包含 device_code 的 JWT Bearer Token
+       Token payload: {"device_code": "device_001", "exp": 1234567890}
+    2. 管理员注册：使用管理员 JWT Bearer Token（is_staff 或 role='admin'）
+       此时需要通过 body 或 topic 提供 device_code
+
     Request body:
     {
+      "device_code": "device_001",  // 可选（从 token 或 topic 中提取）
       "schema_version": 2,
       "ip_address": "192.168.1.100",
       "timestamp": "2026-01-14T12:00:00Z",
@@ -1289,9 +1296,9 @@ class DeviceRegisterView(BasicAuthMixin, JsonBodyMixin, View):
     }
 
     注意：
-    - device_code 从 MQTT topic 中提取: compostlab/v2/{device_code}/register
-    - 或者通过 body 中的 device_code 字段提供
-    - 如果设备不存在，会自动创建
+    - device_code 优先级：JWT token > MQTT topic > request body
+    - MQTT topic 格式: compostlab/v2/{device_code}/register
+    - 如果设备不存在，会自动创建（需要管理员权限或设备自注册）
     """
 
     def post(self, request):
@@ -1299,28 +1306,65 @@ class DeviceRegisterView(BasicAuthMixin, JsonBodyMixin, View):
 
         # 提取 device_code
         device_code = None
+        registration_type = getattr(request, "device_registration_type", None)
 
-        # 1. 从 body 中获取 device_code
-        if "device_code" in body:
-            device_code = (body.get("device_code") or "").strip()
+        # 对于设备自注册，需要验证 token 和请求中的 device_code 是否一致
+        if registration_type == "self":
+            token_device_code = getattr(request, "device_code_from_token", None)
 
-        # 2. 从 topic 中提取（如果通过 MQTT 调用）
-        topic = getattr(request, "mqtt_topic", None) or request.GET.get("topic", "")
-        if topic and not device_code:
-            parts = [p for p in topic.strip().split("/") if p]
-            if len(parts) >= 4 and parts[0].lower() == "compostlab" and parts[1].lower() == "v2":
-                # compostlab/v2/{device_code}/register
-                if parts[3].lower() == "register":
-                    device_code = parts[2].strip()
+            # 1. 优先从 body 中获取 device_code
+            if "device_code" in body:
+                device_code = (body.get("device_code") or "").strip()
 
-        if not device_code:
-            return _json_400("device_code is required (from body or topic)")
+            # 2. 如果 body 中没有，从 token 中获取
+            elif token_device_code:
+                device_code = token_device_code
+
+            # 3. 尝试从 topic 中提取
+            else:
+                topic = getattr(request, "mqtt_topic", None) or request.GET.get("topic", "")
+                if topic:
+                    parts = [p for p in topic.strip().split("/") if p]
+                    if len(parts) >= 4 and parts[0].lower() == "compostlab" and parts[1].lower() == "v2":
+                        # compostlab/v2/{device_code}/register
+                        if parts[3].lower() == "register":
+                            device_code = parts[2].strip()
+
+            # 验证 device_code 是否存在
+            if not device_code:
+                return _json_400("device_code is required (from request body, MQTT topic, or JWT token)")
+
+            # 验证 token 中的 device_code 与请求中的 device_code 是否一致
+            # 如果请求中提供了 device_code，必须与 token 中的一致
+            if token_device_code and device_code != token_device_code:
+                return _json_400("device_code in request does not match device_code in JWT token")
+
+        # 对于管理员注册
+        elif registration_type == "admin":
+            # 1. 优先从 body 中获取 device_code
+            if "device_code" in body:
+                device_code = (body.get("device_code") or "").strip()
+
+            # 2. 尝试从 topic 中提取
+            topic = getattr(request, "mqtt_topic", None) or request.GET.get("topic", "")
+            if topic and not device_code:
+                parts = [p for p in topic.strip().split("/") if p]
+                if len(parts) >= 4 and parts[0].lower() == "compostlab" and parts[1].lower() == "v2":
+                    # compostlab/v2/{device_code}/register
+                    if parts[3].lower() == "register":
+                        device_code = parts[2].strip()
+
+            if not device_code:
+                return _json_400("device_code is required (from request body or MQTT topic)")
 
         # 查找或创建设备
         try:
             d = Device.objects.get(**{DEVICE_CODE_FIELD: device_code})
             is_new = False
         except Device.DoesNotExist:
+            # 设备不存在时：
+            # - 管理员可以创建新设备
+            # - 设备自注册也可以创建新设备
             d = Device()
             _set_if_exists(d, DEVICE_CODE_FIELD, device_code)
             _set_if_exists(d, "name", device_code)
@@ -1349,6 +1393,7 @@ class DeviceRegisterView(BasicAuthMixin, JsonBodyMixin, View):
         # 返回设备信息
         response = _device_to_dict(d)
         response["registered"] = not is_new  # false 表示新创建，true 表示已存在并更新
+        response["registration_type"] = registration_type  # 标识注册方式：'self' 或 'admin'
 
         return JsonResponse(response, status=201 if is_new else 200)
 
