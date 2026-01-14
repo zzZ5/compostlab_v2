@@ -248,6 +248,13 @@ export default function RunDetailPage() {
 	 */
 	const [bucket, setBucket] = useState<string>("10m");
 
+	/**
+	 * 数据量限制：
+	 * - Runs 页面可能包含多设备长时间数据，需要更大的数据量
+	 * - 默认 20000，最大支持 200000
+	 */
+	const [dataLimit, setDataLimit] = useState<number>(20000);
+
 	const from = range?.[0] ? dayjs(range[0]).format("YYYY-MM-DD HH:mm:ss") : null;
 	const to = range?.[1] ? dayjs(range[1]).format("YYYY-MM-DD HH:mm:ss") : null;
 
@@ -360,6 +367,7 @@ export default function RunDetailPage() {
 		group: selectedWindowId ? null : group, // 选中 Window 时忽略 group 筛选
 		treatment: selectedWindowId ? null : treatment,
 		channels: selectedCodes.length > 0 ? selectedCodes : [],
+		limit: dataLimit,
 	});
 
 	const points = (telemetryQ.isSuccess && telemetryQ.data?.data && selectedCodes.length > 0) ? telemetryQ.data.data : [];
@@ -985,6 +993,18 @@ export default function RunDetailPage() {
 												{ value: "1m", label: "1m" },
 												{ value: "10m", label: "10m" },
 												{ value: "1h", label: "1h" },
+											]}
+										/>
+										<Select
+											style={{ width: 120 }}
+											value={dataLimit}
+											onChange={setDataLimit}
+											options={[
+												{ value: 10000, label: "10K" },
+												{ value: 20000, label: "20K" },
+												{ value: 50000, label: "50K" },
+												{ value: 100000, label: "100K" },
+												{ value: 200000, label: "200K" },
 											]}
 										/>
 										{selectedWindowId && (

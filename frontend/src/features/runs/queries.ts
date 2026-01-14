@@ -34,9 +34,10 @@ export function useRunTelemetry(args: {
 	bucket?: string | null;
 	group?: string | null;
 	treatment?: string | null;
+	limit?: number;
 }) {
-	const { runId, from, to, channels, bucket, group, treatment } = args;
-	const argsKey = [from, to, channels?.join(",") || "", bucket || "", group || "", treatment || ""].join("|");
+	const { runId, from, to, channels, bucket, group, treatment, limit } = args;
+	const argsKey = [from, to, channels?.join(",") || "", bucket || "", group || "", treatment || "", limit || ""].join("|");
 
 	return useQuery<RunTelemetryResp>({
 		queryKey: runKeys.telemetry(runId, argsKey),
@@ -48,6 +49,7 @@ export function useRunTelemetry(args: {
 				bucket,
 				group,
 				treatment,
+				limit,
 			});
 			const res = await api.get<RunTelemetryResp>(`/runs/${runId}/telemetry${qs}`);
 			return res.data;
