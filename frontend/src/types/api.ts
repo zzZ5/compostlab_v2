@@ -482,6 +482,10 @@ export type MyAnnouncementsResp = PaginatedResp<MyAnnouncement> & {
 	unread_count: number;
 };
 
+export type MyHistoryResp = PaginatedResp<MyAnnouncement> & {
+	total_count: number;
+};
+
 export type UnreadCountResp = {
 	unread_count: number;
 };

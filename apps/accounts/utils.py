@@ -1,4 +1,6 @@
 from django.contrib.auth.models import User
+from django.utils import timezone as django_timezone
+import pytz
 from .models import UserProfile, AuditLog
 
 
@@ -10,6 +12,52 @@ def get_client_ip(request):
     else:
         ip = request.META.get("REMOTE_ADDR")
     return ip
+
+
+def format_datetime_for_user(dt, user_timezone="Asia/Shanghai"):
+    """
+    将 UTC 时间格式化为用户所在时区的本地时间字符串
+
+    Args:
+        dt: UTC datetime 对象
+        user_timezone: 用户时区字符串，如 "Asia/Shanghai"
+
+    Returns:
+        str: 格式化后的本地时间字符串，如 "2026-01-14 16:30:45"
+    """
+    if dt is None:
+        return None
+
+    try:
+        tz = pytz.timezone(user_timezone)
+        if dt.tzinfo is None:
+            dt = django_timezone.make_aware(dt, pytz.UTC)
+        local_dt = dt.astimezone(tz)
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+    except pytz.UnknownTimeZoneError:
+        # 时区无效时使用系统默认时区
+        tz = pytz.timezone("Asia/Shanghai")
+        if dt.tzinfo is None:
+            dt = django_timezone.make_aware(dt, pytz.UTC)
+        local_dt = dt.astimezone(tz)
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_user_timezone(user):
+    """
+    获取用户的时区设置
+
+    Args:
+        user: User 对象
+
+    Returns:
+        str: 时区字符串，默认为 "Asia/Shanghai"
+    """
+    try:
+        profile = user.profile
+        return profile.timezone or "Asia/Shanghai"
+    except UserProfile.DoesNotExist:
+        return "Asia/Shanghai"
 
 
 def log_audit(

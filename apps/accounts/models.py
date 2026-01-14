@@ -20,17 +20,24 @@ class UserProfile(models.Model):
         db_index=True,
         help_text="用户角色：readonly（只读）、operator（操作员）、admin（管理员）",
     )
-    
+
     # 个人信息
     real_name = models.CharField(max_length=100, blank=True, help_text="真实姓名")
     department = models.CharField(max_length=100, blank=True, help_text="部门/实验室")
     phone = models.CharField(max_length=20, blank=True, help_text="联系电话")
-    
+
     # 状态
     is_active = models.BooleanField(default=True, help_text="是否启用")
     last_login_at = models.DateTimeField(null=True, blank=True, help_text="最后登录时间")
     last_login_ip = models.GenericIPAddressField(null=True, blank=True, help_text="最后登录 IP")
-    
+
+    # 时区设置
+    timezone = models.CharField(
+        max_length=50,
+        default="Asia/Shanghai",
+        help_text="用户时区，如 Asia/Shanghai, UTC, America/New_York",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

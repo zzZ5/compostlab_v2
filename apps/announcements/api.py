@@ -5,9 +5,9 @@ from django.utils.decorators import method_decorator
 from django.http import JsonResponse
 from django.views import View
 
-from apps.accounts.models import UserProfile, AuditLog
+from apps.accounts.models import UserProfile, AuditLog, UserRole
 from apps.accounts.mixins import JWTAuthMixin, AdminRequiredMixin
-from apps.accounts.utils import log_audit, get_client_ip
+from apps.accounts.utils import log_audit, get_client_ip, get_user_timezone, format_datetime_for_user
 from apps.api.mixins import JsonBodyMixin
 from apps.api.pagination import OffsetPaginator
 
@@ -19,10 +19,17 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
     """公告列表（管理员）"""
 
     def get(self, request):
-        if not request.user.is_staff:
-            return JsonResponse(
-                {"detail": "权限不足"}, status=403
-            )
+        # 权限检查：仅管理员及以上角色可以查看公告列表
+        try:
+            profile = request.user.profile
+        except UserProfile.DoesNotExist:
+            return JsonResponse({"detail": "权限不足"}, status=403)
+
+        if not (request.user.is_superuser or request.user.is_staff or profile.role in [UserRole.ADMIN, UserRole.OPERATOR]):
+            return JsonResponse({"detail": "权限不足，需要管理员或操作员角色"}, status=403)
+
+        # 获取用户时区
+        user_tz = get_user_timezone(request.user)
 
         # 获取查询参数
         page = int(request.GET.get("page", 1))
@@ -33,6 +40,9 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
         target_role = request.GET.get("target_role", "")
         is_active = request.GET.get("is_active", "")
         is_pinned = request.GET.get("is_pinned", "")
+        is_expired = request.GET.get("is_expired", "")
+        created_after = request.GET.get("created_after")
+        created_before = request.GET.get("created_before")
 
         # 构建查询
         queryset = Announcement.objects.all()
@@ -54,6 +64,24 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
             queryset = queryset.filter(is_active=is_active == "true")
         if is_pinned:
             queryset = queryset.filter(is_pinned=is_pinned == "true")
+        if is_expired:
+            # 过期状态筛选
+            now = timezone.now()
+            if is_expired == "true":
+                # 只显示已过期的
+                queryset = queryset.filter(expiry_at__lt=now, expiry_at__isnull=False)
+            elif is_expired == "false":
+                # 只显示未过期的
+                queryset = queryset.filter(Q(expiry_at__gte=now) | Q(expiry_at__isnull=True))
+
+        # 日期范围筛选
+        if created_after:
+            queryset = queryset.filter(created_at__gte=created_after)
+        if created_before:
+            queryset = queryset.filter(created_at__lte=created_before)
+
+        # 排序：默认按创建时间倒序（最新的在前）
+        queryset = queryset.order_by("-created_at")
 
         # 分页
         paginator = OffsetPaginator(queryset, page, page_size)
@@ -80,16 +108,12 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
                     "target_role": announcement.target_role,
                     "is_active": announcement.is_active,
                     "is_pinned": announcement.is_pinned,
-                    "expiry_at": (
-                        announcement.expiry_at.strftime("%Y-%m-%d %H:%M:%S")
-                        if announcement.expiry_at
-                        else None
-                    ),
+                    "expiry_at": format_datetime_for_user(announcement.expiry_at, user_tz),
                     "is_expired": announcement.is_expired(),
                     "read_count": read_count,
                     "created_by": created_by_name,
-                    "created_at": announcement.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "updated_at": announcement.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "created_at": format_datetime_for_user(announcement.created_at, user_tz),
+                    "updated_at": format_datetime_for_user(announcement.updated_at, user_tz),
                 }
             )
 
@@ -102,10 +126,19 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementCreateView(JWTAuthMixin, AdminRequiredMixin, JsonBodyMixin, View):
+class AnnouncementCreateView(JWTAuthMixin, JsonBodyMixin, View):
     """创建公告"""
 
     def post(self, request):
+        # 权限检查：仅管理员可以创建公告
+        try:
+            profile = request.user.profile
+        except UserProfile.DoesNotExist:
+            return JsonResponse({"detail": "权限不足"}, status=403)
+
+        if not (request.user.is_superuser or profile.role == UserRole.ADMIN):
+            return JsonResponse({"detail": "权限不足，仅管理员可以发布公告"}, status=403)
+
         try:
             body = self.json_body(request)
 
@@ -115,16 +148,38 @@ class AnnouncementCreateView(JWTAuthMixin, AdminRequiredMixin, JsonBodyMixin, Vi
             if not body.get("content"):
                 return JsonResponse({"detail": "内容不能为空"}, status=400)
 
+            # 验证目标角色：管理员只能发布公告给自己角色或更低的角色
+            target_role = body.get("target_role", Announcement.TargetRole.ALL)
+            role_levels = {"all": 0, "readonly": 1, "operator": 2, "admin": 3}
+            user_level = role_levels.get(profile.role, 0)
+            target_level = role_levels.get(target_role, 0)
+
+            # 非超级管理员不能发布给比自己角色高的用户
+            if target_level > user_level and not request.user.is_superuser:
+                return JsonResponse({"detail": "权限不足，不能发布给更高级别的用户"}, status=403)
+
+            # 处理过期时间
+            expiry_at_str = body.get("expiry_at")
+            expiry_at = None
+            if expiry_at_str:
+                from django.utils import timezone
+                from datetime import datetime
+
+                try:
+                    expiry_at = timezone.make_aware(datetime.fromisoformat(expiry_at_str))
+                except ValueError:
+                    return JsonResponse({"detail": "过期时间格式错误"}, status=400)
+
             # 创建公告
             announcement = Announcement.objects.create(
                 title=body["title"],
                 content=body["content"],
                 category=body.get("category", Announcement.Category.ANNOUNCEMENT),
                 priority=body.get("priority", Announcement.Priority.MEDIUM),
-                target_role=body.get("target_role", Announcement.TargetRole.ALL),
+                target_role=target_role,
                 is_active=body.get("is_active", True),
                 is_pinned=body.get("is_pinned", False),
-                expiry_at=None,  # 可以后续添加
+                expiry_at=expiry_at,
                 created_by=request.user,
             )
 
@@ -305,7 +360,8 @@ class MyAnnouncementsView(JWTAuthMixin, View):
     """我的公告（当前用户可见的公告）"""
 
     def get(self, request):
-        # 获取用户角色
+        # 获取用户角色和时区
+        user_tz = get_user_timezone(request.user)
         try:
             profile = UserProfile.objects.get(user=request.user)
             user_role = profile.role
@@ -337,6 +393,13 @@ class MyAnnouncementsView(JWTAuthMixin, View):
         if unread_only:
             queryset = queryset.exclude(id__in=read_announcement_ids)
 
+        # 排序：置顶优先，然后按优先级降序，最后按创建时间倒序
+        queryset = queryset.order_by(
+            "-is_pinned",
+            "-priority",
+            "-created_at"
+        )
+
         # 分页
         paginator = OffsetPaginator(queryset, page, page_size)
         result = paginator.paginate()
@@ -354,12 +417,8 @@ class MyAnnouncementsView(JWTAuthMixin, View):
                     "category": announcement.category,
                     "priority": announcement.priority,
                     "is_pinned": announcement.is_pinned,
-                    "expiry_at": (
-                        announcement.expiry_at.strftime("%Y-%m-%d %H:%M:%S")
-                        if announcement.expiry_at
-                        else None
-                    ),
-                    "created_at": announcement.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "expiry_at": format_datetime_for_user(announcement.expiry_at, user_tz),
+                    "created_at": format_datetime_for_user(announcement.created_at, user_tz),
                     "is_read": is_read,
                 }
             )
@@ -427,3 +486,77 @@ class UnreadCountView(JWTAuthMixin, View):
         count = queryset.count()
 
         return JsonResponse({"unread_count": count})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MyHistoryView(JWTAuthMixin, View):
+    """我的公告历史（已读公告）"""
+
+    def get(self, request):
+        # 获取用户时区
+        user_tz = get_user_timezone(request.user)
+
+        # 获取查询参数
+        page = int(request.GET.get("page", 1))
+        page_size = int(request.GET.get("page_size", 20))
+        category = request.GET.get("category", "")
+        priority = request.GET.get("priority", "")
+        show_expired = request.GET.get("show_expired", "true") == "true"
+
+        # 获取用户已读的公告记录
+        queryset = AnnouncementRead.objects.filter(user=request.user).select_related(
+            "announcement"
+        )
+
+        # 根据公告属性筛选
+        if category:
+            queryset = queryset.filter(announcement__category=category)
+        if priority:
+            queryset = queryset.filter(announcement__priority=priority)
+
+        # 排序：按阅读时间倒序（最近阅读的在前）
+        # 对于同一天阅读的公告，按公告创建时间倒序
+        queryset = queryset.order_by("-read_at", "-announcement__created_at")
+
+        # 分页
+        paginator = OffsetPaginator(queryset, page, page_size)
+        result = paginator.paginate()
+
+        # 序列化数据
+        data = []
+        for read_record in result["data"]:
+            announcement = read_record.announcement
+
+            # 计算是否过期
+            is_expired = announcement.is_expired()
+
+            data.append(
+                {
+                    "id": announcement.id,
+                    "title": announcement.title,
+                    "content": announcement.content,
+                    "category": announcement.category,
+                    "priority": announcement.priority,
+                    "is_pinned": announcement.is_pinned,
+                    "expiry_at": format_datetime_for_user(
+                        announcement.expiry_at, user_tz
+                    ),
+                    "created_at": format_datetime_for_user(
+                        announcement.created_at, user_tz
+                    ),
+                    "read_at": format_datetime_for_user(read_record.read_at, user_tz),
+                    "is_read": True,
+                    "is_expired": is_expired,
+                }
+            )
+
+        # 统计总数（包括已过期的）
+        total_count = queryset.count()
+
+        return JsonResponse(
+            {
+                "data": data,
+                "pagination": result["pagination"],
+                "total_count": total_count,
+            }
+        )

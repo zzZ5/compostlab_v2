@@ -32,6 +32,7 @@ function getSelectedKey(pathname: string) {
     if (pathname.startsWith("/runs")) return "/runs";
     if (pathname.startsWith("/telemetry")) return "/telemetry";
     if (pathname.startsWith("/scripts")) return "/scripts";
+    if (pathname.startsWith("/announcements/history")) return "/announcements/history";
     if (pathname.startsWith("/announcements")) return "/announcements";
     if (pathname.startsWith("/users")) return "/users";
     if (pathname.startsWith("/profile")) return "/profile";
@@ -134,6 +135,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             { key: "/runs", icon: <ExperimentOutlined />, label: <Link href="/runs">运行批次</Link> },
             { key: "/telemetry", icon: <LineChartOutlined />, label: <Link href="/telemetry">数据探索</Link> },
             { type: "divider" },
+            { key: "/announcements/history", icon: <BellOutlined />, label: <Link href="/announcements/history">公告历史</Link> },
             ...(currentUser?.role === "admin" || currentUser?.is_staff || currentUser?.is_superuser
               ? [
                   { key: "/announcements", icon: <BellOutlined />, label: <Link href="/announcements">公告管理</Link> },
