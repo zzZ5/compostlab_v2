@@ -18,8 +18,9 @@ def _field_names(model) -> set[str]:
 
 def _device_code_field() -> str:
     """获取设备编码字段名"""
+    from apps.devices.models import Device
     for cand in ("code", "device_code", "key", "device_uid"):
-        if cand in _field_names(model):
+        if cand in _field_names(Device):
             return cand
     return "code"
 
