@@ -75,7 +75,7 @@ class DeviceTelemetryView(BasicAuthMixin, View):
     - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
     
     分页参数：
-    - limit: 每页数量，默认 1000，最大 10000
+    - limit: 每页数量，默认 10000，最大 100000
     - cursor: 游标值（时间戳），用于获取下一页数据
     """
 
@@ -89,8 +89,8 @@ class DeviceTelemetryView(BasicAuthMixin, View):
         bucket = parse_bucket(request.GET.get("bucket"))
 
         # 分页参数
-        limit = int(request.GET.get("limit") or "1000")
-        limit = max(1, min(limit, 10000))
+        limit = int(request.GET.get("limit") or "10000")
+        limit = max(1, min(limit, 100000))
         cursor = request.GET.get("cursor")
 
         # -------- bucket aggregation via SQL (Timescale) --------
@@ -171,7 +171,7 @@ class DeviceTelemetryView(BasicAuthMixin, View):
             ),
             cursor_field="ts",
             page_size=limit,
-            max_page_size=10000,
+            max_page_size=100000,
             ordering="desc",  # 降序，返回最新的数据
         )
         
@@ -223,7 +223,7 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
     GET /api/v2/devices/<device_id>/channels/<code>/telemetry?from=...&to=...&bucket=10m&cursor=...
     
     分页参数：
-    - limit: 每页数量，默认 1000，最大 10000
+    - limit: 每页数量，默认 10000，最大 100000
     - cursor: 游标值（时间戳），用于获取下一页数据
     """
 
@@ -237,8 +237,8 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
         bucket = parse_bucket(request.GET.get("bucket"))
 
         # 分页参数
-        limit = int(request.GET.get("limit") or "1000")
-        limit = max(1, min(limit, 10000))
+        limit = int(request.GET.get("limit") or "10000")
+        limit = max(1, min(limit, 100000))
         cursor = request.GET.get("cursor")
 
         # --- bucket aggregation (SQL) ---
@@ -314,7 +314,7 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
             ),
             cursor_field="ts",
             page_size=limit,
-            max_page_size=10000,
+            max_page_size=100000,
             ordering="desc",  # 降序，返回最新的数据
         )
         
@@ -507,7 +507,7 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
     - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
     
     分页参数：
-    - limit: 每页数量，默认 1000，最大 10000
+    - limit: 每页数量，默认 10000，最大 100000
     - cursor: 游标值（时间戳），用于获取下一页数据
     """
 
@@ -548,8 +548,8 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
         bucket = parse_bucket(request.GET.get("bucket"))
 
         # 分页参数
-        limit = int(request.GET.get("limit") or "1000")
-        limit = max(1, min(limit, 10000))
+        limit = int(request.GET.get("limit") or "10000")
+        limit = max(1, min(limit, 100000))
         cursor = request.GET.get("cursor")
 
         # -------- bucket aggregation via SQL (Timescale) --------
@@ -630,7 +630,7 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
             ),
             cursor_field="ts",
             page_size=limit,
-            max_page_size=10000,
+            max_page_size=100000,
             ordering="desc",  # 降序，返回最新的数据
         )
         

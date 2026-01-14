@@ -194,6 +194,8 @@ export default function DeviceDetailPage() {
 	const [range, setRange] = useState<[any, any] | null>(null);
 	// bucket: "" 表示 raw
 	const [bucket, setBucket] = useState<string>("");
+	// 数据量限制
+	const [dataLimit, setDataLimit] = useState<number>(10000);
 
 	const from = range?.[0] ? fmt(range[0]) : null;
 	const to = range?.[1] ? fmt(range[1]) : null;
@@ -204,6 +206,7 @@ export default function DeviceDetailPage() {
 		to,
 		bucket: bucket ? bucket : null,
 		channels: effectiveCodes.length ? effectiveCodes : null,
+		limit: dataLimit,
 	});
 
 	const points = (telemetryQ.isSuccess && effectiveCodes.length > 0) ? (telemetryQ.data?.data || []) : [];
@@ -1089,6 +1092,20 @@ export default function DeviceDetailPage() {
 															{ value: "1m", label: "1m" },
 															{ value: "10m", label: "10m" },
 															{ value: "1h", label: "1h" },
+														]}
+													/>
+
+													<Select
+														size="small"
+														style={{ width: 100 }}
+														value={dataLimit}
+														onChange={setDataLimit}
+														options={[
+															{ value: 1000, label: "1K" },
+															{ value: 5000, label: "5K" },
+															{ value: 10000, label: "10K" },
+															{ value: 20000, label: "20K" },
+															{ value: 50000, label: "50K" },
 														]}
 													/>
 
