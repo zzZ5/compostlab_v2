@@ -1,8 +1,10 @@
 import base64
 import json
+from datetime import timedelta
 
 from django.contrib.auth import authenticate
 from django.http import JsonResponse
+from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed
 from rest_framework_simplejwt.tokens import AccessToken
@@ -220,3 +222,70 @@ class DeviceJWTAuthMixin:
             {"detail": "Unsupported authentication method. Use Bearer token."},
             status=401
         )
+
+
+class TelemetryAccessMixin:
+    """
+    遥测数据访问控制 Mixin
+
+    为敏感数据查询添加时间范围限制：
+    - readonly 用户只能查询最近 7 天的数据
+    - operator 和 admin 用户可以查询任意时间范围的数据
+
+    注意：这个 Mixin 必须放在认证 Mixin 之前，
+    例如：TelemetryAccessMixin, BasicAuthMixin, View
+    """
+
+    # 默认配置
+    DEFAULT_READONLY_DAYS = 7  # 只读用户默认只能查询最近 7 天
+
+    def get_adjusted_time_range(self, request, dt_from, dt_to):
+        """
+        获取调整后的时间范围（为只读用户自动限制）
+
+        Args:
+            request: 请求对象
+            dt_from: 用户指定的开始时间
+            dt_to: 用户指定的结束时间
+
+        Returns:
+            tuple: (adjusted_dt_from, adjusted_dt_to, was_limited)
+        """
+        # 获取用户信息
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return dt_from, dt_to, False
+
+        # 检查用户角色
+        from apps.accounts.models import UserProfile, UserRole
+
+        try:
+            profile = user.profile
+        except UserProfile.DoesNotExist:
+            # 没有 profile 的用户，默认为 readonly
+            profile = None
+            role = UserRole.READONLY
+        else:
+            role = profile.role
+
+        # 超级用户、管理员和操作员可以访问所有数据
+        if user.is_superuser or role in [UserRole.ADMIN, UserRole.OPERATOR]:
+            return dt_from, dt_to, False
+
+        # 只读用户只能查询最近 N 天的数据
+        max_days = self.DEFAULT_READONLY_DAYS
+
+        # 如果用户未指定开始时间，自动限制到 max_days
+        if dt_from is None:
+            adjusted_from = timezone.now() - timedelta(days=max_days)
+            return adjusted_from, dt_to, True
+
+        # 检查用户指定的时间是否在允许范围内
+        time_diff = timezone.now() - dt_from
+        if time_diff.days > max_days:
+            # 超出限制，自动截断到最大允许时间
+            adjusted_from = timezone.now() - timedelta(days=max_days)
+            return adjusted_from, dt_to, True
+
+        # 在允许范围内，返回用户指定的时间
+        return dt_from, dt_to, False

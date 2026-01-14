@@ -29,7 +29,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from apps.api.mixins import BasicAuthMixin
+from apps.api.mixins import BasicAuthMixin, TelemetryAccessMixin
 from apps.api.utils import parse_dt, parse_bucket
 from apps.api.pagination import CursorPaginator, paginated_response
 from apps.devices.models import Device
@@ -68,11 +68,15 @@ class Echo:
         return value
 
 
-class DeviceTelemetryView(BasicAuthMixin, View):
+class DeviceTelemetryView(TelemetryAccessMixin, BasicAuthMixin, View):
     """
     GET /api/v2/devices/<device_id>/telemetry?channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m&cursor=...
     - bucket 为空：raw 点数据（ORM）支持游标分页
     - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
+    
+    访问控制：
+    - readonly 用户只能查询最近 7 天的数据
+    - operator 和 admin 用户可以查询任意时间范围的数据
     
     分页参数：
     - limit: 每页数量，默认 10000，最大 100000
@@ -86,6 +90,9 @@ class DeviceTelemetryView(BasicAuthMixin, View):
 
         dt_from = parse_dt(request.GET.get("from"))
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
+
+        # 对只读用户自动限制时间范围
+        dt_from, dt_to, was_limited = self.get_adjusted_time_range(request, dt_from, dt_to)
         bucket = parse_bucket(request.GET.get("bucket"))
 
         # 分页参数
@@ -218,9 +225,13 @@ class DeviceTelemetryView(BasicAuthMixin, View):
         )
 
 
-class DeviceChannelTelemetryView(BasicAuthMixin, View):
+class DeviceChannelTelemetryView(TelemetryAccessMixin, BasicAuthMixin, View):
     """
     GET /api/v2/devices/<device_id>/channels/<code>/telemetry?from=...&to=...&bucket=10m&cursor=...
+    
+    访问控制：
+    - readonly 用户只能查询最近 7 天的数据
+    - operator 和 admin 用户可以查询任意时间范围的数据
     
     分页参数：
     - limit: 每页数量，默认 10000，最大 100000
@@ -234,6 +245,9 @@ class DeviceChannelTelemetryView(BasicAuthMixin, View):
 
         dt_from = parse_dt(request.GET.get("from"))
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
+
+        # 对只读用户自动限制时间范围
+        dt_from, dt_to, was_limited = self.get_adjusted_time_range(request, dt_from, dt_to)
         bucket = parse_bucket(request.GET.get("bucket"))
 
         # 分页参数
@@ -497,7 +511,7 @@ class DeviceSummaryView(BasicAuthMixin, View):
         )
 
 
-class MultiDeviceTelemetryView(BasicAuthMixin, View):
+class MultiDeviceTelemetryView(TelemetryAccessMixin, BasicAuthMixin, View):
     """
     GET /api/v2/telemetry?device_ids=1,2,3&channels=TEMP_C,O2_VOL_PCT&from=...&to=...&bucket=10m&cursor=...
     跨设备遥测查询，支持多个设备和多个通道的对比
@@ -505,6 +519,10 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
     - channels: 通道code列表，逗号分隔
     - bucket 为空：raw 点数据（ORM）支持游标分页
     - bucket 非空：Timescale time_bucket 聚合（avg，SQL）
+    
+    访问控制：
+    - readonly 用户只能查询最近 7 天的数据
+    - operator 和 admin 用户可以查询任意时间范围的数据
     
     分页参数：
     - limit: 每页数量，默认 10000，最大 100000
@@ -545,6 +563,9 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
 
         dt_from = parse_dt(request.GET.get("from"))
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
+
+        # 对只读用户自动限制时间范围
+        dt_from, dt_to, was_limited = self.get_adjusted_time_range(request, dt_from, dt_to)
         bucket = parse_bucket(request.GET.get("bucket"))
 
         # 分页参数
@@ -676,11 +697,15 @@ class MultiDeviceTelemetryView(BasicAuthMixin, View):
         )
 
 
-class DeviceExportView(BasicAuthMixin, View):
+class DeviceExportView(TelemetryAccessMixin, BasicAuthMixin, View):
     """
     GET /api/v2/devices/<device_id>/export?from=...&to=...&channels=...
     CSV Streaming（raw 点数据）
     - ts 输出统一为 "YYYY-MM-DD HH:MM:SS"
+    
+    访问控制：
+    - readonly 用户只能导出最近 7 天的数据
+    - operator 和 admin 用户可以导出任意时间范围的数据
     """
 
     def get(self, request, device_id: int):
@@ -689,6 +714,9 @@ class DeviceExportView(BasicAuthMixin, View):
         codes = _parse_channels_param(request)
         dt_from = parse_dt(request.GET.get("from"))
         dt_to = parse_dt(request.GET.get("to")) or timezone.now()
+
+        # 对只读用户自动限制时间范围
+        dt_from, dt_to, was_limited = self.get_adjusted_time_range(request, dt_from, dt_to)
 
         qs = TelemetryKV.objects.filter(device_id=device_id, ts__lt=dt_to)
         if dt_from is not None:
