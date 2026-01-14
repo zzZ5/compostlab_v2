@@ -26,6 +26,7 @@ Device / Channel API
 
 from __future__ import annotations
 
+import time
 from typing import Dict, Optional
 
 from django.db import connection
@@ -34,6 +35,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.utils.decorators import method_decorator
+from django.db.models import F
 
 from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
 from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate, ScriptTemplate, ScriptExecution
@@ -399,6 +401,88 @@ class DeviceCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
         if "meta" in body and hasattr(d, "meta") and isinstance(body.get("meta"), dict):
             d.meta = body.get("meta")
 
+        if "configuration" in body and hasattr(d, "configuration"):
+            configuration = body.get("configuration")
+            if configuration is None:
+                d.configuration = {}
+            elif isinstance(configuration, dict):
+                # 检查是否是设备上传的配置（通过 source 标记）
+                is_from_device = body.get("source") == "device"
+                
+                if is_from_device:
+                    # 设备上传的配置：直接更新数据库
+                    d.configuration = configuration
+                else:
+                    # 前端编辑的配置：异步流程
+                    # 1. 先下发MQTT命令
+                    if not getattr(d, "response_topic", ""):
+                        return _json_400("Device.response_topic is empty, cannot send config.")
+                    
+                    try:
+                        payload = {
+                            "device": _get_device_code(d),
+                            "commands": [
+                                {
+                                    "config": configuration,
+                                    "command": "config_update"
+                                }
+                            ],
+                            "server_ts": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                        publish_json(d.response_topic, payload, qos=1, retain=False)
+                        # 创建命令记录
+                        DeviceCommand.objects.create(
+                            device=d,
+                            command="config_update",
+                            payload=payload,
+                            status=DeviceCommand.STATUS_SENT,
+                            sent_at=timezone.now(),
+                            created_by=getattr(request, "user", None),
+                            result={"mqtt": "published", "topic": d.response_topic}
+                        )
+                    except Exception as e:
+                        return JsonResponse(
+                            {"detail": f"Failed to send config via MQTT: {str(e)}"},
+                            status=500
+                        )
+                    
+                    # 2. 等待设备重新register（最多60秒）
+                    # 通过比较 last_seen_at 来检测设备是否重新上线
+                    last_seen_before = d.last_seen_at
+                    max_wait_time = 60  # 60秒超时
+                    check_interval = 1  # 每秒检查一次
+                    
+                    for _ in range(max_wait_time):
+                        time.sleep(check_interval)
+                        # 刷新设备状态
+                        d.refresh_from_db(fields=["last_seen_at", "configuration"])
+                        # 检查 last_seen_at 是否更新（设备重新注册）
+                        if d.last_seen_at and d.last_seen_at != last_seen_before:
+                            # 设备已重新注册，检查配置是否已更新
+                            if d.configuration == configuration:
+                                # 配置已更新成功
+                                return JsonResponse(
+                                    {
+                                        "detail": "Config updated successfully",
+                                        "device": _device_to_dict(d)
+                                    },
+                                    status=200
+                                )
+                            # 配置不一致，继续等待
+                    
+                    # 3. 超时：设备未在1分钟内重新注册
+                    return JsonResponse(
+                        {
+                            "detail": "Device offline: config sent but device did not re-register within 60 seconds",
+                            "status": "timeout",
+                            "command_sent": True
+                        },
+                        status=504  # Gateway Timeout
+                    )
+                # 如果是设备上传的配置，继续保存
+            else:
+                return _json_400("configuration must be an object.")
+
         if "is_active" in body and hasattr(d, "is_active"):
             d.is_active = bool(body.get("is_active"))
 
@@ -456,6 +540,88 @@ class DeviceUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
                 d.meta = meta
             else:
                 return _json_400("meta must be an object.")
+
+        if "configuration" in body and hasattr(d, "configuration"):
+            configuration = body.get("configuration")
+            if configuration is None:
+                d.configuration = {}
+            elif isinstance(configuration, dict):
+                # 检查是否是设备上传的配置（通过 source 标记）
+                is_from_device = body.get("source") == "device"
+                
+                if is_from_device:
+                    # 设备上传的配置：直接更新数据库
+                    d.configuration = configuration
+                else:
+                    # 前端编辑的配置：异步流程
+                    # 1. 先下发MQTT命令
+                    if not getattr(d, "response_topic", ""):
+                        return _json_400("Device.response_topic is empty, cannot send config.")
+                    
+                    try:
+                        payload = {
+                            "device": _get_device_code(d),
+                            "commands": [
+                                {
+                                    "config": configuration,
+                                    "command": "config_update"
+                                }
+                            ],
+                            "server_ts": timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                        publish_json(d.response_topic, payload, qos=1, retain=False)
+                        # 创建命令记录
+                        DeviceCommand.objects.create(
+                            device=d,
+                            command="config_update",
+                            payload=payload,
+                            status=DeviceCommand.STATUS_SENT,
+                            sent_at=timezone.now(),
+                            created_by=getattr(request, "user", None),
+                            result={"mqtt": "published", "topic": d.response_topic}
+                        )
+                    except Exception as e:
+                        return JsonResponse(
+                            {"detail": f"Failed to send config via MQTT: {str(e)}"},
+                            status=500
+                        )
+                    
+                    # 2. 等待设备重新register（最多60秒）
+                    # 通过比较 last_seen_at 来检测设备是否重新上线
+                    last_seen_before = d.last_seen_at
+                    max_wait_time = 60  # 60秒超时
+                    check_interval = 1  # 每秒检查一次
+                    
+                    for _ in range(max_wait_time):
+                        time.sleep(check_interval)
+                        # 刷新设备状态
+                        d.refresh_from_db(fields=["last_seen_at", "configuration"])
+                        # 检查 last_seen_at 是否更新（设备重新注册）
+                        if d.last_seen_at and d.last_seen_at != last_seen_before:
+                            # 设备已重新注册，检查配置是否已更新
+                            if d.configuration == configuration:
+                                # 配置已更新成功
+                                return JsonResponse(
+                                    {
+                                        "detail": "Config updated successfully",
+                                        "device": _device_to_dict(d)
+                                    },
+                                    status=200
+                                )
+                            # 配置不一致，继续等待
+                    
+                    # 3. 超时：设备未在1分钟内重新注册
+                    return JsonResponse(
+                        {
+                            "detail": "Device offline: config sent but device did not re-register within 60 seconds",
+                            "status": "timeout",
+                            "command_sent": True
+                        },
+                        status=504  # Gateway Timeout
+                    )
+                # 如果是设备上传的配置，继续保存
+            else:
+                return _json_400("configuration must be an object.")
 
         if "is_active" in body and hasattr(d, "is_active"):
             d.is_active = bool(body.get("is_active"))

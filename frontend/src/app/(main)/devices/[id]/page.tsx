@@ -356,6 +356,7 @@ export default function DeviceDetailPage() {
 			note: device.note || "",
 			is_active: device.is_active !== false,
 			meta: device.meta || {},
+			configuration: device.configuration || {},
 		});
 		setDeviceModalOpen(true);
 	}
@@ -376,6 +377,12 @@ export default function DeviceDetailPage() {
 				body.meta = null;
 			} else {
 				body.meta = v.meta;
+			}
+			// 当configuration为空时，显式设置为null以清空服务器端的configuration
+			if (!v.configuration || Object.keys(v.configuration).length === 0) {
+				body.configuration = null;
+			} else {
+				body.configuration = v.configuration;
 			}
 
 			await updateDevice.mutateAsync(body);
@@ -524,6 +531,42 @@ export default function DeviceDetailPage() {
 	const createTemplate = useCreateControlTemplate();
 	const deleteTemplate = useDeleteControlTemplate();
 	const queryClient = useQueryClient();
+
+	// === 设备配置管理 ===
+	const [configModalOpen, setConfigModalOpen] = useState(false);
+	const [configForm] = Form.useForm();
+	const [configSubmitting, setConfigSubmitting] = useState(false);
+
+	// 打开配置编辑
+	function openConfigEdit() {
+		if (!device) return;
+		configForm.resetFields();
+		configForm.setFieldsValue({
+			configuration: device.configuration || {},
+		});
+		setConfigModalOpen(true);
+	}
+
+	// 提交配置修改
+	async function submitConfig() {
+		setConfigSubmitting(true);
+		try {
+			const v = await configForm.validateFields();
+			const body: any = {
+				// 当configuration为空时，显式设置为null以清空服务器端的configuration
+				configuration: (!v.configuration || Object.keys(v.configuration).length === 0) ? null : v.configuration,
+			};
+
+			await updateDevice.mutateAsync(body);
+			message.success("设备配置已保存");
+			setConfigModalOpen(false);
+		} catch (err) {
+			if ((err as any)?.errorFields) return;
+			message.error(getErrorMessage(err, "保存失败"));
+		} finally {
+			setConfigSubmitting(false);
+		}
+	}
 
 	const [templateModalOpen, setTemplateModalOpen] = useState(false);
 	const [editingTemplate, setEditingTemplate] = useState<any>(null);
@@ -1322,6 +1365,49 @@ export default function DeviceDetailPage() {
 						label: "Control",
 						children: (
 							<Row gutter={[12, 12]}>
+								<Col xs={24}>
+									<Card
+										title="设备配置管理"
+										extra={
+											<Button type="primary" onClick={openConfigEdit}>
+												编辑配置
+											</Button>
+										}
+									>
+										<Space direction="vertical" size={12} style={{ width: "100%" }}>
+											<Text type="secondary">
+												管理设备的配置参数。不同设备的配置参数可能差别较大，例如采样间隔、上报频率、阈值设置等。
+											</Text>
+
+											{device?.configuration && Object.keys(device.configuration).length > 0 ? (
+												<>
+													<Text strong>当前配置：</Text>
+													<div style={{
+														background: "#f5f5f5",
+														padding: 12,
+														borderRadius: 4,
+														fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+														fontSize: 12,
+														maxHeight: 300,
+														overflow: "auto"
+													}}>
+														{Object.entries(device.configuration).map(([key, value]) => (
+															<div key={key} style={{ marginBottom: 6 }}>
+																<span style={{ color: "#1890ff", fontWeight: 600 }}>{key}:</span>{" "}
+																<span style={{ color: "#666" }}>
+																	{typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}
+																</span>
+															</div>
+														))}
+													</div>
+												</>
+											) : (
+												<Text type="secondary">暂无配置参数</Text>
+											)}
+										</Space>
+									</Card>
+								</Col>
+
 								<Col xs={24} md={12}>
 									<Card
 										title="下发命令"
@@ -1563,6 +1649,62 @@ export default function DeviceDetailPage() {
 					<Form.Item name="meta" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 					</Form.Item>
+
+					<Divider style={{ margin: "8px 0" }} />
+					<Text strong>configuration（设备配置参数）</Text>
+					<Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+						不同设备的配置参数可能差别较大，例如采样间隔、上报频率、阈值设置等
+					</Text>
+					<Form.Item name="configuration" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
+						<KeyValueEditor placeholderKey="参数名" placeholderValue="参数值" />
+					</Form.Item>
+				</Form>
+			</Modal>
+
+			{/* ===== 设备配置编辑 ===== */}
+			<Modal
+				open={configModalOpen}
+				title="编辑设备配置"
+				onCancel={() => setConfigModalOpen(false)}
+				onOk={submitConfig}
+				okText="保存"
+				afterOpenChange={(open) => {
+					if (!open) {
+						configForm.resetFields();
+					}
+				}}
+				confirmLoading={configSubmitting}
+				maskClosable={!configSubmitting}
+				width={700}
+			>
+				<Form layout="vertical" form={configForm}>
+					<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+						配置设备的运行参数。不同设备的配置参数可能差别较大，请根据实际设备类型和需求进行配置。
+					</Text>
+
+					<Form.Item
+						name="configuration"
+						style={{ marginBottom: 0 }}
+						getValueProps={(value) => ({ value })}
+					>
+						<KeyValueEditor
+							placeholderKey="参数名（例如：sample_interval）"
+							placeholderValue="参数值（例如：60）"
+						/>
+					</Form.Item>
+
+					<Divider style={{ margin: "12px 0" }} />
+					<Text type="secondary" style={{ fontSize: 11 }}>
+						常见配置参数示例：
+					</Text>
+					<ul style={{ fontSize: 12, marginTop: 8, color: "#666", paddingLeft: 20 }}>
+						<li>sample_interval: 采样间隔（秒）</li>
+						<li>report_interval: 上报间隔（秒）</li>
+						<li>threshold_temp: 温度阈值</li>
+						<li>threshold_humidity: 湿度阈值</li>
+						<li>auto_start: 自动启动开关</li>
+						<li>mode: 运行模式</li>
+					</ul>
 				</Form>
 			</Modal>
 
@@ -1653,6 +1795,15 @@ export default function DeviceDetailPage() {
 					<Text strong>meta（Key-Value）</Text>
 					<Form.Item name="meta" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
+					</Form.Item>
+
+					<Divider style={{ margin: "8px 0" }} />
+					<Text strong>configuration（设备配置参数）</Text>
+					<Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+						不同设备的配置参数可能差别较大，例如采样间隔、上报频率、阈值设置等
+					</Text>
+					<Form.Item name="configuration" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
+						<KeyValueEditor placeholderKey="参数名" placeholderValue="参数值" />
 					</Form.Item>
 				</Form>
 			</Modal>
