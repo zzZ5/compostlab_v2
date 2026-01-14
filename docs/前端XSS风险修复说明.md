@@ -6,7 +6,7 @@
 **严重程度**: 🔴 高危
 **文件**: `frontend/src/lib/auth.ts`
 
-前端将用户信息（包括敏感字段如 `role`、`is_staff`、`is_superuser`）存储在 `localStorage` 中。如果应用存在 XSS 漏洞，攻击者可以窃取这些信息。
+前端将用户信息存储在 `localStorage` 中。如果应用存在 XSS 漏洞，攻击者可以窃取这些信息。
 
 ```typescript
 // 原始代码（不安全）
@@ -22,13 +22,13 @@ export function getUser(): any | null {
 
 ## 安全风险
 
-- XSS 攻击可以窃取用户身份信息
-- 攻击者可以模拟用户操作
-- 可能导致会话劫持
+- localStorage 会永久存储数据（直到手动清除），即使关闭浏览器也仍然存在
+- 数据在同源的所有标签页间共享，增加了泄露风险
+- 如果存在 XSS 漏洞，攻击者可以长期访问存储的用户信息
 
 ## 修复方案
 
-采用**方案 2: 使用 sessionStorage 并只存储非敏感信息**
+使用 **sessionStorage 替代 localStorage**
 
 ### 1. 使用 sessionStorage 替代 localStorage
 
@@ -40,112 +40,95 @@ export function getUser(): any | null {
 | 作用域 | 同源的所有标签页共享 | 仅当前标签页有效 |
 | 安全性 | 较低（长期存储易被窃取） | 较高（短期存储降低风险） |
 
-### 2. 只存储非敏感信息
-
-修改 `setUser` 函数，只存储用于显示的字段：
+### 2. 修改存储方式
 
 ```typescript
 export function setUser(user: any) {
     if (typeof window === "undefined") return;
-    // 只存储非敏感信息，避免 XSS 窃取敏感字段
+    // 使用 sessionStorage 存储用户信息
     const safeUser = {
         id: user.id,
         username: user.username,
         real_name: user.real_name,
+        role: user.role,
         role_display: user.role_display,
-        // 不存储 role、is_staff、is_superuser 等敏感字段
-        // 这些字段应该通过 API 动态获取
     };
     sessionStorage.setItem("user", JSON.stringify(safeUser));
 }
-```
 
-### 3. 动态获取完整用户信息
-
-添加新函数 `fetchFullUserInfo`，通过 API 获取完整的用户信息（包含权限字段）：
-
-```typescript
-/**
- * 获取完整的用户信息（包含权限字段）
- * 通过 API 动态获取，避免在本地存储敏感信息
- */
-export async function fetchFullUserInfo(): Promise<any> {
-    const token = getAccessToken();
-    if (!token) return null;
-
+export function getUser(): any | null {
+    if (typeof window === "undefined") return null;
+    const str = sessionStorage.getItem("user");
+    if (!str) return null;
     try {
-        const response = await fetch("/api/v2/auth/me", {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-
-        if (!response.ok) {
-            return null;
-        }
-
-        const user = await response.json();
-        return user;
+        return JSON.parse(str);
     } catch {
         return null;
     }
 }
+
+export function clearTokens() {
+    if (typeof window === "undefined") return;
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    sessionStorage.removeItem("user");  // 同时清除 sessionStorage
+}
 ```
 
-### 4. 更新前端代码
+### 3. 前端使用
 
-修改 `frontend/src/app/(main)/layout.tsx`，使用 `fetchFullUserInfo` 获取完整用户信息用于权限判断：
+前端代码无需修改，`getUser()` 返回的对象包含 `role` 字段，可以正常用于权限判断：
 
 ```typescript
-// 添加 fullUserInfo 状态
-const [fullUserInfo, setFullUserInfo] = useState<any>(null);
+const currentUser = getUser();
 
-// 在 useEffect 中加载完整用户信息
-useEffect(() => {
-    const ok = typeof window !== "undefined" ? (hasToken() || hasBasicAuth()) : true;
-    if (!ok) {
-        const next = encodeURIComponent(pathname);
-        router.replace(`/login?next=${next}`);
-        return;
-    }
-    // 加载基本信息（用于显示）
-    if (typeof window !== "undefined") {
-        setCurrentUser(getUser());
-    }
-    // 加载完整用户信息（包含权限字段，用于权限判断）
-    fetchFullUserInfo().then(setFullUserInfo);
-    setReady(true);
-}, [pathname, router]);
+// 菜单权限判断
+{currentUser?.role === "admin" && (
+    <Menu.Item key="/users">用户管理</Menu.Item>
+)}
 
-// 使用 fullUserInfo 进行权限判断
-<Menu
-  items={[
-    // ...
-    ...(fullUserInfo?.role === "admin" || fullUserInfo?.is_staff || fullUserInfo?.is_superuser
-      ? [
-          { key: "/announcements", label: "公告管理" },
-          { key: "/users", label: "用户管理" },
-          { key: "/audit-logs", label: "操作日志" },
-        ]
-      : []),
-  ]}
-/>
+// 角色标签显示
+<Tag color={currentUser?.role === "admin" ? "red" : "default"}>
+    {currentUser?.role_display}
+</Tag>
 ```
 
 ## 安全改进
 
 1. **降低 XSS 攻击影响**
-   - 敏感信息（role, is_staff, is_superuser）不再存储在客户端
-   - 即使发生 XSS，攻击者也无法获取权限信息
-
-2. **减少数据泄露风险**
    - sessionStorage 在关闭页面后自动清除
    - 数据不会跨标签页共享
+   - 减少了攻击者获取信息的时间窗口
 
-3. **保持功能完整性**
-   - 基本用户信息（用户名、显示名）仍可从 sessionStorage 快速获取
-   - 完整用户信息（包含权限）通过 API 动态获取
-   - 不影响前端 UI 显示和权限判断
+2. **保持用户体验**
+   - `username`、`real_name`、`role` 等字段可以正常显示
+   - 权限判断逻辑无需修改
+   - 不影响现有功能
+
+3. **Token 仍使用 localStorage**
+   - `access_token` 和 `refresh_token` 仍存储在 localStorage（因为需要持久化）
+   - Token 本身通过 HttpOnly Cookie 会更安全，但需要后端配合
+
+## 存储的数据
+
+**sessionStorage 中的 user 对象**（关闭页面即清除）：
+```json
+{
+  "id": 1,
+  "username": "admin",
+  "real_name": "管理员",
+  "role": "admin",
+  "role_display": "管理员"
+}
+```
+
+**localStorage 中的 tokens**（持久化存储）：
+```json
+{
+  "access_token": "eyJhbGc...",
+  "refresh_token": "eyJhbGc..."
+}
+```
 
 ## 测试建议
 
@@ -154,21 +137,23 @@ useEffect(() => {
 - [ ] 用户登录后，右上角正确显示用户名和角色标签
 - [ ] 管理员可以看到"公告管理"、"用户管理"、"操作日志"菜单
 - [ ] 非管理员看不到管理菜单
-- [ ] 关闭页面后重新打开，需要重新登录
+- [ ] 关闭页面后重新打开，需要重新登录（sessionStorage 已清除）
 
 ### 2. 安全测试
 
 - [ ] 打开浏览器开发者工具，检查 sessionStorage 中的 user 对象
-  - 应该只包含：id, username, real_name, role_display
-  - 不应该包含：role, is_staff, is_superuser
+  - 应该包含：id, username, real_name, role, role_display
 - [ ] 检查 localStorage 中的 tokens
   - access_token 和 refresh_token 仍然存在（这是正常的）
   - localStorage 中不应该有 user 字段
+- [ ] 关闭浏览器标签页后，sessionStorage 中的 user 应该被清除
+- [ ] 打开新的标签页访问同一域名，sessionStorage 应该是空的
 
-### 3. 性能测试
+### 3. 跨标签页测试
 
-- [ ] 页面刷新时，API 请求 `/api/v2/auth/me` 响应正常
-- [ ] 菜单渲染延迟不明显
+- [ ] 在标签页 A 中登录
+- [ ] 在标签页 B 中访问同一域名（不登录）
+- [ ] 标签页 B 不应该看到标签页 A 的用户信息（sessionStorage 不共享）
 
 ## 后续建议
 
@@ -186,7 +171,12 @@ useEffect(() => {
 
 ## 总结
 
-通过将敏感用户信息从 localStorage 迁移到 sessionStorage，并只存储非敏感字段，我们有效降低了 XSS 攻击的风险。完整用户信息（包含权限字段）通过 API 动态获取，既保证了安全性，又保持了功能完整性。
+通过将用户信息从 localStorage 迁移到 sessionStorage，我们有效降低了 XSS 攻击的风险。主要改进：
+
+- **短期存储**: sessionStorage 在关闭页面后自动清除，不会长期存储用户数据
+- **标签页隔离**: 数据只在当前标签页有效，不会跨标签页共享
+- **功能完整**: username、role 等字段可以正常显示和用于权限判断
+- **简化实现**: 不需要额外的 API 调用，代码改动最小
 
 ---
 
