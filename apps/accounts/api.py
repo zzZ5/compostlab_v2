@@ -16,6 +16,7 @@ from .models import UserProfile, AuditLog, UserRole
 from .mixins import JWTAuthMixin, AdminRequiredMixin
 from .utils import log_audit, get_or_create_profile, get_client_ip
 from .token_blacklist import TokenBlacklist
+from .rate_limit import LoginRateLimitedMixin, AuthRateLimitedMixin
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,13 @@ logger = logging.getLogger(__name__)
 # ==================== 认证相关 ====================
 
 @method_decorator(csrf_exempt, name='dispatch')
-class LoginView(View):
+class LoginView(LoginRateLimitedMixin, View):
     """
     POST /api/v2/auth/login
     Body: {"username": "...", "password": "..."}
     Returns: {"access": "...", "refresh": "...", "user": {...}}
+
+    速率限制: 5 次 / 5 分钟
     """
     
     def post(self, request):
@@ -221,11 +224,13 @@ class MeView(JWTAuthMixin, View):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
-class ChangePasswordView(JWTAuthMixin, View):
+class ChangePasswordView(AuthRateLimitedMixin, JWTAuthMixin, View):
     """
     POST /api/v2/auth/change-password
     Body: {"old_password": "...", "new_password": "..."}
     修改密码后会撤销用户的所有 token
+
+    速率限制: 3 次 / 小时
     """
 
     def post(self, request):
