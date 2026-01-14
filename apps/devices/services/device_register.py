@@ -78,9 +78,10 @@ def register_device_from_payload(
     if is_new and hasattr(device, "register_at") and not device.register_at:
         device.register_at = timezone.now()
 
-    # 更新配置信息
-    if "configuration" in payload and isinstance(payload.get("configuration"), dict) and hasattr(device, "configuration"):
-        device.configuration = payload.get("configuration")
+    # 更新配置信息（支持 config 和 configuration 两种字段名）
+    config_data = payload.get("config") or payload.get("configuration")
+    if config_data and isinstance(config_data, dict) and hasattr(device, "configuration"):
+        device.configuration = config_data
 
     # 更新最后上线时间
     device.last_seen_at = timezone.now()
