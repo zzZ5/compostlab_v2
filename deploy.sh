@@ -23,18 +23,23 @@ show_help() {
 用法: ./deploy.sh [选项]
 
 选项:
-  build       - 重新构建前端（使用 HTTPS）
-  restart     - 重启 Docker 服务
-  restart-mqtt- 重启 MQTT Worker
-  status      - 查看服务状态
-  logs-mqtt   - 查看 MQTT Worker 日志
-  help        - 显示此帮助信息
+  build              - 重新构建前端（使用 HTTPS）
+  restart            - 重启 Docker 服务
+  restart-mqtt       - 重启 MQTT Worker（遥测数据）
+  restart-register   - 重启 MQTT Register Worker（设备注册）
+  restart-all-mqtt   - 重启所有 MQTT Worker
+  status             - 查看服务状态
+  logs-mqtt          - 查看 MQTT Worker 日志（遥测数据）
+  logs-register      - 查看 MQTT Register Worker 日志（设备注册）
+  help               - 显示此帮助信息
 
 示例:
-  ./deploy.sh build        # 重建前端
-  ./deploy.sh restart      # 重启服务
-  ./deploy.sh restart-mqtt # 重启 MQTT Worker
-  ./deploy.sh logs-mqtt    # 查看 MQTT 日志
+  ./deploy.sh build            # 重建前端
+  ./deploy.sh restart          # 重启服务
+  ./deploy.sh restart-mqtt     # 重启 MQTT Worker
+  ./deploy.sh restart-register # 重启设备注册 Worker
+  ./deploy.sh logs-mqtt        # 查看 MQTT 遥测日志
+  ./deploy.sh logs-register    # 查看设备注册日志
 
 注意: CPolar 隧道请在网页控制台配置
 EOF
@@ -160,9 +165,9 @@ show_status() {
     echo ""
 }
 
-# 重启 MQTT Worker
+# 重启 MQTT Worker（遥测数据）
 restart_mqtt() {
-    echo -e "${YELLOW}重启 MQTT Worker...${NC}"
+    echo -e "${YELLOW}重启 MQTT Worker（遥测数据）...${NC}"
     docker compose restart mqtt_worker
     sleep 5
     echo -e "${GREEN}MQTT Worker 已重启${NC}"
@@ -172,11 +177,42 @@ restart_mqtt() {
     show_status
 }
 
-# 查看 MQTT Worker 日志
+# 重启 MQTT Register Worker（设备注册）
+restart_register() {
+    echo -e "${YELLOW}重启 MQTT Register Worker（设备注册）...${NC}"
+    docker compose restart mqtt_register_worker
+    sleep 5
+    echo -e "${GREEN}MQTT Register Worker 已重启${NC}"
+    echo ""
+
+    # 显示状态
+    show_status
+}
+
+# 重启所有 MQTT Worker
+restart_all_mqtt() {
+    echo -e "${YELLOW}重启所有 MQTT Worker...${NC}"
+    docker compose restart mqtt_worker mqtt_register_worker
+    sleep 5
+    echo -e "${GREEN}所有 MQTT Worker 已重启${NC}"
+    echo ""
+
+    # 显示状态
+    show_status
+}
+
+# 查看 MQTT Worker 日志（遥测数据）
 logs_mqtt() {
-    echo -e "${YELLOW}MQTT Worker 日志（最近 50 行）：${NC}"
+    echo -e "${YELLOW}MQTT Worker 日志（遥测数据，最近 50 行）：${NC}"
     echo ""
     docker compose logs --tail=50 mqtt_worker
+}
+
+# 查看 MQTT Register Worker 日志（设备注册）
+logs_register() {
+    echo -e "${YELLOW}MQTT Register Worker 日志（设备注册，最近 50 行）：${NC}"
+    echo ""
+    docker compose logs --tail=50 mqtt_register_worker
 }
 
 # 主函数
@@ -193,11 +229,20 @@ main() {
         restart-mqtt)
             restart_mqtt
             ;;
+        restart-register)
+            restart_register
+            ;;
+        restart-all-mqtt)
+            restart_all_mqtt
+            ;;
         status)
             show_status
             ;;
         logs-mqtt)
             logs_mqtt
+            ;;
+        logs-register)
+            logs_register
             ;;
         help|--help|-h)
             show_help

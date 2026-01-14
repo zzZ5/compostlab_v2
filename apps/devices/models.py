@@ -28,6 +28,9 @@ class Device(models.Model):
     meta = models.JSONField(default=dict, blank=True)
 
     last_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    ip_address = models.CharField(max_length=64, blank=True, default="", help_text="设备上线时的 IP 地址")
+    register_at = models.DateTimeField(null=True, blank=True, help_text="设备首次注册时间")
+    configuration = models.JSONField(default=dict, blank=True, help_text="设备配置信息")
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

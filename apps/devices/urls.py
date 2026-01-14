@@ -199,5 +199,16 @@ urlpatterns = [
         script_views.AutoControlView.as_view(),
         name="auto_control_check",
     ),
+    # -------- Device Registration --------
+    # POST /api/v2/devices/register
+    path(
+        "devices/register",
+        method_router(
+            {
+                "POST": views.DeviceRegisterView,
+            }
+        ),
+        name="device_register",
+    ),
 ]
 

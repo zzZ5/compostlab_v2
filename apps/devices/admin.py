@@ -64,6 +64,8 @@ class DeviceAdmin(admin.ModelAdmin):
         "name",
         "device_code",
         "is_active",
+        "ip_address",
+        "register_at",
         "last_seen_at",
         "post_topic",
         "response_topic",
@@ -73,10 +75,29 @@ class DeviceAdmin(admin.ModelAdmin):
         "updated_at",
     )
     list_filter = ("is_active",) if "is_active" in DEVICE_FIELDS else ()
-    search_fields = ("name", DEVICE_CODE_FIELD)
+    search_fields = ("name", DEVICE_CODE_FIELD, "ip_address")
     ordering = ("-id",)
     readonly_fields = tuple(
-        f for f in ("created_at", "updated_at", "last_seen_at") if f in DEVICE_FIELDS
+        f for f in ("created_at", "updated_at", "last_seen_at", "register_at") if f in DEVICE_FIELDS
+    )
+
+    fieldsets = (
+        ("基本信息", {
+            "fields": ("name", DEVICE_CODE_FIELD, "is_active")
+        }),
+        ("注册信息", {
+            "fields": ("ip_address", "register_at", "last_seen_at")
+        }),
+        ("MQTT 配置", {
+            "fields": ("post_topic", "response_topic")
+        }),
+        ("配置信息", {
+            "fields": ("configuration", "note")
+        }),
+        ("时间信息", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
     )
 
     def device_code(self, obj: Device) -> str:
@@ -89,6 +110,19 @@ class DeviceAdmin(admin.ModelAdmin):
 
     def last_seen_at(self, obj: Device):
         return getattr(obj, "last_seen_at", None)
+
+    def ip_address(self, obj: Device):
+        ip = getattr(obj, "ip_address", None)
+        if ip:
+            return format_html('<span style="color:#1890ff;font-family:monospace;">{}</span>', ip)
+        return "-"
+
+    ip_address.short_description = "IP 地址"
+
+    def register_at(self, obj: Device):
+        return getattr(obj, "register_at", None)
+
+    register_at.short_description = "注册时间"
 
     def post_topic(self, obj: Device):
         return getattr(obj, "post_topic", None)

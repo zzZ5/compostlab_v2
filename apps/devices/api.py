@@ -153,6 +153,12 @@ def _device_to_dict(d: Device) -> dict:
         out["response_topic"] = getattr(d, "response_topic") or ""
     if hasattr(d, "note"):
         out["note"] = getattr(d, "note") or ""
+    if hasattr(d, "ip_address"):
+        out["ip_address"] = getattr(d, "ip_address") or ""
+    if hasattr(d, "register_at"):
+        out["register_at"] = _dt_local_str(getattr(d, "register_at", None))
+    if hasattr(d, "configuration"):
+        out["configuration"] = getattr(d, "configuration", {}) or {}
 
     return {k: v for k, v in out.items() if v is not None}
 
@@ -1090,3 +1096,93 @@ class ControlTemplateDetailView(
 
         tpl.delete()
         return JsonResponse({"detail": "deleted", "id": template_id}, status=200)
+
+
+# -------------------------
+# Device Registration (MQTT)
+# -------------------------
+@method_decorator(csrf_exempt, name="dispatch")
+class DeviceRegisterView(BasicAuthMixin, JsonBodyMixin, View):
+    """
+    POST /api/v2/devices/register
+
+    设备上线注册接口（可通过 MQTT 或 HTTP 调用）
+    MQTT topic: compostlab/v2/{device_code}/register
+
+    Request body:
+    {
+      "schema_version": 2,
+      "ip_address": "192.168.1.100",
+      "timestamp": "2026-01-14T12:00:00Z",
+      "configuration": {
+        "sampling_interval": 5,
+        "data_retention_days": 30,
+        "firmware_version": "1.0.0",
+        "hardware_version": "v1.2"
+      }
+    }
+
+    注意：
+    - device_code 从 MQTT topic 中提取: compostlab/v2/{device_code}/register
+    - 或者通过 body 中的 device_code 字段提供
+    - 如果设备不存在，会自动创建
+    """
+
+    def post(self, request):
+        body = self.json_body(request)
+
+        # 提取 device_code
+        device_code = None
+
+        # 1. 从 body 中获取 device_code
+        if "device_code" in body:
+            device_code = (body.get("device_code") or "").strip()
+
+        # 2. 从 topic 中提取（如果通过 MQTT 调用）
+        topic = getattr(request, "mqtt_topic", None) or request.GET.get("topic", "")
+        if topic and not device_code:
+            parts = [p for p in topic.strip().split("/") if p]
+            if len(parts) >= 4 and parts[0].lower() == "compostlab" and parts[1].lower() == "v2":
+                # compostlab/v2/{device_code}/register
+                if parts[3].lower() == "register":
+                    device_code = parts[2].strip()
+
+        if not device_code:
+            return _json_400("device_code is required (from body or topic)")
+
+        # 查找或创建设备
+        try:
+            d = Device.objects.get(**{DEVICE_CODE_FIELD: device_code})
+            is_new = False
+        except Device.DoesNotExist:
+            d = Device()
+            _set_if_exists(d, DEVICE_CODE_FIELD, device_code)
+            _set_if_exists(d, "name", device_code)
+            d.is_active = True
+            d.save()
+            is_new = True
+
+        # 更新 IP 地址
+        ip_address = (body.get("ip_address") or "").strip()
+        if ip_address and hasattr(d, "ip_address"):
+            d.ip_address = ip_address
+
+        # 更新注册时间（如果是新设备或首次注册）
+        if is_new and hasattr(d, "register_at"):
+            d.register_at = timezone.now()
+
+        # 更新配置信息
+        if "configuration" in body and isinstance(body.get("configuration"), dict) and hasattr(d, "configuration"):
+            d.configuration = body.get("configuration")
+
+        # 更新最后上线时间
+        d.last_seen_at = timezone.now()
+
+        d.save()
+
+        # 返回设备信息
+        response = _device_to_dict(d)
+        response["registered"] = not is_new  # false 表示新创建，true 表示已存在并更新
+
+        return JsonResponse(response, status=201 if is_new else 200)
+
