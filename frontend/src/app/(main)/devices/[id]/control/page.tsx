@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button, Card, Collapse, Form, Input, InputNumber, Modal, Space, Table, Tag, Tabs, Typography, message } from "antd";
 import { useSendDeviceCommand } from "@/features/devices/mutations";
 import { useDeviceCommands, useDevicesTree } from "@/features/devices/queries";
+import { Spin } from "antd";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -26,6 +27,10 @@ export default function DeviceControlPage() {
 	const [configModalOpen, setConfigModalOpen] = useState(false);
 	const [configJson, setConfigJson] = useState<string>("");
 
+	// IP地理位置
+	const [ipLocation, setIpLocation] = useState<string>("");
+	const [ipLocationLoading, setIpLocationLoading] = useState(false);
+
 	// 获取设备信息（包含 configuration）
 	const devicesQ = useDevicesTree(true);
 	const device = useMemo(() => {
@@ -35,12 +40,40 @@ export default function DeviceControlPage() {
 	const sendMut = useSendDeviceCommand(deviceId);
 	const cmdQ = useDeviceCommands(deviceId, 50);
 
+	// 查询IP地理位置
+	useEffect(() => {
+		if (device?.ip_address) {
+			fetchIpLocation(device.ip_address);
+		}
+	}, [device?.ip_address]);
+
 	const send = async (commands: any[]) => {
 		try {
 			await sendMut.mutateAsync({ commands });
 			message.success("命令已下发（已发布到 MQTT）");
 		} catch (e: any) {
 			message.error(`下发失败：${e?.message || String(e)}`);
+		}
+	};
+
+	// 查询IP地理位置
+	const fetchIpLocation = async (ip: string) => {
+		if (!ip || ipLocationLoading) return;
+		setIpLocationLoading(true);
+		try {
+			const response = await fetch(`http://ip-api.com/json/${ip}?lang=zh-CN`);
+			const data = await response.json();
+			if (data.status === 'success') {
+				const location = `${data.country || ''} ${data.regionName || ''} ${data.city || ''}`.trim();
+				setIpLocation(location);
+			} else {
+				setIpLocation("未知位置");
+			}
+		} catch (e) {
+			console.error("IP地理位置查询失败:", e);
+			setIpLocation("查询失败");
+		} finally {
+			setIpLocationLoading(false);
 		}
 	};
 
@@ -71,7 +104,17 @@ export default function DeviceControlPage() {
 				{device && (
 					<>
 						<Tag color="blue">{device.code}</Tag>
-						{device.ip_address && <Tag color="green">IP: {device.ip_address}</Tag>}
+						{device.ip_address && (
+							<Tag color="green">
+								IP: {device.ip_address}
+								{ipLocation && (
+									<>
+										{ipLocationLoading && <Spin size="small" style={{ marginLeft: 4 }} />}
+										{!ipLocationLoading && ipLocation && <span style={{ marginLeft: 8 }}>({ipLocation})</span>}
+									</>
+								)}
+							</Tag>
+						)}
 					</>
 				)}
 				<Button onClick={() => router.push(`/devices/${deviceId}`)}>返回设备详情</Button>

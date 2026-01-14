@@ -378,12 +378,7 @@ export default function DeviceDetailPage() {
 			} else {
 				body.meta = v.meta;
 			}
-			// 当configuration为空时，显式设置为null以清空服务器端的configuration
-			if (!v.configuration || Object.keys(v.configuration).length === 0) {
-				body.configuration = null;
-			} else {
-				body.configuration = v.configuration;
-			}
+			// configuration 不在设备编辑中修改，仅在Control页面的配置编辑Modal中修改
 
 			await updateDevice.mutateAsync(body);
 			message.success("设备已保存");
@@ -537,6 +532,31 @@ export default function DeviceDetailPage() {
 	const [configForm] = Form.useForm();
 	const [configSubmitting, setConfigSubmitting] = useState(false);
 
+	// === IP地理位置查询 ===
+	const [ipLocation, setIpLocation] = useState<string>("");
+	const [ipLocationLoading, setIpLocationLoading] = useState(false);
+
+	// 查询IP地理位置
+	async function fetchIpLocation(ip: string) {
+		if (!ip || ipLocationLoading) return;
+		setIpLocationLoading(true);
+		try {
+			const response = await fetch(`http://ip-api.com/json/${ip}?lang=zh-CN`);
+			const data = await response.json();
+			if (data.status === 'success') {
+				const location = `${data.country || ''} ${data.regionName || ''} ${data.city || ''}`.trim();
+				setIpLocation(location);
+			} else {
+				setIpLocation("未知位置");
+			}
+		} catch (e) {
+			console.error("IP地理位置查询失败:", e);
+			setIpLocation("查询失败");
+		} finally {
+			setIpLocationLoading(false);
+		}
+	}
+
 	// 打开配置编辑
 	function openConfigEdit() {
 		if (!device) return;
@@ -613,6 +633,13 @@ export default function DeviceDetailPage() {
 			});
 		}
 	}, [templateModalOpen, editingTemplate]);
+
+	// 查询IP地理位置
+	useEffect(() => {
+		if (device?.ip_address) {
+			fetchIpLocation(device.ip_address);
+		}
+	}, [device?.ip_address]);
 
 	// 更新模板（内部调用）
 	async function updateTemplate(id: number, data: any) {
@@ -846,7 +873,15 @@ export default function DeviceDetailPage() {
 									</Space>
 									<Text type="secondary">通道: {channels.length}</Text>
 									{device.ip_address && (
-										<Text type="secondary">IP: {device.ip_address}</Text>
+										<Text type="secondary">
+											IP: {device.ip_address}
+											{ipLocation && (
+												<>
+													{ipLocationLoading && <Spin size="small" style={{ marginLeft: 4 }} />}
+													{!ipLocationLoading && ipLocation && <span style={{ marginLeft: 8 }}>({ipLocation})</span>}
+												</>
+											)}
+										</Text>
 									)}
 								</Space>
 							</Col>
@@ -1649,15 +1684,6 @@ export default function DeviceDetailPage() {
 					<Form.Item name="meta" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
 					</Form.Item>
-
-					<Divider style={{ margin: "8px 0" }} />
-					<Text strong>configuration（设备配置参数）</Text>
-					<Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-						不同设备的配置参数可能差别较大，例如采样间隔、上报频率、阈值设置等
-					</Text>
-					<Form.Item name="configuration" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
-						<KeyValueEditor placeholderKey="参数名" placeholderValue="参数值" />
-					</Form.Item>
 				</Form>
 			</Modal>
 
@@ -1795,15 +1821,6 @@ export default function DeviceDetailPage() {
 					<Text strong>meta（Key-Value）</Text>
 					<Form.Item name="meta" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
 						<KeyValueEditor placeholderKey="key" placeholderValue="value" />
-					</Form.Item>
-
-					<Divider style={{ margin: "8px 0" }} />
-					<Text strong>configuration（设备配置参数）</Text>
-					<Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-						不同设备的配置参数可能差别较大，例如采样间隔、上报频率、阈值设置等
-					</Text>
-					<Form.Item name="configuration" style={{ marginTop: 8 }} getValueProps={(value) => ({ value })}>
-						<KeyValueEditor placeholderKey="参数名" placeholderValue="参数值" />
 					</Form.Item>
 				</Form>
 			</Modal>
