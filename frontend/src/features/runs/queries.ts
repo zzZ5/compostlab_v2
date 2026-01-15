@@ -37,7 +37,16 @@ export function useRunTelemetry(args: {
 	limit?: number;
 }) {
 	const { runId, from, to, channels, bucket, group, treatment, limit } = args;
-	const argsKey = [from, to, channels?.join(",") || "", bucket || "", group || "", treatment || "", limit || ""].join("|");
+	// 确保依赖数组长度稳定，使用固定顺序和空字符串代替 null/undefined
+	const argsKey = [
+		from || "",
+		to || "",
+		channels?.join(",") || "",
+		bucket || "",
+		group || "",
+		treatment || "",
+		limit ?? ""
+	].join("|");
 
 	return useQuery<RunTelemetryResp>({
 		queryKey: runKeys.telemetry(runId, argsKey),

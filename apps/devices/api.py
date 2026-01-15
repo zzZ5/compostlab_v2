@@ -641,20 +641,18 @@ class DeviceUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 class DeviceDeleteView(BasicAuthMixin, View):
     """DELETE /api/v2/devices/<device_id>"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def delete(self, request, device_id: int):
+        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
+        # 直接检查权限
         from apps.permissions import check_permission, ResourceType, ActionType
-
-        # 检查删除权限（需要 admin 角色）
+        
         user = getattr(request, "user", None)
         if not check_permission(user, ResourceType.DEVICE, ActionType.DELETE):
             return JsonResponse(
                 {"detail": "Permission denied. Admin role required for device deletion."},
                 status=403,
             )
-
-        return super().dispatch(request, *args, **kwargs)
-
-    def delete(self, request, device_id: int):
+        
         try:
             d = Device.objects.get(id=device_id)
         except Device.DoesNotExist:
@@ -954,10 +952,11 @@ class ChannelUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 class ChannelDeleteView(BasicAuthMixin, View):
     """DELETE /api/v2/devices/<device_id>/channels/<channel_id>"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def delete(self, request, device_id: int, channel_id: int):
+        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
+        # 直接检查权限
         from apps.permissions import check_permission, ResourceType, ActionType
 
-        # 检查删除权限（需要 admin 角色）
         user = getattr(request, "user", None)
         if not check_permission(user, ResourceType.CHANNEL, ActionType.DELETE):
             return JsonResponse(
@@ -965,9 +964,6 @@ class ChannelDeleteView(BasicAuthMixin, View):
                 status=403,
             )
 
-        return super().dispatch(request, *args, **kwargs)
-
-    def delete(self, request, device_id: int, channel_id: int):
         try:
             Device.objects.get(id=device_id)
         except Device.DoesNotExist:
@@ -1216,20 +1212,6 @@ class ControlTemplateDetailView(
     DELETE /api/v2/control-templates/<id>
     """
 
-    def dispatch(self, request, *args, **kwargs):
-        from apps.permissions import check_permission, ResourceType, ActionType
-
-        # 对于 DELETE 方法，需要 admin 权限
-        if request.method == "DELETE":
-            user = getattr(request, "user", None)
-            if not check_permission(user, ResourceType.SCRIPT, ActionType.DELETE):
-                return JsonResponse(
-                    {"detail": "Permission denied. Admin role required for control template deletion."},
-                    status=403,
-                )
-
-        return super().dispatch(request, *args, **kwargs)
-
     def get(self, request, template_id: int):
         try:
             tpl = ControlTemplate.objects.get(id=template_id)
@@ -1295,6 +1277,17 @@ class ControlTemplateDetailView(
         return self.patch(request, template_id)
 
     def delete(self, request, template_id: int):
+        # BasicAuthMixin.dispatch 和 StaffRequiredMixin 已经认证了用户并设置了 request.user
+        # 对于 DELETE 方法，需要 admin 权限
+        from apps.permissions import check_permission, ResourceType, ActionType
+
+        user = getattr(request, "user", None)
+        if not check_permission(user, ResourceType.SCRIPT, ActionType.DELETE):
+            return JsonResponse(
+                {"detail": "Permission denied. Admin role required for control template deletion."},
+                status=403,
+            )
+
         try:
             tpl = ControlTemplate.objects.get(id=template_id)
         except ControlTemplate.DoesNotExist:

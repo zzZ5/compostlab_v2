@@ -343,14 +343,14 @@ class RunUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-@method_decorator(csrf_exempt, name="dispatch")
 class RunDeleteView(BasicAuthMixin, View):
     """DELETE /api/v2/runs/<run_id>"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def delete(self, request, run_id: int):
+        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
+        # 直接检查权限
         from apps.permissions import check_permission, ResourceType, ActionType
 
-        # 检查删除权限（需要 admin 角色）
         user = getattr(request, "user", None)
         if not check_permission(user, ResourceType.RUN, ActionType.DELETE):
             return JsonResponse(
@@ -358,9 +358,6 @@ class RunDeleteView(BasicAuthMixin, View):
                 status=403,
             )
 
-        return super().dispatch(request, *args, **kwargs)
-
-    def delete(self, request, run_id: int):
         run = Run.objects.get(id=run_id)
         run.delete()
         return JsonResponse({"detail": "deleted", "run_id": run_id}, status=200)

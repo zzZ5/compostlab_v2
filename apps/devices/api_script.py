@@ -179,19 +179,25 @@ class ScriptTemplateDetailView(
     DELETE  /api/v2/scripts/<id>
     """
 
-    def dispatch(self, request, *args, **kwargs):
+    def delete(self, request, script_id: int):
+        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
+        # 对于 DELETE 方法，需要 admin 权限
         from apps.permissions import check_permission, ResourceType, ActionType
 
-        # 对于 DELETE 方法，需要 admin 权限
-        if request.method == "DELETE":
-            user = getattr(request, "user", None)
-            if not check_permission(user, ResourceType.SCRIPT, ActionType.DELETE):
-                return JsonResponse(
-                    {"detail": "Permission denied. Admin role required for script deletion."},
-                    status=403,
-                )
+        user = getattr(request, "user", None)
+        if not check_permission(user, ResourceType.SCRIPT, ActionType.DELETE):
+            return JsonResponse(
+                {"detail": "Permission denied. Admin role required for script deletion."},
+                status=403,
+            )
 
-        return super().dispatch(request, *args, **kwargs)
+        try:
+            script = ScriptTemplate.objects.get(id=script_id)
+        except ScriptTemplate.DoesNotExist:
+            return JsonResponse({"detail": "Script template not found."}, status=404)
+
+        script.delete()
+        return JsonResponse({"detail": "deleted", "script_id": script_id}, status=200)
 
     def get(self, request, script_id: int):
         try:
