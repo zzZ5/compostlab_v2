@@ -17,6 +17,8 @@ import {
     LogoutOutlined,
     ControlOutlined,
     BellOutlined,
+    InfoCircleOutlined,
+    FileTextOutlined,
 } from "@ant-design/icons";
 import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser, setUser } from "@/lib/auth";
 import { useMe } from "@/features/users/queries";
@@ -39,6 +41,7 @@ function getSelectedKey(pathname: string) {
     if (pathname.startsWith("/users")) return "/users";
     if (pathname.startsWith("/profile")) return "/profile";
     if (pathname.startsWith("/audit-logs")) return "/audit-logs";
+    if (pathname.startsWith("/usage")) return "/usage";
     return "/";
 }
 
@@ -124,17 +127,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         collapsedWidth={isMobile ? 0 : 80}
         style={{ borderRight: "1px solid #e8e8e8" }}
       >
-        <div
-          style={{
-            height: 56,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: collapsed ? "0" : "0 16px",
-          }}
-        >
-          <CompostLabLogo size={collapsed ? "small" : "large"} />
-        </div>
+        <Link href="/" style={{ display: "block", width: "100%" }}>
+          <div
+            style={{
+              height: 56,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: collapsed ? "0" : "0 16px",
+            }}
+          >
+            <CompostLabLogo size={collapsed ? "small" : "large"} />
+          </div>
+        </Link>
 
         <Menu
           theme="dark"
@@ -155,6 +160,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                   { key: "/audit-logs", icon: <AuditOutlined />, label: <Link href="/audit-logs">操作日志</Link> },
                 ]
               : []),
+            { type: "divider" },
+            { key: "/usage", icon: <FileTextOutlined />, label: <Link href="/usage">使用说明</Link> },
+            { key: "/about", icon: <InfoCircleOutlined />, label: <Link href="/about">关于我们</Link> },
           ]}
         />
       </Sider>

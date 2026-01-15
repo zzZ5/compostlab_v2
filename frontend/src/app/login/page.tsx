@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { Button, Card, Form, Input, Typography, message } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { setTokens, setUser, clearTokens } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { LoginResp } from "@/types/api";
@@ -99,6 +100,14 @@ function LoginForm() {
             登录
           </Button>
         </Form>
+
+        <div style={{ marginTop: 16, textAlign: "center" }}>
+          <Link href="/about">
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              关于我们
+            </Text>
+          </Link>
+        </div>
       </Card>
     </div>
   );
