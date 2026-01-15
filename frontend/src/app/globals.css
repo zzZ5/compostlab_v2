@@ -40,3 +40,39 @@ a {
     font-size: 14px;
   }
 }
+
+/* 固定布局相关样式 */
+.ant-layout-sider {
+  transition: width 0.2s ease-in-out !important;
+}
+
+.ant-layout-header {
+  transition: left 0.2s ease-in-out !important;
+}
+
+/* 移动端侧边栏样式 */
+@media (max-width: 767px) {
+  .ant-layout-sider {
+    position: fixed !important;
+    z-index: 1001 !important;
+  }
+}
+
+/* 滚动条样式优化 */
+.ant-layout-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-track {
+  background: #001529;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb {
+  background: #40a9ff;
+  border-radius: 3px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: #69c0ff;
+}
+

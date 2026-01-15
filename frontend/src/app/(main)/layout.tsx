@@ -53,6 +53,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
 
   // 使用 useMe query 获取当前用户信息
   const { data: meData, isLoading: isLoadingMe } = useMe();
@@ -77,6 +78,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     if (typeof window === "undefined") return;
     if (isMobile) {
       setCollapsed(true);
+      setMobileDrawerOpen(false);
       return;
     }
     const v = window.localStorage.getItem("compostlab:siderCollapsed");
@@ -95,13 +97,21 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }, [pathname, router]);
 
   function onToggleCollapsed() {
-    setCollapsed((c) => {
-      const next = !c;
-      if (typeof window !== "undefined" && !isMobile) {
-        window.localStorage.setItem("compostlab:siderCollapsed", next ? "1" : "0");
-      }
-      return next;
-    });
+    if (isMobile) {
+      setMobileDrawerOpen((prev) => !prev);
+    } else {
+      setCollapsed((c) => {
+        const next = !c;
+        if (typeof window !== "undefined" && !isMobile) {
+          window.localStorage.setItem("compostlab:siderCollapsed", next ? "1" : "0");
+        }
+        return next;
+      });
+    }
+  }
+
+  function closeMobileDrawer() {
+    setMobileDrawerOpen(false);
   }
 
   if (!ready) {
@@ -113,19 +123,32 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    <Layout style={{ minHeight: "100vh", display: "flex", flexDirection: "row" }}>
       <Sider
         collapsible
-        collapsed={collapsed}
-        onCollapse={(v) => {
-          setCollapsed(v);
-          if (typeof window !== "undefined" && !isMobile) {
-            window.localStorage.setItem("compostlab:siderCollapsed", v ? "1" : "0");
-          }
-        }}
-        breakpoint="md"
+        collapsed={isMobile ? false : collapsed}
         collapsedWidth={isMobile ? 0 : 80}
-        style={{ borderRight: "1px solid #e8e8e8" }}
+        breakpoint="md"
+        style={isMobile ? {
+          borderRight: "1px solid #e8e8e8",
+          position: "fixed",
+          left: mobileDrawerOpen ? 0 : "-80%",
+          top: 0,
+          height: "100vh",
+          zIndex: 1000,
+          overflowY: "auto",
+          width: "80%",
+          maxWidth: 280,
+          transition: "left 0.3s ease-in-out",
+        } : {
+          borderRight: "1px solid #e8e8e8",
+          position: "fixed",
+          left: 0,
+          top: 0,
+          height: "100vh",
+          zIndex: 1000,
+          overflowY: "auto",
+        }}
       >
         <Link href="/" style={{ display: "block", width: "100%" }}>
           <div
@@ -167,9 +190,30 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         />
       </Sider>
 
-      <Layout>
+      {/* 移动端遮罩层 */}
+      {isMobile && mobileDrawerOpen && (
+        <div
+          onClick={closeMobileDrawer}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.45)",
+            zIndex: 999,
+            transition: "opacity 0.3s",
+          }}
+        />
+      )}
+
+      <Layout style={{ marginLeft: isMobile ? 0 : (collapsed ? 80 : 200), display: "flex", flexDirection: "column", minHeight: "100vh" }}>
         <Header
           style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            left: isMobile ? 0 : (collapsed ? 80 : 200),
             background: "#fff",
             borderBottom: "1px solid #e8e8e8",
             padding: isMobile ? "0 16px" : "0 24px",
@@ -178,6 +222,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             justifyContent: "space-between",
             gap: 16,
             height: 56,
+            zIndex: 999,
+            transition: "left 0.2s ease-in-out",
           }}
         >
           <Button
@@ -243,7 +289,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </Space>
         </Header>
 
-        <Content style={{ padding: isMobile ? 16 : 24 }}>
+        <Content style={{ padding: isMobile ? 16 : 24, marginTop: 56, minHeight: "calc(100vh - 56px)" }}>
           <div style={{ maxWidth: 1400, margin: "0 auto" }}>
             <AnnouncementBanner />
             {children}

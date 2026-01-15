@@ -4,7 +4,33 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import { useMemo, useState } from "react";
-import { Button, Card, Col, Grid, Input, Modal, Row, Space, Spin, Switch, Table, Tag, Typography, message } from "antd";
+import { 
+	Button, 
+	Card, 
+	Col, 
+	Grid, 
+	Input, 
+	Modal, 
+	Row, 
+	Space, 
+	Spin, 
+	Switch, 
+	Table, 
+	Tag, 
+	Typography, 
+	message, 
+	Select,
+	Dropdown,
+	Empty,
+	Skeleton 
+} from "antd";
+import { 
+	ArrowUpOutlined, 
+	ArrowDownOutlined, 
+	FilterOutlined,
+	SortAscendingOutlined,
+	MoreOutlined 
+} from "@ant-design/icons";
 
 import Page from "@/components/Page";
 import { useRuns } from "@/features/runs/queries";
@@ -18,10 +44,17 @@ import { getErrorMessage } from "@/lib/errors";
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
 
+type SortField = "run_id" | "name" | "start_at" | "end_at" | "window_count" | "device_count";
+type SortOrder = "asc" | "desc";
+
+interface FilterState {
+	status: "all" | "running" | "finished" | "not_started";
+}
+
 function getRunStatus(r: any) {
-	if (!r.start_at) return { text: "未开始", color: "default" };
-	if (r.end_at) return { text: "已结束", color: "success" };
-	return { text: "进行中", color: "processing" };
+	if (!r.start_at) return { text: "未开始", color: "default", value: "not_started" };
+	if (r.end_at) return { text: "已结束", color: "success", value: "finished" };
+	return { text: "进行中", color: "processing", value: "running" };
 }
 
 function getRunDuration(r: any) {
@@ -39,9 +72,9 @@ function getRunDuration(r: any) {
 
 function getRecipeSummary(recipe: any) {
 	if (!recipe || typeof recipe !== "object") return "-";
-	const keys = Object.keys(recipe || {});
-	if (!keys.length) return "-";
-	return keys.slice(0, 3).join(", ") + (keys.length > 3 ? " ..." : "");
+	const entries = Object.entries(recipe || {});
+	if (!entries.length) return "-";
+	return entries.slice(0, 4).map(([key, value]) => `${key}: ${value}`).join("; ") + (entries.length > 4 ? " ..." : "");
 }
 
 function getSettingsSummary(settings: any) {
@@ -57,15 +90,66 @@ export default function RunsPage() {
 	const router = useRouter();
 
 	const [q, setQ] = useState("");
-	// ✅ 管理模式默认开启（更符合“用户可直接维护 Run / Window”的场景）
 	const [manage, setManage] = useState(true);
+	const [sortField, setSortField] = useState<SortField>("run_id");
+	const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+	const [filter, setFilter] = useState<FilterState>({ status: "all" });
+	
 	const runsQ = useRuns({ q: q.trim() || "" });
 	const runs = runsQ.data || [];
+	
 	const createRun = useCreateRun();
 	const deleteRun = useDeleteRun();
 	const [editing, setEditing] = useState<any | null>(null);
 	const updateRun = useUpdateRun(editing?.run_id || 0);
 	const [modalOpen, setModalOpen] = useState(false);
+
+	// 过滤和排序
+	const filteredAndSortedRuns = useMemo(() => {
+		let result = [...runs];
+		
+		// 状态筛选
+		if (filter.status !== "all") {
+			result = result.filter(r => getRunStatus(r).value === filter.status);
+		}
+		
+		// 排序
+		result.sort((a, b) => {
+			let aVal: any, bVal: any;
+			
+			switch (sortField) {
+				case "name":
+					aVal = (a.name || "").toLowerCase();
+					bVal = (b.name || "").toLowerCase();
+					break;
+				case "start_at":
+					aVal = a.start_at || "";
+					bVal = b.start_at || "";
+					break;
+				case "end_at":
+					aVal = a.end_at || "";
+					bVal = b.end_at || "";
+					break;
+				case "window_count":
+					aVal = a.window_count || 0;
+					bVal = b.window_count || 0;
+					break;
+				case "device_count":
+					aVal = a.device_count || 0;
+					bVal = b.device_count || 0;
+					break;
+				default:
+					aVal = a.run_id || 0;
+					bVal = b.run_id || 0;
+			}
+			
+			if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
+			if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
+			return 0;
+		});
+		
+		return result;
+	}, [runs, filter, sortField, sortOrder]);
 
 	function openCreate() {
 		setEditing(null);
@@ -75,6 +159,31 @@ export default function RunsPage() {
 	function openEdit(r: any) {
 		setEditing(r);
 		setModalOpen(true);
+	}
+
+	function handleSort(field: SortField) {
+		if (sortField === field) {
+			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+		} else {
+			setSortField(field);
+			setSortOrder("desc");
+		}
+	}
+
+	function SortHeader({ title, field }: { title: string; field: SortField }) {
+		const isCurrent = sortField === field;
+		return (
+			<Space 
+				size={4} 
+				onClick={() => handleSort(field)}
+				style={{ cursor: "pointer", userSelect: "none" }}
+			>
+				<Text strong>{title}</Text>
+				{isCurrent && (
+					sortOrder === "asc" ? <ArrowUpOutlined /> : <ArrowDownOutlined />
+				)}
+			</Space>
+		);
 	}
 
 	async function submitRun(payload: {
@@ -129,29 +238,56 @@ export default function RunsPage() {
 		});
 	}
 
-	const data = useMemo(() => runs, [runs]);
-
 	const columns: any[] = [
 		{
-			title: "Run",
+			title: <SortHeader title="Run" field="name" />,
 			key: "run",
 			dataIndex: "name",
-			width: 220,
+			width: 200,
 			render: (name: any, r: any) => (
-				<Space orientation="vertical" size={2}>
-					<Link href={`/runs/${r.run_id}`} style={{ fontWeight: 600, color: "#1890ff" }}>
+				<Space orientation="vertical" size={4}>
+					<Link
+						href={`/runs/${r.run_id}`}
+						style={{
+							fontWeight: 500,
+							color: "#1677ff",
+							fontSize: 14,
+							lineHeight: 1.4,
+							transition: "all 0.2s",
+						}}
+						onMouseEnter={(e) => e.currentTarget.style.textDecoration = "underline"}
+						onMouseLeave={(e) => e.currentTarget.style.textDecoration = "none"}
+					>
 						{r.name || `Run #${r.run_id}`}
 					</Link>
-					<Text type="secondary" style={{ fontSize: 12 }}>
-						ID: {r.run_id}
+					<Text type="secondary" style={{ fontSize: 12, color: "#8c8c8c" }}>
+						#{r.run_id}
 					</Text>
 				</Space>
 			),
 		},
 		{
+			title: <SortHeader title="状态 / 时长" field="start_at" />,
+			key: "status",
+			width: 140,
+			render: (_: any, r: any) => {
+				const status = getRunStatus(r);
+				return (
+					<Space orientation="vertical" size={2}>
+						<Space size={4}>
+							<Tag color={status.color}>{status.text}</Tag>
+						</Space>
+						<Text type="secondary" style={{ fontSize: 12 }}>
+							{getRunDuration(r)}
+						</Text>
+					</Space>
+				);
+			},
+		},
+		{
 			title: "概览",
 			key: "overview",
-			width: 160,
+			width: 180,
 			render: (_: any, r: any) => (
 				<Space orientation="vertical" size={2}>
 					<Space size={4}>
@@ -175,27 +311,9 @@ export default function RunsPage() {
 			),
 		},
 		{
-			title: "状态 / 时长",
-			key: "status",
-			width: 140,
-			render: (_: any, r: any) => {
-				const status = getRunStatus(r);
-				return (
-					<Space orientation="vertical" size={2}>
-						<Space size={4}>
-							<Tag color={status.color}>{status.text}</Tag>
-						</Space>
-						<Text type="secondary" style={{ fontSize: 12 }}>
-							{getRunDuration(r)}
-						</Text>
-					</Space>
-				);
-			},
-		},
-		{
 			title: "时间",
 			key: "time",
-			width: 200,
+			width: 180,
 			render: (_: any, r: any) => (
 				<Space orientation="vertical" size={2}>
 					<Text style={{ fontSize: 12 }}>开始: {r.start_at ? r.start_at.split(" ")[0] : "-"}</Text>
@@ -206,24 +324,44 @@ export default function RunsPage() {
 		{
 			title: "配方",
 			key: "recipe",
-			width: 150,
-			ellipsis: { showTitle: false },
+			width: 200,
 			render: (_: any, r: any) => (
-				<Text style={{ fontSize: 12 }} title={getRecipeSummary(r.recipe)}>
+				<div
+					style={{
+						fontSize: 12,
+						lineHeight: 1.6,
+						whiteSpace: "normal",
+						wordBreak: "break-word",
+					}}
+					title={getRecipeSummary(r.recipe)}
+				>
 					{getRecipeSummary(r.recipe)}
-				</Text>
+				</div>
 			),
 		},
 		{
 			title: "备注",
 			dataIndex: "note",
 			key: "note",
-			width: 120,
-			ellipsis: { showTitle: false },
+			width: 250,
 			render: (v: any) => (
-				<Text type="secondary" style={{ fontSize: 12 }} title={v || "-"}>
+				<div
+					style={{
+						fontSize: 12,
+						color: "#595959",
+						lineHeight: 1.6,
+						whiteSpace: "normal",
+						wordBreak: "break-word",
+						overflow: "hidden",
+						display: "-webkit-box",
+						WebkitLineClamp: 3,
+						WebkitBoxOrient: "vertical",
+						maxHeight: 57,
+					}}
+					title={v || "-"}
+				>
 					{v || "-"}
-				</Text>
+				</div>
 			),
 		},
 	];
@@ -243,6 +381,76 @@ export default function RunsPage() {
 			),
 		}];
 	}, [manage, columns]);
+
+	// 空状态
+	if (filteredAndSortedRuns.length === 0 && !runsQ.isLoading) {
+		return (
+			<Page
+				title="运行批次"
+				extra={
+					<Space wrap>
+						<Input.Search
+							placeholder="搜索 run（name）"
+							allowClear
+							style={{ width: isMobile ? "100%" : 320 }}
+							value={q}
+							onChange={(e) => setQ(e.target.value)}
+						/>
+						<Select
+							value={filter.status}
+							onChange={(v) => setFilter({ ...filter, status: v as any })}
+							style={{ width: isMobile ? "100%" : 140 }}
+							options={[
+								{ label: "全部状态", value: "all" },
+								{ label: "进行中", value: "running" },
+								{ label: "已结束", value: "finished" },
+								{ label: "未开始", value: "not_started" }
+							]}
+						/>
+						<Dropdown menu={{
+							items: [
+								{ key: "run_id", label: "按 ID 排序", onClick: () => setSortField("run_id") },
+								{ key: "name", label: "按名称排序", onClick: () => setSortField("name") },
+								{ key: "start_at", label: "按开始时间排序", onClick: () => setSortField("start_at") },
+								{ key: "window_count", label: "按窗口数排序", onClick: () => setSortField("window_count") },
+								{ key: "device_count", label: "按设备数排序", onClick: () => setSortField("device_count") }
+							]
+						}} trigger={["click"]}>
+							<Button icon={<SortAscendingOutlined />}>
+								{sortOrder === "asc" ? "升序" : "降序"}
+							</Button>
+						</Dropdown>
+						<Space size={6}>
+							<Text type="secondary">管理模式</Text>
+							<Switch checked={manage} onChange={setManage} />
+						</Space>
+						{manage && (
+							<Button type="primary" onClick={openCreate}>
+								新建 Run
+							</Button>
+						)}
+					</Space>
+				}
+			>
+				<div style={{ padding: 80, textAlign: "center" }}>
+					<Empty 
+						description={
+							q || filter.status !== "all" 
+								? "没有找到匹配的运行批次" 
+								: "暂无运行批次"
+						}
+					/>
+					{manage && (
+						<div style={{ marginTop: 24 }}>
+							<Button type="primary" onClick={openCreate}>
+								创建第一个运行批次
+							</Button>
+						</div>
+					)}
+				</div>
+			</Page>
+		);
+	}
 
 	if (runsQ.isLoading) {
 		return (
@@ -264,6 +472,30 @@ export default function RunsPage() {
 						value={q}
 						onChange={(e) => setQ(e.target.value)}
 					/>
+					<Select
+						value={filter.status}
+						onChange={(v) => setFilter({ ...filter, status: v as any })}
+						style={{ width: isMobile ? "100%" : 140 }}
+						options={[
+							{ label: "全部状态", value: "all" },
+							{ label: "进行中", value: "running" },
+							{ label: "已结束", value: "finished" },
+							{ label: "未开始", value: "not_started" }
+						]}
+					/>
+					<Dropdown menu={{
+						items: [
+							{ key: "run_id", label: "按 ID 排序", onClick: () => setSortField("run_id") },
+							{ key: "name", label: "按名称排序", onClick: () => setSortField("name") },
+							{ key: "start_at", label: "按开始时间排序", onClick: () => setSortField("start_at") },
+							{ key: "window_count", label: "按窗口数排序", onClick: () => setSortField("window_count") },
+							{ key: "device_count", label: "按设备数排序", onClick: () => setSortField("device_count") }
+						]
+					}} trigger={["click"]}>
+						<Button icon={<SortAscendingOutlined />}>
+							{sortOrder === "asc" ? "升序" : "降序"}
+						</Button>
+					</Dropdown>
 					<Space size={6}>
 						<Text type="secondary">管理模式</Text>
 						<Switch checked={manage} onChange={setManage} />
@@ -278,7 +510,7 @@ export default function RunsPage() {
 		>
 			{isMobile ? (
 				<Row gutter={[12, 12]}>
-					{data.map((r: any) => (
+					{filteredAndSortedRuns.map((r: any) => (
 						<Col xs={24} key={r.run_id}>
 							<Card hoverable onClick={() => router.push(`/runs/${r.run_id}`)}>
 								<div style={{ marginBottom: 8 }}>
@@ -293,51 +525,42 @@ export default function RunsPage() {
 									</div>
 									<Space size={4} wrap>
 										<Tag color="blue">ID {r.run_id}</Tag>
+										{(() => {
+											const status = getRunStatus(r);
+											return <Tag color={status.color}>{status.text}</Tag>;
+										})()}
 									</Space>
 								</div>
 
 								<div style={{ marginTop: 8, fontSize: 13 }}>
-									{(() => {
-										const status = getRunStatus(r);
-										return (
-											<>
-												<Space size={12} wrap>
-													<Space size={4}>
-														<Text type="secondary" style={{ fontSize: 12 }}>状态:</Text>
-														<Tag color={status.color} style={{ margin: 0, fontSize: 11 }}>{status.text}</Tag>
-													</Space>
-													<Space size={4}>
-														<Text type="secondary" style={{ fontSize: 12 }}>时长:</Text>
-														<Text style={{ fontSize: 11 }}>{getRunDuration(r)}</Text>
-													</Space>
-												</Space>
-												<Space size={12} wrap style={{ marginTop: 6 }}>
-													<Space size={4}>
-														<Text type="secondary" style={{ fontSize: 12 }}>Windows:</Text>
-														<Tag color="blue" style={{ margin: 0, fontSize: 11 }}>{r.window_count ?? 0}</Tag>
-													</Space>
-													<Space size={4}>
-														<Text type="secondary" style={{ fontSize: 12 }}>设备:</Text>
-														<Tag color="green" style={{ margin: 0, fontSize: 11 }}>{r.device_count ?? 0}</Tag>
-													</Space>
-												</Space>
-												{r.device_list && r.device_list.length > 0 && (
-													<div style={{ marginTop: 6 }}>
-														<Text type="secondary" style={{ fontSize: 11 }} ellipsis title={r.device_list.join(", ")}>
-															设备: {r.device_list.join(", ")}
-														</Text>
-													</div>
-												)}
-												{r.note && (
-													<div style={{ marginTop: 4 }}>
-														<Text type="secondary" ellipsis style={{ fontSize: 12 }}>
-															{r.note}
-														</Text>
-													</div>
-												)}
-											</>
-										);
-									})()}
+									<Space size={12} wrap>
+										<Space size={4}>
+											<Text type="secondary" style={{ fontSize: 12 }}>时长:</Text>
+											<Text style={{ fontSize: 11 }}>{getRunDuration(r)}</Text>
+										</Space>
+										<Space size={4}>
+											<Text type="secondary" style={{ fontSize: 12 }}>Windows:</Text>
+											<Tag color="blue" style={{ margin: 0, fontSize: 11 }}>{r.window_count ?? 0}</Tag>
+										</Space>
+										<Space size={4}>
+											<Text type="secondary" style={{ fontSize: 12 }}>设备:</Text>
+											<Tag color="green" style={{ margin: 0, fontSize: 11 }}>{r.device_count ?? 0}</Tag>
+										</Space>
+									</Space>
+									{r.device_list && r.device_list.length > 0 && (
+										<div style={{ marginTop: 6 }}>
+											<Text type="secondary" style={{ fontSize: 11 }} ellipsis title={r.device_list.join(", ")}>
+												{r.device_list.join(", ")}
+											</Text>
+										</div>
+									)}
+									{r.note && (
+										<div style={{ marginTop: 4 }}>
+											<Text type="secondary" ellipsis style={{ fontSize: 12 }}>
+												{r.note}
+											</Text>
+										</div>
+									)}
 								</div>
 
 								{manage && (
@@ -373,10 +596,16 @@ export default function RunsPage() {
 				<Table 
 					rowKey="run_id" 
 					columns={columnsWithActions as any} 
-					dataSource={data as any} 
-					pagination={{ pageSize: 10 }}
-					scroll={{ x: 1200 }}
+					dataSource={filteredAndSortedRuns as any} 
+					pagination={{ 
+						pageSize: 20,
+						showSizeChanger: true,
+						pageSizeOptions: ["10", "20", "50", "100"],
+						showTotal: (total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`
+					}}
+					scroll={{ x: 1200, y: "calc(100vh - 320px)" }}
 					size="middle"
+					sticky
 				/>
 			)}
 
