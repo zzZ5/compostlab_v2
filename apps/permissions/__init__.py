@@ -17,13 +17,15 @@
 - admin (3): 完全控制权限
 """
 
-from .config import PermissionMatrix, get_required_role_for_action
+from .config import PermissionMatrix, get_required_role_for_action, ResourceType, ActionType
 from .mixins import RoleRequiredMixin, OperatorRequiredMixin, AdminRequiredMixin
 from .checks import has_permission, check_permission, get_user_role_level
 
 __all__ = [
     'PermissionMatrix',
     'get_required_role_for_action',
+    'ResourceType',
+    'ActionType',
     'RoleRequiredMixin',
     'OperatorRequiredMixin',
     'AdminRequiredMixin',

@@ -18,7 +18,8 @@ import {
     ControlOutlined,
     BellOutlined,
 } from "@ant-design/icons";
-import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser } from "@/lib/auth";
+import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser, setUser } from "@/lib/auth";
+import { useMe } from "@/features/users/queries";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 import AnnouncementBadge from "@/components/AnnouncementBadge";
 
@@ -48,7 +49,22 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  // 使用 useMe query 获取当前用户信息
+  const { data: meData, isLoading: isLoadingMe } = useMe();
+
+  // 尝试从 sessionStorage 获取用户信息（避免频繁 API 请求）
+  const sessionStorageUser = getUser();
+
+  // 优先使用 sessionStorage 中的用户信息，如果没有则使用 API 返回的数据
+  const currentUser = sessionStorageUser || meData || null;
+
+  // 当从 API 获取到用户信息时，保存到 sessionStorage
+  useEffect(() => {
+    if (meData && !sessionStorageUser) {
+      setUser(meData);
+    }
+  }, [meData, sessionStorageUser]);
 
   const selectedKey = useMemo(() => getSelectedKey(pathname), [pathname]);
 
@@ -70,10 +86,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.replace(`/login?next=${next}`);
       return;
     }
-    // 加载用户信息
-    if (typeof window !== "undefined") {
-      setCurrentUser(getUser());
-    }
+    // 设置 ready 状态（用户信息会通过 useMe query 异步获取）
     setReady(true);
   }, [pathname, router]);
 
