@@ -8,7 +8,39 @@
 - 更新注册时间
 """
 
+import re
+from datetime import datetime
 from django.utils import timezone
+
+
+def _parse_timestamp(ts_value) -> datetime | None:
+    """解析多种时间戳格式"""
+    if not ts_value:
+        return None
+
+    # 字符串时间戳（ISO 8601 格式）
+    if isinstance(ts_value, str):
+        for fmt in (
+            "%Y-%m-%dT%H:%M:%S.%fZ",
+            "%Y-%m-%dT%H:%M:%SZ",
+            "%Y-%m-%dT%H:%M:%S%z",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+        ):
+            try:
+                return datetime.strptime(ts_value, fmt)
+            except ValueError:
+                continue
+        return None
+
+    # 数字时间戳（秒或毫秒）
+    try:
+        ts_float = float(ts_value)
+        if ts_float > 1e10:  # 毫秒时间戳
+            ts_float = ts_float / 1000
+        return datetime.fromtimestamp(ts_float, tz=timezone.utc)
+    except (ValueError, OSError):
+        return None
 
 
 def _field_names(model) -> set[str]:
@@ -74,17 +106,27 @@ def register_device_from_payload(
     if ip_address and hasattr(device, "ip_address"):
         device.ip_address = ip_address
 
+    # 解析时间戳字段（支持 timestamp、ts、time、measured_time）
+    timestamp_value = None
+    for field in ("timestamp", "ts", "time", "measured_time"):
+        if field in payload:
+            ts_value = payload.get(field)
+            timestamp_value = _parse_timestamp(ts_value)
+            if timestamp_value:
+                break
+
     # 更新注册时间（如果是新设备或首次注册）
     if is_new and hasattr(device, "register_at") and not device.register_at:
-        device.register_at = timezone.now()
+        device.register_at = timestamp_value if timestamp_value else timezone.now()
 
     # 更新配置信息（支持 config 和 configuration 两种字段名）
     config_data = payload.get("config") or payload.get("configuration")
     if config_data and isinstance(config_data, dict) and hasattr(device, "configuration"):
         device.configuration = config_data
 
-    # 更新最后上线时间
-    device.last_seen_at = timezone.now()
+    # 更新最后上线时间（优先使用 payload 中的时间戳）
+    if hasattr(device, "last_seen_at"):
+        device.last_seen_at = timestamp_value if timestamp_value else timezone.now()
 
     # 保存设备信息
     device.save()

@@ -25,8 +25,17 @@ def _sha256(text: str) -> str:
 
 def _parse_ts(ts_value) -> datetime:
     """
-    解析时间戳（优先你要求的格式：'YYYY-MM-DD HH:MM:SS'）
-    也兼容 ISO8601 / datetime / None
+    解析时间戳（支持多种字段名）
+    - ts (推荐)
+    - timestamp
+    - measured_time
+    - time
+
+    支持的格式：
+    - 'YYYY-MM-DD HH:MM:SS' (推荐)
+    - ISO8601: '2025-12-19T17:08:45+08:00' 或带 'Z'
+    - datetime 对象
+    - None (返回当前时间)
     """
     if not ts_value:
         return timezone.now()
@@ -478,7 +487,10 @@ def ingest_payload(
 
     # ---- timestamp ----
     ts = _parse_ts(
-        payload.get("ts") or payload.get("measured_time") or payload.get("time")
+        payload.get("ts")
+        or payload.get("timestamp")
+        or payload.get("measured_time")
+        or payload.get("time")
     )
 
     # ---- extract points ----
