@@ -69,7 +69,7 @@ export default function AnnouncementDetailPage() {
 		>
 			<Card loading={isLoading}>
 				{announcement && (
-					<Space direction="vertical" size={24} style={{ width: "100%" }}>
+					<Space orientation="vertical" size={24} style={{ width: "100%" }}>
 						{/* 标题和标签 */}
 						<div>
 							<Text strong style={{ fontSize: 20 }}>

@@ -204,7 +204,7 @@ export default function DeviceControlPage() {
 										<>
 											{/* 设备注册信息 */}
 											<Card title="设备注册信息" style={{ marginBottom: 12 }}>
-												<Space direction="vertical" size={8} style={{ width: "100%" }}>
+												<Space orientation="vertical" size={8} style={{ width: "100%" }}>
 													<Space>
 														<Text type="secondary">IP 地址：</Text>
 														<Text code>{device.ip_address || "-"}</Text>
@@ -330,7 +330,7 @@ export default function DeviceControlPage() {
 														key,
 														label: key,
 														children: (
-															<Space direction="vertical" style={{ width: "100%" }}>
+															<Space orientation="vertical" style={{ width: "100%" }}>
 																{typeof value === "object" && !Array.isArray(value) ? (
 																	// 嵌套对象 - 递归渲染
 																	<>
@@ -443,7 +443,7 @@ export default function DeviceControlPage() {
 				cancelText="取消"
 				width={700}
 			>
-				<Space direction="vertical" style={{ width: "100%" }} size={8}>
+				<Space orientation="vertical" style={{ width: "100%" }} size={8}>
 					<Text type="secondary">
 						编辑配置后点击"下发配置"，将通过 MQTT 发送 config_update 命令到设备。
 						配置将合并到设备当前配置中，只更新指定的字段。

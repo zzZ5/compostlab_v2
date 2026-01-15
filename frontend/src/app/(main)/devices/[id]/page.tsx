@@ -1412,7 +1412,7 @@ export default function DeviceDetailPage() {
 											</Button>
 										}
 									>
-										<Space direction="vertical" size={12} style={{ width: "100%" }}>
+										<Space orientation="vertical" size={12} style={{ width: "100%" }}>
 											<Text type="secondary">
 												管理设备的配置参数。不同设备的配置参数可能差别较大，例如采样间隔、上报频率、阈值设置等。
 											</Text>
