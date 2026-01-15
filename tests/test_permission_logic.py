@@ -41,7 +41,7 @@ class TestPermissionLogic:
         # 清理测试用户
         User.objects.filter(username__in=[
             'superuser', 'staff_admin', 'staff_operator', 'staff_no_profile',
-            'operator', 'readonly', 'normal_admin'
+            'operator', 'readonly', 'normal_admin', 'inactive'
         ]).delete()
 
     def test_superuser_has_all_permissions(self):

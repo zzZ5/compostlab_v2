@@ -1,6 +1,9 @@
 """
 新的认证和权限 Mixin，支持 JWT Token
 保留 BasicAuth 作为备选方案（向后兼容）
+
+注意：权限相关的 Mixins 已迁移至 apps.permissions.mixins
+建议在新代码中使用新的权限模块
 """
 import base64
 import logging
@@ -84,33 +87,39 @@ class JWTAuthMixin:
         )
 
 
+# 注意：以下是旧的权限 Mixins，保留用于向后兼容
+# 新代码建议使用 apps.permissions.mixins 中的权限 Mixins
+
 class RoleRequiredMixin:
     """
-    角色权限检查 Mixin
-    
+    角色权限检查 Mixin（向后兼容版本）
+
+    注意：建议使用 apps.permissions.mixins.RoleRequiredMixin
+
     用法：
         class MyView(JWTAuthMixin, RoleRequiredMixin, View):
             required_role = "operator"  # 或 "admin" / "readonly"
     """
     required_role = "readonly"  # 默认只读
-    
+
     def dispatch(self, request, *args, **kwargs):
         user = getattr(request, "user", None)
-        
+
         if not has_permission(user, self.required_role):
             return JsonResponse(
                 {"detail": f"Permission denied. Required role: {self.required_role}"},
                 status=403,
             )
-        
+
         return super().dispatch(request, *args, **kwargs)
 
 
 class OperatorRequiredMixin(RoleRequiredMixin):
-    """操作员权限（快捷方式）"""
+    """操作员权限（快捷方式）- 向后兼容版本"""
     required_role = "operator"
 
 
 class AdminRequiredMixin(RoleRequiredMixin):
-    """管理员权限（快捷方式）"""
+    """管理员权限（快捷方式）- 向后兼容版本"""
     required_role = "admin"
+

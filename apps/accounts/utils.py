@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from django.utils import timezone as django_timezone
 import pytz
-from .models import UserProfile, AuditLog
+from .models import UserProfile, AuditLog, UserRole
 
 
 def get_client_ip(request):
@@ -118,9 +118,11 @@ def has_permission(user, required_role):
     """
     检查用户是否有足够权限
 
+    注意：此函数已迁移至 apps.permissions.checks，建议直接使用新模块
+
     Args:
         user: User 对象
-        required_role: 需要的最低角色（readonly/operator/admin）
+        required_role: 需要的最低角色（readonly/operator/admin 或 UserRole 枚举）
 
     Returns:
         bool: 是否有权限
@@ -132,10 +134,34 @@ def has_permission(user, required_role):
 
     权限规则：
     - is_superuser: 超级管理员，拥有所有权限
+    - 未启用的用户（is_active=False）：没有任何权限
     - 其他用户: 完全依赖 UserProfile.role 判断权限
       - is_staff 不再自动赋予 admin 权限
       - is_staff 用户也必须有对应的 UserProfile.role
     """
+    # 兼容字符串和 UserRole 枚举
+    if isinstance(required_role, UserRole):
+        required_role_value = required_role.value
+    else:
+        required_role_value = required_role
+
+    # 导入新的权限检查模块（避免循环导入）
+    try:
+        from apps.permissions.checks import has_permission as new_has_permission
+
+        # 将字符串转换为 UserRole 枚举
+        role_map = {
+            "readonly": UserRole.READONLY,
+            "operator": UserRole.OPERATOR,
+            "admin": UserRole.ADMIN,
+        }
+        if required_role_value in role_map:
+            required_role_enum = role_map[required_role_value]
+            return new_has_permission(user, required_role_enum)
+    except ImportError:
+        pass
+
+    # 回退到旧逻辑（向后兼容）
     if not user or not user.is_authenticated:
         return False
 
@@ -147,17 +173,17 @@ def has_permission(user, required_role):
     try:
         profile = user.profile
     except UserProfile.DoesNotExist:
-        # 没有 profile 的用户，默认被视为 readonly
-        # is_staff 用户如果没有 profile，也没有角色信息，不能有高级权限
-        return required_role == "readonly"
+        # 没有 profile 的用户，只有 readonly 权限
+        return required_role_value == "readonly"
 
     # 检查用户是否启用
     if not profile.is_active:
+        # 未启用的用户没有任何权限
         return False
 
     # 角色等级：readonly < operator < admin
     role_levels = {"readonly": 1, "operator": 2, "admin": 3}
-    user_level = role_levels.get(profile.role, 0)
-    required_level = role_levels.get(required_role, 999)
+    user_level = role_levels.get(profile.role.value if isinstance(profile.role, UserRole) else profile.role, 0)
+    required_level = role_levels.get(required_role_value, 999)
 
     return user_level >= required_level

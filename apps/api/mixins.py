@@ -80,17 +80,19 @@ class StaffRequiredMixin:
     支持两种方式判断：
     1. Django is_staff / is_superuser
     2. UserProfile role (admin 或 operator)
+
+    注意：建议使用 apps.permissions.mixins.OperatorRequiredMixin 或 AdminRequiredMixin
     """
 
     def dispatch(self, request, *args, **kwargs):
         user = getattr(request, "user", None)
         if not user:
             return JsonResponse({"detail": "Admin permission required."}, status=403)
-        
+
         # Django 原生权限
         if user.is_staff or user.is_superuser:
             return super().dispatch(request, *args, **kwargs)
-        
+
         # UserProfile 角色检查
         try:
             profile = user.profile
@@ -98,7 +100,7 @@ class StaffRequiredMixin:
                 return super().dispatch(request, *args, **kwargs)
         except Exception:
             pass
-        
+
         return JsonResponse({"detail": "Admin or operator permission required."}, status=403)
 
 

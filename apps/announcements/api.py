@@ -7,6 +7,7 @@ from django.views import View
 
 from apps.accounts.models import UserProfile, AuditLog, UserRole
 from apps.accounts.mixins import JWTAuthMixin, AdminRequiredMixin
+from apps.permissions import ResourceType, ActionType, OperatorRequiredMixin
 from apps.accounts.utils import log_audit, get_client_ip, get_user_timezone, format_datetime_for_user
 from apps.api.mixins import JsonBodyMixin
 from apps.api.pagination import OffsetPaginator
@@ -15,19 +16,13 @@ from .models import Announcement, AnnouncementRead
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
-    """公告列表（管理员）"""
+class AnnouncementListView(OperatorRequiredMixin, JWTAuthMixin, JsonBodyMixin, View):
+    """
+    公告列表（管理员和操作员）
+    使用 OperatorRequiredMixin 自动检查权限
+    """
 
     def get(self, request):
-        # 权限检查：仅管理员及以上角色可以查看公告列表
-        try:
-            profile = request.user.profile
-        except UserProfile.DoesNotExist:
-            return JsonResponse({"detail": "权限不足"}, status=403)
-
-        if not (request.user.is_superuser or request.user.is_staff or profile.role in [UserRole.ADMIN, UserRole.OPERATOR]):
-            return JsonResponse({"detail": "权限不足，需要管理员或操作员角色"}, status=403)
-
         # 获取用户时区
         user_tz = get_user_timezone(request.user)
 
@@ -126,18 +121,13 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementCreateView(JWTAuthMixin, JsonBodyMixin, View):
-    """创建公告"""
+class AnnouncementCreateView(AdminRequiredMixin, JWTAuthMixin, JsonBodyMixin, View):
+    """
+    创建公告（仅管理员）
+    使用 AdminRequiredMixin 自动检查权限
+    """
 
     def post(self, request):
-        # 权限检查：仅管理员可以创建公告
-        try:
-            profile = request.user.profile
-        except UserProfile.DoesNotExist:
-            return JsonResponse({"detail": "权限不足"}, status=403)
-
-        if not (request.user.is_superuser or profile.role == UserRole.ADMIN):
-            return JsonResponse({"detail": "权限不足，仅管理员可以发布公告"}, status=403)
 
         try:
             body = self.json_body(request)
@@ -151,7 +141,13 @@ class AnnouncementCreateView(JWTAuthMixin, JsonBodyMixin, View):
             # 验证目标角色：管理员只能发布公告给自己角色或更低的角色
             target_role = body.get("target_role", Announcement.TargetRole.ALL)
             role_levels = {"all": 0, "readonly": 1, "operator": 2, "admin": 3}
-            user_level = role_levels.get(profile.role, 0)
+
+            try:
+                profile = request.user.profile
+                user_level = role_levels.get(profile.role, 0)
+            except UserProfile.DoesNotExist:
+                user_level = 0
+
             target_level = role_levels.get(target_role, 0)
 
             # 非超级管理员不能发布给比自己角色高的用户
