@@ -546,24 +546,20 @@ class RunWindowUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, Vie
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-@method_decorator(csrf_exempt, name="dispatch")
 class RunWindowDeleteView(BasicAuthMixin, View):
     """DELETE /api/v2/runs/<run_id>/windows/<window_id>"""
 
-    def dispatch(self, request, *args, **kwargs):
+    def delete(self, request, run_id: int, window_id: int):
+        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
+        # 直接检查权限
         from apps.permissions import check_permission, ResourceType, ActionType
 
-        # 检查删除权限（需要 admin 角色）
         user = getattr(request, "user", None)
         if not check_permission(user, ResourceType.RUN, ActionType.DELETE):
             return JsonResponse(
                 {"detail": "Permission denied. Admin role required for run window deletion."},
                 status=403,
             )
-
-        return super().dispatch(request, *args, **kwargs)
-
-    def delete(self, request, run_id: int, window_id: int):
         run = Run.objects.get(id=run_id)
         w = RunWindow.objects.get(id=window_id, run=run)
         w.delete()

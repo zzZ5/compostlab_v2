@@ -98,14 +98,26 @@ class RoleRequiredMixin:
 
     用法：
         class MyView(JWTAuthMixin, RoleRequiredMixin, View):
-            required_role = "operator"  # 或 "admin" / "readonly"
+            required_role = "operator"  # 或 "admin" / "readonly" 或 UserRole.OPERATOR
     """
     required_role = "readonly"  # 默认只读
 
     def dispatch(self, request, *args, **kwargs):
         user = getattr(request, "user", None)
 
-        if not has_permission(user, self.required_role):
+        # 将 required_role 转换为 UserRole 枚举
+        from .models import UserRole
+        if isinstance(self.required_role, str):
+            role_map = {
+                "readonly": UserRole.READONLY,
+                "operator": UserRole.OPERATOR,
+                "admin": UserRole.ADMIN,
+            }
+            required_role_enum = role_map.get(self.required_role.lower())
+        else:
+            required_role_enum = self.required_role
+
+        if not has_permission(user, required_role_enum):
             return JsonResponse(
                 {"detail": f"Permission denied. Required role: {self.required_role}"},
                 status=403,

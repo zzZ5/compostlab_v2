@@ -435,7 +435,7 @@ export default function AnnouncementsPage() {
 				open={drawerOpen}
 				title="公告详情"
 				onClose={() => setDrawerOpen(false)}
-				width={600}
+				size="large"
 				destroyOnHidden
 			>
 				{selectedAnnouncement && (

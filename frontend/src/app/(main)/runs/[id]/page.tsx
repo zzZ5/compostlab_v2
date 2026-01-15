@@ -1144,7 +1144,7 @@ export default function RunDetailPage() {
 				onCancel={() => setRunModalOpen(false)}
 				onOk={submitRun}
 				okText="保存"
-				destroyOnClose
+				destroyOnHidden
 				confirmLoading={updateRun.isPending}
 			>
 				<Form layout="vertical" form={runForm}>
@@ -1199,7 +1199,7 @@ export default function RunDetailPage() {
 				onCancel={() => setWindowModalOpen(false)}
 				onOk={submitWindow}
 				okText={editingWindow ? "保存" : "创建"}
-				destroyOnClose
+				destroyOnHidden
 				confirmLoading={createWindow.isPending || updateWindow.isPending}
 			>
 				<Form layout="vertical" form={windowForm}>
