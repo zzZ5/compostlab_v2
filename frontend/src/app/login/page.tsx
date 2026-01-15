@@ -1,14 +1,15 @@
 "use client";
 
 import { Suspense } from "react";
-import { Button, Card, Form, Input, Typography, message, Space } from "antd";
+import { Button, Card, Form, Input, Typography, message } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setTokens, setUser, clearTokens } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { LoginResp } from "@/types/api";
+import CompostLabLogo from "@/components/CompostLabLogo";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 function LoginForm() {
   const router = useRouter();
@@ -37,9 +38,11 @@ function LoginForm() {
         styles={{ body: { padding: 24 } }}
       >
         <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <Title level={3} style={{ marginBottom: 8, fontWeight: 600 }}>
-            CompostLab
-          </Title>
+          <div style={{ marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CompostLabLogo size="xlarge" />
+          </div>
+          <Text type="secondary">Compostlab</Text>
+          <br />
           <Text type="secondary">实验室数据管理系统</Text>
         </div>
 

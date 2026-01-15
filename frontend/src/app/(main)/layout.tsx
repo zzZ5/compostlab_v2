@@ -22,6 +22,7 @@ import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser, setUser }
 import { useMe } from "@/features/users/queries";
 import AnnouncementBanner from "@/components/AnnouncementBanner";
 import AnnouncementBadge from "@/components/AnnouncementBadge";
+import CompostLabLogo from "@/components/CompostLabLogo";
 
 const { Text } = Typography;
 
@@ -128,13 +129,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             height: 56,
             display: "flex",
             alignItems: "center",
-            padding: "0 20px",
-            fontWeight: 600,
-            fontSize: 18,
-            color: "#fff",
+            justifyContent: "center",
+            padding: collapsed ? "0" : "0 16px",
           }}
         >
-          {collapsed ? "🧪" : "🧪 CompostLab"}
+          <CompostLabLogo size={collapsed ? "small" : "large"} />
         </div>
 
         <Menu
