@@ -1068,16 +1068,27 @@ class RunAttachmentsView(BasicAuthMixin, ReadOrWritePermissionMixin, View):
         category = request.POST.get('category', 'other')
         description = request.POST.get('description', '')
 
-        # 验证文件类型（可选）
-        allowed_extensions = ['.csv', '.xls', '.xlsx', '.doc', '.docx', '.pdf', '.txt', '.zip', '.rar']
+        # 允许的文件扩展名（Office 文档 + 常见数据/压缩格式）
+        allowed_extensions = [
+            # Office 文档
+            '.doc', '.docx',  # Word
+            '.xls', '.xlsx',  # Excel
+            '.ppt', '.pptx',  # PowerPoint
+            # 常见数据格式
+            '.csv', '.txt',
+            # PDF
+            '.pdf',
+            # 压缩格式
+            '.zip', '.rar', '.7z', '.tar', '.gz',
+        ]
         file_ext = os.path.splitext(file.name)[1].lower()
         if file_ext not in allowed_extensions:
-            return JsonResponse({"error": f"File type {file_ext} is not allowed"}, status=400)
+            return JsonResponse({"error": f"File type {file_ext} is not allowed. Allowed types: {', '.join(allowed_extensions)}"}, status=400)
 
-        # 验证文件大小（限制为 50MB）
-        max_size = 50 * 1024 * 1024
+        # 验证文件大小（限制为 10MB）
+        max_size = 10 * 1024 * 1024
         if file.size > max_size:
-            return JsonResponse({"error": "File size exceeds 50MB limit"}, status=400)
+            return JsonResponse({"error": "File size exceeds 10MB limit"}, status=400)
 
         # 创建附件记录
         attachment = RunAttachment.objects.create(
