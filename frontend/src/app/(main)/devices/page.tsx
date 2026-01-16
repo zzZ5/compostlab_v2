@@ -493,10 +493,6 @@ export default function DevicesPage() {
 					columns={columns as any}
 					dataSource={filtered as any}
 					pagination={{ pageSize: 10 }}
-					defaultSort={{
-						field: "device_id",
-						order: "descend",
-					}}
 				/>
 			)}
 
