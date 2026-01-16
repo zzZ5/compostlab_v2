@@ -985,11 +985,6 @@ export default function RunDetailPage() {
 								]}
 								dataSource={attachments}
 								scroll={{ x: 650 }}
-								style={{
-									'& .ant-table-cell': {
-										padding: '12px 16px',
-									},
-								}}
 							/>
 						)}
 					</Card>
