@@ -57,6 +57,13 @@ import type { RunWindow } from "@/types/api";
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
 
+// 附件表格的单元格样式
+const attachmentsTableStyles = `
+	.attachments-table .ant-table-cell {
+		padding: 6px 8px !important;
+	}
+`;
+
 type Opt = { value: string; label: string };
 
 export default function RunDetailPage() {
@@ -575,7 +582,9 @@ export default function RunDetailPage() {
 	}
 
 	return (
-		<Page
+		<>
+			<style>{attachmentsTableStyles}</style>
+			<Page
 			title={run.name || `Run #${runId}`}
 			extra={
 				<Space wrap>
@@ -739,7 +748,6 @@ export default function RunDetailPage() {
 							</Space>
 						}
 						size="small"
-						style={{ minHeight: 200 }}
 						extra={
 							manage && (
 								<Space size="small">
@@ -756,9 +764,36 @@ export default function RunDetailPage() {
 										]}
 									/>
 									<Upload
-										accept=".csv,.xls,.xlsx,.doc,.docx,.pdf,.txt,.zip,.rar"
+										accept=".csv,.xls,.xlsx,.doc,.docx,.ppt,.pptx,.pdf,.txt,.zip,.rar,.7z,.tar,.gz"
 										showUploadList={false}
 										beforeUpload={async (file) => {
+											// 验证文件大小（限制为 10MB）
+											const maxSize = 10 * 1024 * 1024;
+											if (file.size > maxSize) {
+												message.error('文件大小不能超过 10MB');
+												return false;
+											}
+
+											// 允许的文件扩展名（与后端一致）
+											const allowedExtensions = [
+												// Office 文档
+												'.doc', '.docx',  // Word
+												'.xls', '.xlsx',  // Excel
+												'.ppt', '.pptx',  // PowerPoint
+												// 常见数据格式
+												'.csv', '.txt',
+												// PDF
+												'.pdf',
+												// 压缩格式
+												'.zip', '.rar', '.7z', '.tar', '.gz',
+											];
+
+											const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+											if (!allowedExtensions.includes(fileExt)) {
+												message.error(`不支持的文件类型: ${fileExt}`);
+												return false;
+											}
+
 											try {
 												await uploadAttachment.mutateAsync({
 													file,
@@ -776,9 +811,13 @@ export default function RunDetailPage() {
 											上传
 										</Button>
 									</Upload>
+									<Text type="secondary" style={{ fontSize: 11 }}>
+										支持 Office 文档、PDF、CSV、TXT、压缩包等，最大 10MB
+									</Text>
 								</Space>
 							)
 						}
+						styles={{ body: { padding: '12px' } }}
 					>
 						{attachments.length === 0 ? (
 							<div style={{ textAlign: 'center', padding: '40px 0' }}>
@@ -792,58 +831,60 @@ export default function RunDetailPage() {
 								</Space>
 							</div>
 						) : (
-							<Table
-								size="small"
-								pagination={false}
-								rowKey="id"
-								columns={[
+							<div style={{ maxHeight: attachments.length > 2 ? '190px' : 'auto', overflow: 'auto' }}>
+								<Table
+									size="small"
+									pagination={false}
+									rowKey="id"
+									className="attachments-table"
+									columns={[
 									{
 										title: "文件名",
 										dataIndex: "filename",
 										key: "filename",
 										ellipsis: true,
-										width: 280,
-										render: (text, record: any) => (
-											<div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '8px 0' }}>
-												<Space size="small">
-													<Tag
-														color={
-															record.category === "data" ? "blue" :
-															record.category === "protocol" ? "green" :
-															record.category === "report" ? "orange" :
-															"default"
-														}
-														style={{ fontSize: 11, margin: 0, padding: '2px 6px' }}
-													>
-														{record.category_display}
-													</Tag>
-													<Text
-														ellipsis
-														style={{
-															fontSize: 13,
-															color: '#262626',
-															maxWidth: 200
-														}}
-														title={text}
-													>
-														{text}
-													</Text>
-												</Space>
-												{record.description && record.description !== text && (
-													<Text
-														type="secondary"
-														ellipsis
-														style={{
-															fontSize: 12,
-															maxWidth: 270,
-															lineHeight: 1.4
-														}}
-														title={record.description}
-													>
-														{record.description}
-													</Text>
-												)}
-											</div>
+										width: 200,
+										render: (text: string, record: any) => (
+											<Space size="small">
+												<Tag
+													color={
+														record.category === "data" ? "blue" :
+														record.category === "protocol" ? "green" :
+														record.category === "report" ? "orange" :
+														"default"
+													}
+													style={{ fontSize: 11, margin: 0, padding: '1px 5px', lineHeight: 1.5 }}
+												>
+													{record.category_display}
+												</Tag>
+												<Text
+													ellipsis
+													style={{
+														fontSize: 12,
+														color: '#262626'
+													}}
+													title={text}
+												>
+													{text}
+												</Text>
+											</Space>
+										),
+									},
+									{
+										title: "描述",
+										dataIndex: "description",
+										key: "description",
+										ellipsis: true,
+										width: 200,
+										render: (text: string, record: any) => (
+											<Text
+												type="secondary"
+												ellipsis
+												style={{ fontSize: 12 }}
+												title={text || "-"}
+											>
+												{text || "-"}
+											</Text>
 										),
 									},
 									{
@@ -856,7 +897,7 @@ export default function RunDetailPage() {
 											const sizeKB = size / 1024;
 											const sizeMB = sizeKB / 1024;
 											return (
-												<Text style={{ fontSize: 13, color: '#595959', fontWeight: 500 }}>
+												<Text style={{ fontSize: 12, color: '#595959' }}>
 													{sizeMB < 1 ? `${sizeKB.toFixed(1)} KB` : `${sizeMB.toFixed(1)} MB`}
 												</Text>
 											);
@@ -866,24 +907,26 @@ export default function RunDetailPage() {
 										title: "上传者",
 										dataIndex: "uploaded_by",
 										key: "uploaded_by",
-										width: 100,
-										render: (text: string, record: any) => (
-											<div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px 0' }}>
-												<Text
-													style={{
-														fontSize: 13,
-														color: '#262626',
-														fontWeight: 500
-													}}
-													ellipsis
-													title={text || "-"}
-												>
-													{text || "-"}
-												</Text>
-												<Text type="secondary" style={{ fontSize: 11 }}>
-													{dayjs(record.uploaded_at).format("MM-DD HH:mm")}
-												</Text>
-											</div>
+										width: 90,
+										render: (text: string) => (
+											<Text
+												style={{ fontSize: 12, color: '#262626' }}
+												ellipsis
+												title={text || "-"}
+											>
+												{text || "-"}
+											</Text>
+										),
+									},
+									{
+										title: "上传时间",
+										dataIndex: "uploaded_at",
+										key: "uploaded_at",
+										width: 150,
+										render: (time: string) => (
+											<Text type="secondary" style={{ fontSize: 12 }}>
+												{time ? dayjs(time).format("YYYY-MM-DD HH:mm:ss") : "-"}
+											</Text>
 										),
 									},
 									{
@@ -986,6 +1029,7 @@ export default function RunDetailPage() {
 								dataSource={attachments}
 								scroll={{ x: 650 }}
 							/>
+							</div>
 						)}
 					</Card>
 				</Col>
@@ -1661,5 +1705,6 @@ export default function RunDetailPage() {
 				</Form>
 			</Modal>
 		</Page>
+		</>
 	);
 }
