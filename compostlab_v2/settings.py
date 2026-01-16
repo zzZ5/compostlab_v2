@@ -139,8 +139,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://localhost:3000",
     "http://127.0.0.1:3000",
     "https://127.0.0.1:3000",
-    "http://compostlab-v2.cpolar.cn",
-    "https://compostlab-v2.cpolar.cn",
+    "http://compostlab.cpolar.cn",
+    "https://compostlab.cpolar.cn",
     "http://compostlab-backend-v2.cpolar.cn",
     "https://compostlab-backend-v2.cpolar.cn",
 ]
@@ -153,8 +153,8 @@ CSRF_TRUSTED_ORIGINS = [
     "https://localhost:3000",
     "http://127.0.0.1:3000",
     "https://127.0.0.1:3000",
-    "http://compostlab-v2.cpolar.cn",
-    "https://compostlab-v2.cpolar.cn",
+    "http://compostlab.cpolar.cn",
+    "https://compostlab.cpolar.cn",
     "http://compostlab-backend-v2.cpolar.cn",
     "https://compostlab-backend-v2.cpolar.cn",
 ]
