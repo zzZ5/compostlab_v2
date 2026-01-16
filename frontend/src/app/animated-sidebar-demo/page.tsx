@@ -323,9 +323,9 @@ export default function AnimatedSidebarDemoPage() {
       showOverlay={true}
       onCollapseChange={handleCollapseChange}
       theme="dark"
+      mainContent={<MainContent sidebarState={sidebarState} onConfigChange={() => {}} />}
     >
       <SidebarContent />
-      <MainContent sidebarState={sidebarState} onConfigChange={() => {}} />
     </AnimatedSidebar>
   );
 }
