@@ -24,6 +24,7 @@ import {
 	Tag,
 	Typography,
 } from "antd";
+import Link from "next/link";
 
 const { CheckableTag } = Tag;
 import dayjs from "dayjs";
@@ -817,9 +818,11 @@ export default function RunDetailPage() {
 																			{devicesForWindow.length > 0 ? (
 																				<Space size={4} wrap>
 																					{devicesForWindow.map((d: any) => (
-																						<Tag key={d.device_id} color="green" style={{ margin: 0, fontSize: 12 }}>
-																							{d.code}{d.name ? ` · ${d.name}` : ""}
-																						</Tag>
+																						<Link key={d.device_id} href={`/devices/${d.device_id}`} onClick={(e) => e.stopPropagation()}>
+																							<Tag color="green" style={{ margin: 0, fontSize: 12, cursor: "pointer" }}>
+																								{d.code}{d.name ? ` · ${d.name}` : ""}
+																							</Tag>
+																						</Link>
 																					))}
 																				</Space>
 																			) : (
@@ -867,16 +870,17 @@ export default function RunDetailPage() {
 																size="small"
 																style={{
 																	border: selectedWindowId === d.device_id ? "2px solid #1890ff" : undefined,
-																	cursor: "pointer",
 																	transition: "all 0.3s",
 																	background: selectedWindowId === d.device_id ? "rgba(24, 144, 255, 0.03)" : undefined,
 																}}
 																onClick={() => setSelectedWindowId(d.device_id)}
 																title={
-																	<Space size={4}>
-																		<Tag color="green">{d.code}</Tag>
-																		{d.name && <Text type="secondary" style={{ fontSize: 12 }}>· {d.name}</Text>}
-																	</Space>
+																	<Link href={`/devices/${d.device_id}`} onClick={(e) => e.stopPropagation()}>
+																		<Space size={4}>
+																			<Tag color="green">{d.code}</Tag>
+																			{d.name && <Text type="secondary" style={{ fontSize: 12 }}>· {d.name}</Text>}
+																		</Space>
+																	</Link>
 																}
 																styles={{ body: { padding: "8px 12px" } }}
 															>
@@ -1105,7 +1109,7 @@ export default function RunDetailPage() {
 											</Space>
 										</div>
 									) : (
-										<Alert type="info" showIcon message="该 Run 的 Window 中暂未检测到可用的通道" description="" />
+										<Alert type="info" showIcon title="该 Run 的 Window 中暂未检测到可用的通道" />
 									)}
 
 									<Space wrap>
@@ -1141,7 +1145,10 @@ export default function RunDetailPage() {
 			<Modal
 				open={runModalOpen}
 				title="编辑 Run"
-				onCancel={() => setRunModalOpen(false)}
+				onCancel={() => {
+					setRunModalOpen(false);
+					runForm.resetFields();
+				}}
 				onOk={submitRun}
 				okText="保存"
 				destroyOnHidden
@@ -1196,7 +1203,10 @@ export default function RunDetailPage() {
 			<Modal
 				open={windowModalOpen}
 				title={editingWindow ? `编辑 Window #${editingWindow.window_id}` : "新建 Window"}
-				onCancel={() => setWindowModalOpen(false)}
+				onCancel={() => {
+					setWindowModalOpen(false);
+					windowForm.resetFields();
+				}}
 				onOk={submitWindow}
 				okText={editingWindow ? "保存" : "创建"}
 				destroyOnHidden

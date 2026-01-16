@@ -836,6 +836,7 @@ export default function DeviceDetailPage() {
 			title={device.name || device.code}
 			extra={
 				<Space wrap>
+					<Button onClick={() => router.back()}>返回</Button>
 					<Tag color="blue">{device.code}</Tag>
 					<Tag>{device.is_active === false ? "Inactive" : "Active"}</Tag>
 
