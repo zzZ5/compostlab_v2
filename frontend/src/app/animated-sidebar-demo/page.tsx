@@ -177,7 +177,7 @@ function MainContent({ sidebarState, onConfigChange }: {
                   value={config.breakpoint}
                   onChange={(value) => handleConfigChange("breakpoint", value || 768)}
                 />
-                <Tag color="blue">当前: {window.innerWidth}</Tag>
+                <Tag color="blue">当前: {typeof window !== 'undefined' ? window.innerWidth : '-'}</Tag>
               </Space>
             </Space>
           </div>
