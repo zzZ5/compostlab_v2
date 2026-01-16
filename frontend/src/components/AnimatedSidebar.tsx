@@ -193,7 +193,7 @@ export default function AnimatedSidebar({
         backgroundColor: "rgba(0, 0, 0, 0.45)",
         zIndex: 999,
         opacity: mobileDrawerOpen || isDragging ? 1 : 0,
-        pointerEvents: (mobileDrawerOpen || isDragging) ? "auto" : "none",
+        pointerEvents: (mobileDrawerOpen || isDragging) ? "auto" as const : "none" as const,
         transition: isDragging ? "none" : `opacity ${transitionDuration * 0.8}ms cubic-bezier(0.34, 1.56, 0.64, 1)`,
       }
     : { display: "none" };
