@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 from datetime import timedelta
 
 from django.contrib.auth import authenticate
@@ -9,6 +10,8 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed
 from rest_framework_simplejwt.tokens import AccessToken
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class BasicAuthMixin:
@@ -33,16 +36,26 @@ class BasicAuthMixin:
             try:
                 jwt_auth = JWTAuthentication()
                 validated = jwt_auth.authenticate(request)
+                logger.info(f"JWT auth: path={request.path}, validated={validated}")
                 if validated:
                     user, token = validated
+                    logger.info(f"JWT success: user={user.username}, is_superuser={user.is_superuser}, is_active={user.is_active}")
                     request.user = user
                     return super().dispatch(request, *args, **kwargs)
+                else:
+                    logger.warning(f"JWT returned None: path={request.path}")
+                    return JsonResponse(
+                        {"detail": "Invalid token."},
+                        status=401,
+                    )
             except (InvalidToken, AuthenticationFailed) as e:
+                logger.error(f"JWT exception: {e}, path={request.path}")
                 return JsonResponse(
                     {"detail": f"Invalid token: {str(e)}"},
                     status=401,
                 )
             except Exception as e:
+                logger.error(f"JWT error: {e}, path={request.path}", exc_info=True)
                 return JsonResponse(
                     {"detail": f"Authentication failed: {str(e)}"},
                     status=401,
