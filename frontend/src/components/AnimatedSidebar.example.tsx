@@ -150,9 +150,9 @@ export default function AnimatedSidebarExample() {
         console.log("侧边栏状态:", collapsed ? "收起" : "展开");
       }}
       theme="dark"
+      mainContent={<MainContent />}
     >
       <SidebarContent />
-      <MainContent />
     </AnimatedSidebar>
   );
 }
