@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { api, buildQuery } from "@/lib/api";
-import type { Run, RunDetailResp, RunListResp, RunTelemetryResp } from "@/types/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, buildQuery, getErrorMessage } from "@/lib/api";
+import type { Run, RunDetailResp, RunListResp, RunTelemetryResp, RunAttachment } from "@/types/api";
 import { runKeys } from "./keys";
 
 export function useRuns(args?: { q?: string }) {
@@ -64,5 +64,16 @@ export function useRunTelemetry(args: {
 			return res.data;
 		},
 		enabled: Number.isFinite(runId) && (channels === undefined || channels === null || channels.length > 0),
+	});
+}
+
+export function useRunAttachments(runId: number, enabled: boolean = true) {
+	return useQuery<{ count: number; results: RunAttachment[] }>({
+		queryKey: runKeys.attachments(runId),
+		queryFn: async () => {
+			const res = await api.get(`/runs/${runId}/attachments`);
+			return res.data;
+		},
+		enabled: Number.isFinite(runId) && enabled,
 	});
 }

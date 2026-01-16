@@ -99,4 +99,29 @@ urlpatterns = [
         views.RunExportWideView.as_view(),
         name="run_export_wide",
     ),
+    # -------- Run Attachments --------
+    # GET  /api/v2/runs/<run_id>/attachments
+    # POST /api/v2/runs/<run_id>/attachments
+    path(
+        "runs/<int:run_id>/attachments",
+        method_router(
+            {
+                "GET": views.RunAttachmentsView,
+                "POST": views.RunAttachmentsView,
+            }
+        ),
+        name="run_attachments_list_create",
+    ),
+    # GET/PATCH/DELETE /api/v2/runs/<run_id>/attachments/<attachment_id>
+    path(
+        "runs/<int:run_id>/attachments/<int:attachment_id>",
+        method_router(
+            {
+                "GET": views.RunAttachmentDetailView,
+                "PATCH": views.RunAttachmentDetailView,
+                "DELETE": views.RunAttachmentDetailView,
+            }
+        ),
+        name="run_attachment_detail_delete",
+    ),
 ]

@@ -96,3 +96,31 @@ class RunWindow(models.Model):
             f"Run#{self.run_id} {self.group} [{device_codes}] "
             f"[{self.start_at} - {self.end_at or '...'}]"
         )
+
+
+class RunAttachment(models.Model):
+    """
+    Run 的附件（支持上传多个文件，如 CSV 理化数据、Word 实验方案等）
+    """
+    CATEGORY_CHOICES = [
+        ('data', '理化数据'),
+        ('protocol', '实验方案'),
+        ('report', '报告'),
+        ('other', '其他'),
+    ]
+
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="attachments")
+    file = models.FileField(upload_to='run_attachments/%Y/%m/')
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
+    description = models.CharField(max_length=255, blank=True, default="")
+    uploaded_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        indexes = [
+            models.Index(fields=["run", "category"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Attachment#{self.pk} - {self.file.name}"

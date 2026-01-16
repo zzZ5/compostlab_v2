@@ -10,4 +10,6 @@ export const runKeys = {
 	windowsBase: (runId: number) => [...runKeys.detail(runId), "windows"] as const,
 	windows: (runId: number, group: string, treatment: string) =>
 		[...runKeys.windowsBase(runId), group, treatment] as const,
+
+	attachments: (runId: number) => [...runKeys.detail(runId), "attachments"] as const,
 };

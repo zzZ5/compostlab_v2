@@ -18,6 +18,7 @@ class ResourceType(str, Enum):
 
     # 运行批次相关
     RUN = "run"
+    RUN_ATTACHMENT = "run_attachment"
 
     # 遥测数据相关
     TELEMETRY = "telemetry"
@@ -102,6 +103,11 @@ class PermissionMatrix:
             ActionType.CREATE: UserRole.OPERATOR,
             ActionType.DELETE: UserRole.ADMIN,
             ActionType.MANAGE: UserRole.ADMIN,
+        },
+        ResourceType.RUN_ATTACHMENT: {
+            ActionType.READ: UserRole.READONLY,
+            ActionType.CREATE: UserRole.OPERATOR,
+            ActionType.DELETE: UserRole.OPERATOR,
         },
 
         # 遥测数据相关

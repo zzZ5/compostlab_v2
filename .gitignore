@@ -13,6 +13,7 @@ venv/
 
 # 本地 SQLite（如果曾经用过）
 db.sqlite3
+run_attachments/
 
 # Django 运行时文件（按需调整，如果你有持久化/media，请在服务器挂卷而不是进仓库）
 media/

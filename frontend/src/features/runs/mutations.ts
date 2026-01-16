@@ -57,3 +57,54 @@ export function useDeleteRun() {
 		},
 	});
 }
+
+export function useUploadRunAttachment(runId: number) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (data: { file: File; category: string; description: string }) => {
+			const formData = new FormData();
+			formData.append('file', data.file);
+			formData.append('category', data.category);
+			formData.append('description', data.description);
+
+			const res = await api.post(`/runs/${runId}/attachments`, formData, {
+				headers: {
+					'Content-Type': 'multipart/form-data',
+				},
+			});
+			return res.data;
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: runKeys.attachments(runId) });
+		},
+	});
+}
+
+export function useUpdateRunAttachment(runId: number) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (data: { attachmentId: number; category?: string; description?: string }) => {
+			const res = await api.patch(`/runs/${runId}/attachments/${data.attachmentId}`, {
+				category: data.category,
+				description: data.description,
+			});
+			return res.data;
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: runKeys.attachments(runId) });
+		},
+	});
+}
+
+export function useDeleteRunAttachment(runId: number) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (attachmentId: number) => {
+			await api.delete(`/runs/${runId}/attachments/${attachmentId}`);
+			return attachmentId;
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: runKeys.attachments(runId) });
+		},
+	});
+}

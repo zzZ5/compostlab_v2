@@ -441,6 +441,30 @@ export type RunExportResp = Blob;
 export type RunExportWideResp = Blob;
 
 /* =========================
+ * Run Attachments
+ * ========================= */
+
+export type RunAttachmentCategory = "data" | "protocol" | "report" | "other";
+
+export type RunAttachment = {
+	id: ID;
+	file: string;
+	filename: string;
+	category: RunAttachmentCategory;
+	category_display: string;
+	description: string;
+	uploaded_by: string | null;
+	uploaded_at: LocalDateTimeString;
+	file_size: number;
+	file_url: string | null;
+};
+
+export type RunAttachmentsResp = {
+	count: number;
+	results: RunAttachment[];
+};
+
+/* =========================
  * Errors（常见）
  * ========================= */
 

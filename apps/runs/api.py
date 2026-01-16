@@ -20,24 +20,32 @@ Runs / RunWindows / Telemetry API
 from __future__ import annotations
 
 import csv
+import os
 import re
+import mimetypes
 from typing import List, Tuple, Optional
 
 from django.db import connection
 from django.db.models import Q, Min, Max
-from django.http import JsonResponse, StreamingHttpResponse
+from django.http import JsonResponse, StreamingHttpResponse, FileResponse, Http404
 from django.utils import timezone
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.conf import settings
 
 from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
 from apps.api.utils import parse_dt, parse_bucket
-from apps.runs.models import Run, RunWindow
+from apps.runs.models import Run, RunWindow, RunAttachment
 from apps.telemetry.models import TelemetryKV
 from apps.devices.models import Device
+from apps.permissions.mixins import ReadOrWritePermissionMixin, ResourceType
+from apps.permissions.config import ActionType
+
+# 用于类型提示
+from django.http import HttpRequest
 
 
 # -------------------------
@@ -1007,3 +1015,197 @@ class RunExportWideView(BasicAuthMixin, View):
         resp = StreamingHttpResponse(row_iter(), content_type="text/csv; charset=utf-8")
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp
+
+
+# -------------------------
+# Run Attachment APIs
+# -------------------------
+class RunAttachmentsView(BasicAuthMixin, ReadOrWritePermissionMixin, View):
+    """Run 附件列表/上传"""
+    resource_type = ResourceType.RUN_ATTACHMENT
+
+    def get(self, request: HttpRequest, run_id: int) -> JsonResponse:
+        """获取指定 Run 的所有附件"""
+        try:
+            run = Run.objects.get(id=run_id)
+        except Run.DoesNotExist:
+            return JsonResponse({"error": "Run not found"}, status=404)
+
+        attachments = RunAttachment.objects.filter(run=run).select_related('uploaded_by')
+
+        data = [
+            {
+                "id": att.id,
+                "file": att.file.name,
+                "filename": os.path.basename(att.file.name),
+                "category": att.category,
+                "category_display": att.get_category_display(),
+                "description": att.description,
+                "uploaded_by": att.uploaded_by.username if att.uploaded_by else None,
+                "uploaded_at": att.uploaded_at.isoformat(),
+                "file_size": att.file.size if att.file else 0,
+                "file_url": att.file.url if att.file else None,
+            }
+            for att in attachments
+        ]
+
+        return JsonResponse({
+            "count": len(data),
+            "results": data,
+        })
+
+    def post(self, request: HttpRequest, run_id: int) -> JsonResponse:
+        """上传附件到指定 Run"""
+        try:
+            run = Run.objects.get(id=run_id)
+        except Run.DoesNotExist:
+            return JsonResponse({"error": "Run not found"}, status=404)
+
+        if 'file' not in request.FILES:
+            return JsonResponse({"error": "No file provided"}, status=400)
+
+        file = request.FILES['file']
+        category = request.POST.get('category', 'other')
+        description = request.POST.get('description', '')
+
+        # 验证文件类型（可选）
+        allowed_extensions = ['.csv', '.xls', '.xlsx', '.doc', '.docx', '.pdf', '.txt', '.zip', '.rar']
+        file_ext = os.path.splitext(file.name)[1].lower()
+        if file_ext not in allowed_extensions:
+            return JsonResponse({"error": f"File type {file_ext} is not allowed"}, status=400)
+
+        # 验证文件大小（限制为 50MB）
+        max_size = 50 * 1024 * 1024
+        if file.size > max_size:
+            return JsonResponse({"error": "File size exceeds 50MB limit"}, status=400)
+
+        # 创建附件记录
+        attachment = RunAttachment.objects.create(
+            run=run,
+            file=file,
+            category=category,
+            description=description,
+            uploaded_by=request.user,
+        )
+
+        return JsonResponse({
+            "id": attachment.id,
+            "file": attachment.file.name,
+            "filename": os.path.basename(attachment.file.name),
+            "category": attachment.category,
+            "category_display": attachment.get_category_display(),
+            "description": attachment.description,
+            "uploaded_by": attachment.uploaded_by.username,
+            "uploaded_at": attachment.uploaded_at.isoformat(),
+            "file_size": attachment.file.size,
+            "file_url": attachment.file.url,
+        }, status=201)
+
+
+class RunAttachmentDetailView(BasicAuthMixin, ReadOrWritePermissionMixin, View):
+    """Run 附件详情/下载/删除/更新"""
+    resource_type = ResourceType.RUN_ATTACHMENT
+
+    def get(self, request: HttpRequest, run_id: int, attachment_id: int) -> JsonResponse | FileResponse:
+        """获取附件详情或下载文件"""
+        try:
+            attachment = RunAttachment.objects.get(id=attachment_id, run_id=run_id)
+        except RunAttachment.DoesNotExist:
+            return JsonResponse({"error": "Attachment not found"}, status=404)
+
+        # 如果查询参数中有 download=1，则返回文件下载
+        if request.GET.get('download') == '1':
+            try:
+                file_path = attachment.file.path
+                if not os.path.exists(file_path):
+                    return JsonResponse({"error": "File not found on server"}, status=404)
+
+                # 获取 MIME 类型
+                content_type, _ = mimetypes.guess_type(file_path)
+                if not content_type:
+                    content_type = 'application/octet-stream'
+
+                # 返回文件
+                return FileResponse(
+                    open(file_path, 'rb'),
+                    content_type=content_type,
+                    as_attachment=True,
+                    filename=os.path.basename(file_path)
+                )
+            except Exception as e:
+                return JsonResponse({"error": str(e)}, status=500)
+
+        # 否则返回附件详情
+        return JsonResponse({
+            "id": attachment.id,
+            "file": attachment.file.name,
+            "filename": os.path.basename(attachment.file.name),
+            "category": attachment.category,
+            "category_display": attachment.get_category_display(),
+            "description": attachment.description,
+            "uploaded_by": attachment.uploaded_by.username if attachment.uploaded_by else None,
+            "uploaded_at": attachment.uploaded_at.isoformat(),
+            "file_size": attachment.file.size if attachment.file else 0,
+            "file_url": attachment.file.url if attachment.file else None,
+        })
+
+    @method_decorator(csrf_exempt, name="dispatch")
+    def patch(self, request: HttpRequest, run_id: int, attachment_id: int) -> JsonResponse:
+        """更新附件的 category 和 description"""
+        try:
+            attachment = RunAttachment.objects.get(id=attachment_id, run_id=run_id)
+        except RunAttachment.DoesNotExist:
+            return JsonResponse({"error": "Attachment not found"}, status=404)
+
+        # 解析请求体
+        try:
+            import json
+            body = json.loads(request.body)
+        except (json.JSONDecodeError, AttributeError):
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        # 只允许更新 category 和 description
+        if 'category' in body:
+            valid_categories = ['data', 'protocol', 'report', 'other']
+            category = body.get('category')
+            if category not in valid_categories:
+                return JsonResponse({"error": f"Invalid category. Must be one of: {', '.join(valid_categories)}"}, status=400)
+            attachment.category = category
+
+        if 'description' in body:
+            description = body.get('description')
+            if description is not None:
+                attachment.description = str(description).strip()
+
+        attachment.save()
+
+        return JsonResponse({
+            "id": attachment.id,
+            "file": attachment.file.name,
+            "filename": os.path.basename(attachment.file.name),
+            "category": attachment.category,
+            "category_display": attachment.get_category_display(),
+            "description": attachment.description,
+            "uploaded_by": attachment.uploaded_by.username if attachment.uploaded_by else None,
+            "uploaded_at": attachment.uploaded_at.isoformat(),
+            "file_size": attachment.file.size if attachment.file else 0,
+            "file_url": attachment.file.url if attachment.file else None,
+        })
+
+    def delete(self, request: HttpRequest, run_id: int, attachment_id: int) -> JsonResponse:
+        """删除附件"""
+        try:
+            attachment = RunAttachment.objects.get(id=attachment_id, run_id=run_id)
+        except RunAttachment.DoesNotExist:
+            return JsonResponse({"error": "Attachment not found"}, status=404)
+
+        # 删除文件
+        if attachment.file:
+            file_path = attachment.file.path
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+        # 删除数据库记录
+        attachment.delete()
+
+        return JsonResponse({"message": "Attachment deleted successfully"}, status=204)

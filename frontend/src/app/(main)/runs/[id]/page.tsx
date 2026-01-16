@@ -23,6 +23,8 @@ import {
 	Alert,
 	Tag,
 	Typography,
+	Upload,
+	Table,
 } from "antd";
 import Link from "next/link";
 
@@ -40,11 +42,15 @@ import { useUpdateRunWindow } from "@/features/runWindows/mutations";
 import { useDeleteRunWindow } from "@/features/runWindows/mutations";
 import { useUpdateRun } from "@/features/runs/mutations";
 import { useDeleteRun } from "@/features/runs/mutations";
+import { useUploadRunAttachment } from "@/features/runs/mutations";
+import { useDeleteRunAttachment } from "@/features/runs/mutations";
+import { useUpdateRunAttachment } from "@/features/runs/mutations";
+import { useRunAttachments } from "@/features/runs/queries";
 import { useRunTelemetry } from "@/features/runs/queries";
-
 import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
 import { normalizeMetric, MetricKey, metricLabel } from "@/lib/metrics";
 import { emptyObjectToUndefined } from "@/lib/kv";
+import { getUser } from "@/lib/auth";
 
 import type { RunWindow } from "@/types/api";
 
@@ -84,6 +90,16 @@ export default function RunDetailPage() {
 	const updateRun = useUpdateRun(runId);
 	const deleteRun = useDeleteRun();
 
+	// 附件相关
+	const attachmentsQ = useRunAttachments(runId);
+	const uploadAttachment = useUploadRunAttachment(runId);
+	const updateAttachment = useUpdateRunAttachment(runId);
+	const deleteAttachment = useDeleteRunAttachment(runId);
+	const attachments = attachmentsQ.data?.results || [];
+	const [uploadCategory, setUploadCategory] = useState<string>("data");
+	const [editingAttachment, setEditingAttachment] = useState<any | null>(null);
+	const [attachmentForm] = Form.useForm();
+
 	const [runModalOpen, setRunModalOpen] = useState(false);
 	const [windowModalOpen, setWindowModalOpen] = useState(false);
 	const [editingWindow, setEditingWindow] = useState<RunWindow | null>(null);
@@ -91,6 +107,9 @@ export default function RunDetailPage() {
 	const [windowForm] = Form.useForm();
 
 	const fmt = (d: any) => (d ? dayjs(d).format("YYYY-MM-DD HH:mm:ss") : null);
+
+	// 获取 API 基础路径
+	const getApiBase = () => (process.env.NEXT_PUBLIC_API_BASE || "").trim() || "/api/v2";
 
 	function openRunEdit() {
 		const r = runQ.data;
@@ -545,6 +564,7 @@ export default function RunDetailPage() {
 	}
 
 	const run = runQ.data;
+	const currentUser = getUser();
 
 	if (!run) {
 		return (
@@ -708,6 +728,273 @@ export default function RunDetailPage() {
 						</Space>
 					</Card>
 				</Col>
+
+				{/* 附件管理 */}
+				<Col xs={24}>
+					<Card
+						title={
+							<Space size="small">
+								<Text strong style={{ fontSize: 14 }}>附件</Text>
+								<Tag color="blue" style={{ margin: 0, fontSize: 12 }}>{attachments.length}</Tag>
+							</Space>
+						}
+						size="small"
+						style={{ minHeight: 200 }}
+						extra={
+							manage && (
+								<Space size="small">
+									<Select
+										size="small"
+										value={uploadCategory}
+										onChange={(v) => setUploadCategory(v)}
+										style={{ width: 90, fontSize: 12 }}
+										options={[
+											{ label: "数据", value: "data" },
+											{ label: "方案", value: "protocol" },
+											{ label: "报告", value: "report" },
+											{ label: "其他", value: "other" },
+										]}
+									/>
+									<Upload
+										accept=".csv,.xls,.xlsx,.doc,.docx,.pdf,.txt,.zip,.rar"
+										showUploadList={false}
+										beforeUpload={async (file) => {
+											try {
+												await uploadAttachment.mutateAsync({
+													file,
+													category: uploadCategory,
+													description: file.name,
+												});
+												message.success("附件上传成功");
+											} catch (err) {
+												message.error(getErrorMessage(err, "上传失败"));
+											}
+											return false;
+										}}
+									>
+										<Button size="small" type="primary" loading={uploadAttachment.isPending}>
+											上传
+										</Button>
+									</Upload>
+								</Space>
+							)
+						}
+					>
+						{attachments.length === 0 ? (
+							<div style={{ textAlign: 'center', padding: '40px 0' }}>
+								<Space direction="vertical" size="small">
+									<Text type="secondary" style={{ fontSize: 13 }}>暂无附件</Text>
+									{manage && (
+										<Text type="secondary" style={{ fontSize: 12 }}>
+											点击右上角"上传"按钮添加附件
+										</Text>
+									)}
+								</Space>
+							</div>
+						) : (
+							<Table
+								size="small"
+								pagination={false}
+								rowKey="id"
+								columns={[
+									{
+										title: "文件名",
+										dataIndex: "filename",
+										key: "filename",
+										ellipsis: true,
+										width: 280,
+										render: (text, record: any) => (
+											<div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '8px 0' }}>
+												<Space size="small">
+													<Tag
+														color={
+															record.category === "data" ? "blue" :
+															record.category === "protocol" ? "green" :
+															record.category === "report" ? "orange" :
+															"default"
+														}
+														style={{ fontSize: 11, margin: 0, padding: '2px 6px' }}
+													>
+														{record.category_display}
+													</Tag>
+													<Text
+														ellipsis
+														style={{
+															fontSize: 13,
+															color: '#262626',
+															maxWidth: 200
+														}}
+														title={text}
+													>
+														{text}
+													</Text>
+												</Space>
+												{record.description && record.description !== text && (
+													<Text
+														type="secondary"
+														ellipsis
+														style={{
+															fontSize: 12,
+															maxWidth: 270,
+															lineHeight: 1.4
+														}}
+														title={record.description}
+													>
+														{record.description}
+													</Text>
+												)}
+											</div>
+										),
+									},
+									{
+										title: "大小",
+										dataIndex: "file_size",
+										key: "file_size",
+										width: 70,
+										align: "right",
+										render: (size: number) => {
+											const sizeKB = size / 1024;
+											const sizeMB = sizeKB / 1024;
+											return (
+												<Text style={{ fontSize: 13, color: '#595959', fontWeight: 500 }}>
+													{sizeMB < 1 ? `${sizeKB.toFixed(1)} KB` : `${sizeMB.toFixed(1)} MB`}
+												</Text>
+											);
+										},
+									},
+									{
+										title: "上传者",
+										dataIndex: "uploaded_by",
+										key: "uploaded_by",
+										width: 100,
+										render: (text: string, record: any) => (
+											<div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px 0' }}>
+												<Text
+													style={{
+														fontSize: 13,
+														color: '#262626',
+														fontWeight: 500
+													}}
+													ellipsis
+													title={text || "-"}
+												>
+													{text || "-"}
+												</Text>
+												<Text type="secondary" style={{ fontSize: 11 }}>
+													{dayjs(record.uploaded_at).format("MM-DD HH:mm")}
+												</Text>
+											</div>
+										),
+									},
+									{
+										title: "操作",
+										key: "actions",
+										width: 110,
+										align: 'center',
+										fixed: "right",
+										render: (_, record: any) => {
+											const canEdit = manage && (
+												currentUser?.role === "ADMIN" ||
+												currentUser?.username === record.uploaded_by
+											);
+											const canDelete = manage && (
+												currentUser?.role === "ADMIN" ||
+												currentUser?.username === record.uploaded_by
+											);
+											return (
+												<Space size="small" style={{ padding: '8px 0' }}>
+													<Button
+														type="link"
+														size="small"
+														style={{
+															padding: '4px 8px',
+															height: 'auto',
+															fontSize: 13,
+															color: '#1890ff',
+															fontWeight: 500
+														}}
+														onClick={async () => {
+															try {
+																const url = `/runs/${runId}/attachments/${record.id}?download=1`;
+																const filename = record.filename;
+																await downloadBlob(api, url, filename);
+															} catch (err) {
+																message.error(getErrorMessage(err, "下载失败"));
+															}
+														}}
+													>
+														下载
+													</Button>
+													{canEdit && (
+														<Button
+															type="link"
+															size="small"
+															style={{
+																padding: '4px 8px',
+																height: 'auto',
+																fontSize: 13,
+																color: '#52c41a',
+																fontWeight: 500
+															}}
+															onClick={() => {
+																setEditingAttachment(record);
+																attachmentForm.resetFields();
+																attachmentForm.setFieldsValue({
+																	category: record.category,
+																	description: record.description,
+																});
+															}}
+														>
+															编辑
+														</Button>
+													)}
+													{canDelete && (
+														<Button
+															type="link"
+															size="small"
+															danger
+															style={{
+																padding: '4px 8px',
+																height: 'auto',
+																fontSize: 13,
+																fontWeight: 500
+															}}
+															onClick={() => {
+																Modal.confirm({
+																	title: "确认删除",
+																	content: `确定要删除附件 "${record.filename}" 吗?`,
+																	okType: "danger",
+																	onOk: async () => {
+																		try {
+																			await deleteAttachment.mutateAsync(record.id);
+																			message.success("删除成功");
+																		} catch (err) {
+																			message.error(getErrorMessage(err, "删除失败"));
+																		}
+																	},
+																});
+															}}
+														>
+															删除
+														</Button>
+													)}
+												</Space>
+											);
+										},
+									},
+								]}
+								dataSource={attachments}
+								scroll={{ x: 650 }}
+								style={{
+									'& .ant-table-cell': {
+										padding: '12px 16px',
+									},
+								}}
+							/>
+						)}
+					</Card>
+				</Col>
+
 				<Col xs={24}>
 					<Row gutter={[12, 12]}>
 						{/* Windows 列表侧边栏 */}
@@ -1196,6 +1483,89 @@ export default function RunDetailPage() {
 							},
 						]}
 					/>
+				</Form>
+			</Modal>
+
+			{/* ===== 附件编辑 ===== */}
+			<Modal
+				open={!!editingAttachment}
+				title={
+					<Space>
+						<span>编辑附件</span>
+						{editingAttachment && (
+							<Tag
+								color={
+									editingAttachment.category === "data" ? "blue" :
+									editingAttachment.category === "protocol" ? "green" :
+									editingAttachment.category === "report" ? "orange" :
+									"default"
+								}
+								style={{ margin: 0 }}
+							>
+								{editingAttachment.category_display}
+							</Tag>
+						)}
+					</Space>
+				}
+				onCancel={() => {
+					setEditingAttachment(null);
+					attachmentForm.resetFields();
+				}}
+				onOk={async () => {
+					try {
+						const v = await attachmentForm.validateFields();
+						await updateAttachment.mutateAsync({
+							attachmentId: editingAttachment.id,
+							category: v.category,
+							description: v.description,
+						});
+						message.success("附件更新成功");
+						setEditingAttachment(null);
+					} catch (err) {
+						if ((err as any)?.errorFields) return;
+						message.error(getErrorMessage(err, "更新失败"));
+					}
+				}}
+				okText="保存"
+				width={500}
+				destroyOnHidden
+				confirmLoading={updateAttachment.isPending}
+			>
+				<Form layout="vertical" form={attachmentForm} style={{ marginTop: 16 }}>
+					<Form.Item
+						label={
+							<Space size="small">
+								<span style={{ fontSize: 14, fontWeight: 500 }}>附件类型</span>
+							</Space>
+						}
+						name="category"
+						rules={[{ required: true, message: "请选择附件类型" }]}
+					>
+						<Select
+							size="large"
+							options={[
+								{ label: "数据", value: "data" },
+								{ label: "方案", value: "protocol" },
+								{ label: "报告", value: "report" },
+								{ label: "其他", value: "other" },
+							]}
+						/>
+					</Form.Item>
+					<Form.Item
+						label={
+							<Space size="small">
+								<span style={{ fontSize: 14, fontWeight: 500 }}>描述</span>
+								<Text type="secondary" style={{ fontSize: 12 }}>(可选)</Text>
+							</Space>
+						}
+						name="description"
+					>
+						<Input.TextArea
+							autoSize={{ minRows: 3, maxRows: 6 }}
+							placeholder="添加附件的描述信息，帮助其他用户了解附件内容"
+							style={{ fontSize: 13 }}
+						/>
+					</Form.Item>
 				</Form>
 			</Modal>
 
