@@ -311,7 +311,7 @@ export default function AnnouncementBadge() {
 					未读 ({unreadCount})
 				</Space>
 			),
-			children: unreadList,
+			children: null,
 		},
 		{
 			key: "history",
@@ -321,7 +321,7 @@ export default function AnnouncementBadge() {
 					历史记录
 				</Space>
 			),
-			children: historyList,
+			children: null,
 		},
 	];
 
