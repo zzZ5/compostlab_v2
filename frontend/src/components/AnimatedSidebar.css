@@ -1,0 +1,108 @@
+/* AnimatedSidebar 组件样式 */
+
+/* 优化移动端侧边栏动画性能 */
+.ant-layout-sider {
+  /* 使用 transform 而非 left 属性来优化性能 */
+  will-change: transform, width;
+  /* 硬件加速 */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* 优化遮罩层动画 */
+.animated-sidebar-overlay {
+  will-change: opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* 移动端滑动指示器 */
+@media (max-width: 767px) {
+  .ant-layout-sider::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    /* 触摸区域扩大 */
+    pointer-events: none;
+  }
+}
+
+/* 滚动条样式优化 */
+.ant-layout-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* 主题为深色时的滚动条样式 */
+.ant-layout-sider.ant-layout-sider-dark::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.ant-layout-sider.ant-layout-sider-dark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ant-layout-sider.ant-layout-sider-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 菜单项动画优化 */
+.ant-menu {
+  will-change: opacity, transform;
+}
+
+/* 防止触摸拖拽时的页面滚动 */
+.ant-layout-sider.touch-dragging {
+  overflow: hidden;
+}
+
+/* 优化按钮点击效果 */
+.ant-btn-text:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.ant-btn-text:active {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* 响应式调整 */
+@media (max-width: 767px) {
+  .ant-layout-sider {
+    border-right: none;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .animated-sidebar-overlay {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .animated-sidebar-overlay {
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* 减少动画效果（用户偏好设置） */
+@media (prefers-reduced-motion: reduce) {
+  .ant-layout-sider,
+  .animated-sidebar-overlay {
+    transition: none !important;
+  }
+}

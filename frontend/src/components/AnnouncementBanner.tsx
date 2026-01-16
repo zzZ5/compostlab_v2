@@ -52,7 +52,7 @@ export default function AnnouncementBanner({ maxVisible = 3 }: AnnouncementBanne
 			{announcements.map((announcement) => (
 				<Alert
 					key={announcement.id}
-					message={
+					title={
 						<>
 							<div
 								style={{

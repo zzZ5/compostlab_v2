@@ -161,24 +161,26 @@ export default function DevicesPage() {
 	const filtered = useMemo(() => {
 		const qq = q.trim().toLowerCase();
 
-		return devices.filter((d) => {
-			const state = getOnlineState(d.last_seen_at);
-			if (statusFilter !== "all" && state !== statusFilter) return false;
+		return devices
+			.filter((d) => {
+				const state = getOnlineState(d.last_seen_at);
+				if (statusFilter !== "all" && state !== statusFilter) return false;
 
-			const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-			const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
-			const tempV = maxLatest(tempChs);
-			const o2V = minLatest(o2Chs);
+				const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
+				const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+				const tempV = maxLatest(tempChs);
+				const o2V = minLatest(o2Chs);
 
-			const tA = evalTemp(tempV);
-			const oA = evalO2(o2V);
-			const ov = overallSev(tA.sev, oA.sev);
-			if (alertFilter !== "all" && ov !== alertFilter) return false;
+				const tA = evalTemp(tempV);
+				const oA = evalO2(o2V);
+				const ov = overallSev(tA.sev, oA.sev);
+				if (alertFilter !== "all" && ov !== alertFilter) return false;
 
-			if (!qq) return true;
-			const hay = `${d.name || ""} ${d.code || ""}`.toLowerCase();
-			return hay.includes(qq);
-		});
+				if (!qq) return true;
+				const hay = `${d.name || ""} ${d.code || ""}`.toLowerCase();
+				return hay.includes(qq);
+			})
+			.sort((a, b) => b.device_id - a.device_id); // 按device_id降序排列，新设备在前
 	}, [devices, q, statusFilter, alertFilter]);
 
 	const columns = useMemo(() => {
@@ -491,6 +493,10 @@ export default function DevicesPage() {
 					columns={columns as any}
 					dataSource={filtered as any}
 					pagination={{ pageSize: 10 }}
+					defaultSort={{
+						field: "device_id",
+						order: "descend",
+					}}
 				/>
 			)}
 

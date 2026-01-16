@@ -1,6 +1,6 @@
 import { Badge, Button, Dropdown, Space, Typography, Tabs, Tag, Empty } from "antd";
 import { BellOutlined, HistoryOutlined } from "@ant-design/icons";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -10,19 +10,89 @@ import type { MyAnnouncement } from "@/types/api";
 
 const { Text } = Typography;
 
-// 格式化日期显示
+// 格式化日期显示（用于创建时间等过去的时间）
 function formatDate(dateString: string | null) {
 	if (!dateString) return "永不过期";
 	const date = new Date(dateString);
 	const now = new Date();
-	const diffMs = now.getTime() - date.getTime();
-	const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-	if (diffDays === 0) return "今天";
+	// 设置为同一天的午夜进行比较
+	const dateMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+	const nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+	const diffDays = Math.floor((nowMidnight.getTime() - dateMidnight.getTime()) / (1000 * 60 * 60 * 24));
+
+	// 今天显示时间
+	if (diffDays === 0) {
+		const hours = date.getHours().toString().padStart(2, "0");
+		const minutes = date.getMinutes().toString().padStart(2, "0");
+		return `今天 ${hours}:${minutes}`;
+	}
+
+	// 昨天
 	if (diffDays === 1) return "昨天";
+
+	// 一周内
 	if (diffDays < 7) return `${diffDays}天前`;
+
+	// 一个月内
 	if (diffDays < 30) return `${Math.floor(diffDays / 7)}周前`;
-	return `${Math.floor(diffDays / 30)}个月前`;
+
+	// 超过一个月，显示具体日期
+	const year = date.getFullYear();
+	const month = (date.getMonth() + 1).toString().padStart(2, "0");
+	const day = date.getDate().toString().padStart(2, "0");
+
+	// 如果是今年，不显示年份
+	const currentYear = now.getFullYear();
+	if (year === currentYear) {
+		return `${month}-${day}`;
+	}
+
+	// 否则显示完整日期
+	return `${year}-${month}-${day}`;
+}
+
+// 格式化过期时间（用于未来的时间）
+function formatExpiryDate(expiryDateString: string) {
+	const expiryDate = new Date(expiryDateString);
+	const now = new Date();
+
+	// 设置为同一天的午夜进行比较
+	const expiryMidnight = new Date(expiryDate.getFullYear(), expiryDate.getMonth(), expiryDate.getDate());
+	const nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+	const diffDays = Math.floor((expiryMidnight.getTime() - nowMidnight.getTime()) / (1000 * 60 * 60 * 24));
+
+	// 今天过期
+	if (diffDays === 0) {
+		const hours = expiryDate.getHours().toString().padStart(2, "0");
+		const minutes = expiryDate.getMinutes().toString().padStart(2, "0");
+		return `今天 ${hours}:${minutes}`;
+	}
+
+	// 明天过期
+	if (diffDays === 1) return "明天";
+
+	// 一周内过期
+	if (diffDays < 7) return `${diffDays}天后`;
+
+	// 一个月内过期
+	if (diffDays < 30) return `${Math.floor(diffDays / 7)}周后`;
+
+	// 超过一个月，显示具体日期
+	const year = expiryDate.getFullYear();
+	const month = (expiryDate.getMonth() + 1).toString().padStart(2, "0");
+	const day = expiryDate.getDate().toString().padStart(2, "0");
+
+	// 如果是今年，不显示年份
+	const currentYear = now.getFullYear();
+	if (year === currentYear) {
+		return `${month}-${day}`;
+	}
+
+	// 否则显示完整日期
+	return `${year}-${month}-${day}`;
 }
 
 // 判断是否已过期
@@ -35,6 +105,17 @@ export default function AnnouncementBadge() {
 	const router = useRouter();
 	const [open, setOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState("unread");
+	const [isMobile, setIsMobile] = useState(false);
+
+	// 检测是否为移动端
+	useEffect(() => {
+		const checkMobile = () => {
+			setIsMobile(window.innerWidth < 768);
+		};
+		checkMobile();
+		window.addEventListener("resize", checkMobile);
+		return () => window.removeEventListener("resize", checkMobile);
+	}, []);
 
 	// 获取未读公告
 	const { data: myAnnouncementsData, isLoading: isLoadingUnread } = useMyAnnouncements({
@@ -109,8 +190,6 @@ export default function AnnouncementBadge() {
 					padding: "12px",
 					borderBottom: "1px solid #f0f0f0",
 					cursor: "pointer",
-					maxWidth: 420,
-					minWidth: 320,
 					transition: "background-color 0.2s",
 				}}
 				onClick={() => handleViewAnnouncement(announcement)}
@@ -144,7 +223,7 @@ export default function AnnouncementBadge() {
 									type={expired ? "danger" : "secondary"}
 									style={{ fontSize: 11 }}
 								>
-									⏰ {expired ? "已过期" : formatDate(announcement.expiry_at)}
+									⏰ {expired ? "已过期" : formatExpiryDate(announcement.expiry_at)}
 								</Text>
 							)}
 						</Space>
@@ -208,20 +287,28 @@ export default function AnnouncementBadge() {
 		},
 	];
 
-	return (
-		<Dropdown
+return (
+	<Dropdown
 			trigger={["click"]}
-			placement="bottomRight"
+			placement={isMobile ? "bottomRight" : "bottomRight"}
 			open={open}
 			onOpenChange={setOpen}
 			popupRender={(menu) => (
-				<div style={{ background: "#fff", borderRadius: 8, boxShadow: "0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08), 0 9px 28px 8px rgba(0,0,0,.05)" }}>
+				<div
+					style={{
+						background: "#fff",
+						borderRadius: 8,
+						boxShadow: "0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08), 0 9px 28px 8px rgba(0,0,0,.05)",
+						width: isMobile ? "calc(100vw - 32px)" : 420,
+						maxWidth: 420,
+					}}
+				>
 					<Tabs
 						activeKey={activeTab}
 						onChange={setActiveTab}
 						items={tabItems}
 						size="small"
-						style={{ width: 420 }}
+						style={{ width: "100%" }}
 					/>
 					<div
 						style={{
@@ -239,7 +326,7 @@ export default function AnnouncementBadge() {
 					</div>
 				</div>
 			)}
-		>
+	>
 			<Badge count={unreadCount} overflowCount={99}>
 				<Button
 					type="text"
