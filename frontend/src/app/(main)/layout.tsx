@@ -73,7 +73,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const selectedKey = useMemo(() => getSelectedKey(pathname), [pathname]);
 
-  // 初始化折叠状态（桌面端记忆；移动端默认折叠）
+  // 初始化折叠状态（桌面端记忆但默认打开；移动端默认折叠）
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isMobile) {
@@ -81,8 +81,17 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       setMobileDrawerOpen(false);
       return;
     }
+    // 从 localStorage 读取折叠状态，如果不存在或不是 "1" 则默认打开
     const v = window.localStorage.getItem("compostlab:siderCollapsed");
-    if (v === "1") setCollapsed(true);
+    if (v === "1") {
+      setCollapsed(true);
+    } else {
+      // 默认打开，并设置 localStorage 为 "0"
+      setCollapsed(false);
+      if (!v) {
+        window.localStorage.setItem("compostlab:siderCollapsed", "0");
+      }
+    }
   }, [isMobile]);
 
   useEffect(() => {
