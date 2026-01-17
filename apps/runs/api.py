@@ -1035,21 +1035,31 @@ class RunAttachmentsView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
 
         attachments = RunAttachment.objects.filter(run=run).select_related('uploaded_by')
 
-        data = [
-            {
+        data = []
+        for att in attachments:
+            # 安全获取文件大小，处理文件不存在的情况
+            file_size = 0
+            file_url = None
+            if att.file:
+                try:
+                    file_size = att.file.size
+                    file_url = att.file.url
+                except (FileNotFoundError, OSError):
+                    file_size = 0
+                    file_url = None
+
+            data.append({
                 "id": att.id,
-                "file": att.file.name,
-                "filename": os.path.basename(att.file.name),
+                "file": att.file.name if att.file else None,
+                "filename": os.path.basename(att.file.name) if att.file else None,
                 "category": att.category,
                 "category_display": att.get_category_display(),
                 "description": att.description,
                 "uploaded_by": att.uploaded_by.username if att.uploaded_by else None,
                 "uploaded_at": att.uploaded_at.isoformat(),
-                "file_size": att.file.size if att.file else 0,
-                "file_url": att.file.url if att.file else None,
-            }
-            for att in attachments
-        ]
+                "file_size": file_size,
+                "file_url": file_url,
+            })
 
         return JsonResponse({
             "count": len(data),
@@ -1150,17 +1160,28 @@ class RunAttachmentDetailView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
                 return JsonResponse({"error": str(e)}, status=500)
 
         # 否则返回附件详情
+        # 安全获取文件大小，处理文件不存在的情况
+        file_size = 0
+        file_url = None
+        if attachment.file:
+            try:
+                file_size = attachment.file.size
+                file_url = attachment.file.url
+            except (FileNotFoundError, OSError):
+                file_size = 0
+                file_url = None
+
         return JsonResponse({
             "id": attachment.id,
-            "file": attachment.file.name,
-            "filename": os.path.basename(attachment.file.name),
+            "file": attachment.file.name if attachment.file else None,
+            "filename": os.path.basename(attachment.file.name) if attachment.file else None,
             "category": attachment.category,
             "category_display": attachment.get_category_display(),
             "description": attachment.description,
             "uploaded_by": attachment.uploaded_by.username if attachment.uploaded_by else None,
             "uploaded_at": attachment.uploaded_at.isoformat(),
-            "file_size": attachment.file.size if attachment.file else 0,
-            "file_url": attachment.file.url if attachment.file else None,
+            "file_size": file_size,
+            "file_url": file_url,
         })
 
     @method_decorator(csrf_exempt, name="dispatch")
@@ -1193,17 +1214,28 @@ class RunAttachmentDetailView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
 
         attachment.save()
 
+        # 安全获取文件大小，处理文件不存在的情况
+        file_size = 0
+        file_url = None
+        if attachment.file:
+            try:
+                file_size = attachment.file.size
+                file_url = attachment.file.url
+            except (FileNotFoundError, OSError):
+                file_size = 0
+                file_url = None
+
         return JsonResponse({
             "id": attachment.id,
-            "file": attachment.file.name,
-            "filename": os.path.basename(attachment.file.name),
+            "file": attachment.file.name if attachment.file else None,
+            "filename": os.path.basename(attachment.file.name) if attachment.file else None,
             "category": attachment.category,
             "category_display": attachment.get_category_display(),
             "description": attachment.description,
             "uploaded_by": attachment.uploaded_by.username if attachment.uploaded_by else None,
             "uploaded_at": attachment.uploaded_at.isoformat(),
-            "file_size": attachment.file.size if attachment.file else 0,
-            "file_url": attachment.file.url if attachment.file else None,
+            "file_size": file_size,
+            "file_url": file_url,
         })
 
     def delete(self, request: HttpRequest, run_id: int, attachment_id: int) -> JsonResponse:

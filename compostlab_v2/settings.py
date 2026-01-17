@@ -131,6 +131,12 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
+# Media files (uploads)
+# https://docs.djangoproject.com/en/6.0/howto/static-files/#serving-uploaded-files
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 
 CORS_ALLOW_CREDENTIALS = True
 

@@ -23,6 +23,8 @@ services:
       - db
     ports:
       - "8001:8000"
+    volumes:
+      - run_attachments:/app/media
 
   mqtt_worker:
     build:
@@ -73,3 +75,4 @@ services:
 
 volumes:
   tsdb_data:
+  run_attachments:
