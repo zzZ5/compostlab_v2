@@ -27,7 +27,7 @@ whitenoise>=6.8,<7.0
 # Data processing (optional but recommended)
 # -------------------------
 pandas>=2.2,<2.3
-numpy>=2.1,<2.2
+numpy>=2.1
 
 # -------------------------
 # Production server (optional; dev can use runserver)

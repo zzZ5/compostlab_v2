@@ -35,7 +35,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.db.models import F
+from django.db.models import F, Q
 
 from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, DeviceJWTAuthMixin
 from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate, ScriptTemplate, ScriptExecution
@@ -1140,7 +1140,8 @@ class ControlTemplateListView(
         # 筛选参数
         device_id = request.GET.get("device_id")
         if device_id:
-            qs = qs.filter(device_id=device_id)
+            # 设备维度筛选时，默认包含全局模板（device_id 为 null）
+            qs = qs.filter(Q(device_id=device_id) | Q(device_id__isnull=True))
 
         is_active = _parse_bool(request.GET.get("is_active"))
         if is_active is not None:
