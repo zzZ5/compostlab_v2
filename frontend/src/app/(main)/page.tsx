@@ -73,9 +73,9 @@ export default function DashboardPage() {
   const isMobile = !screens.md;
 
   const devicesQ = useDevicesTree(true);
-  const devices = devicesQ.data || [];
+  const devices = devicesQ.data?.data || [];
   const runsQ = useRuns();
-  const runs = runsQ.data || [];
+  const runs = runsQ.data?.data || [];
   const [windowsMap, setWindowsMap] = useState<Map<number, any[]>>(new Map());
   const [isLoadingWindows, setIsLoadingWindows] = useState(false);
 

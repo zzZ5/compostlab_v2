@@ -39,6 +39,7 @@ from django.conf import settings
 from apps.api.mixins import JsonBodyMixin
 from apps.accounts.mixins import JWTAuthMixin
 from apps.api.utils import parse_dt, parse_bucket
+from apps.api.pagination import OffsetPaginator
 from apps.runs.models import Run, RunWindow, RunAttachment
 from apps.telemetry.models import TelemetryKV
 from apps.devices.models import Device
@@ -242,6 +243,28 @@ class RunListView(JWTAuthMixin, View):
 
     def get(self, request):
         qs = Run.objects.all().order_by("-id")
+        q = (request.GET.get("q") or "").strip()
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(note__icontains=q))
+        page = request.GET.get("page")
+        page_size = request.GET.get("page_size")
+
+        if page or page_size:
+            page_num = int(page or 1)
+            size = int(page_size or 50)
+            paginator = OffsetPaginator(qs, page=page_num, page_size=size, max_page_size=500)
+            result = paginator.paginate(with_total=True)
+            data = [_run_to_dict(r, include_stats=True) for r in result["data"]]
+            total = result["pagination"].get("total")
+            return JsonResponse(
+                {
+                    "count": total if total is not None else len(data),
+                    "data": data,
+                    "pagination": result["pagination"],
+                },
+                status=200,
+            )
+
         # 列表页需要统计信息
         data = [_run_to_dict(r, include_stats=True) for r in qs]
         return JsonResponse({"count": len(data), "data": data}, status=200)
@@ -1022,7 +1045,7 @@ class RunAttachmentsView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
         try:
             run = Run.objects.get(id=run_id)
         except Run.DoesNotExist:
-            return JsonResponse({"error": "Run not found"}, status=404)
+            return JsonResponse({"detail": "Run not found"}, status=404)
 
         attachments = RunAttachment.objects.filter(run=run).select_related('uploaded_by')
 
@@ -1062,10 +1085,10 @@ class RunAttachmentsView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
         try:
             run = Run.objects.get(id=run_id)
         except Run.DoesNotExist:
-            return JsonResponse({"error": "Run not found"}, status=404)
+            return JsonResponse({"detail": "Run not found"}, status=404)
 
         if 'file' not in request.FILES:
-            return JsonResponse({"error": "No file provided"}, status=400)
+            return JsonResponse({"detail": "No file provided"}, status=400)
 
         file = request.FILES['file']
         category = request.POST.get('category', 'other')
@@ -1086,12 +1109,15 @@ class RunAttachmentsView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
         ]
         file_ext = os.path.splitext(file.name)[1].lower()
         if file_ext not in allowed_extensions:
-            return JsonResponse({"error": f"File type {file_ext} is not allowed. Allowed types: {', '.join(allowed_extensions)}"}, status=400)
+            return JsonResponse(
+                {"detail": f"File type {file_ext} is not allowed. Allowed types: {', '.join(allowed_extensions)}"},
+                status=400,
+            )
 
         # 验证文件大小（限制为 10MB）
         max_size = 10 * 1024 * 1024
         if file.size > max_size:
-            return JsonResponse({"error": "File size exceeds 10MB limit"}, status=400)
+            return JsonResponse({"detail": "File size exceeds 10MB limit"}, status=400)
 
         # 创建附件记录
         attachment = RunAttachment.objects.create(
@@ -1126,14 +1152,14 @@ class RunAttachmentDetailView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
         try:
             attachment = RunAttachment.objects.get(id=attachment_id, run_id=run_id)
         except RunAttachment.DoesNotExist:
-            return JsonResponse({"error": "Attachment not found"}, status=404)
+            return JsonResponse({"detail": "Attachment not found"}, status=404)
 
         # 如果查询参数中有 download=1，则返回文件下载
         if request.GET.get('download') == '1':
             try:
                 file_path = attachment.file.path
                 if not os.path.exists(file_path):
-                    return JsonResponse({"error": "File not found on server"}, status=404)
+                    return JsonResponse({"detail": "File not found on server"}, status=404)
 
                 # 获取 MIME 类型
                 content_type, _ = mimetypes.guess_type(file_path)
@@ -1148,7 +1174,7 @@ class RunAttachmentDetailView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
                     filename=os.path.basename(file_path)
                 )
             except Exception as e:
-                return JsonResponse({"error": str(e)}, status=500)
+                return JsonResponse({"detail": str(e)}, status=500)
 
         # 否则返回附件详情
         # 安全获取文件大小，处理文件不存在的情况
@@ -1181,21 +1207,24 @@ class RunAttachmentDetailView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
         try:
             attachment = RunAttachment.objects.get(id=attachment_id, run_id=run_id)
         except RunAttachment.DoesNotExist:
-            return JsonResponse({"error": "Attachment not found"}, status=404)
+            return JsonResponse({"detail": "Attachment not found"}, status=404)
 
         # 解析请求体
         try:
             import json
             body = json.loads(request.body)
         except (json.JSONDecodeError, AttributeError):
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+            return JsonResponse({"detail": "Invalid JSON"}, status=400)
 
         # 只允许更新 category 和 description
         if 'category' in body:
             valid_categories = ['data', 'protocol', 'report', 'other']
             category = body.get('category')
             if category not in valid_categories:
-                return JsonResponse({"error": f"Invalid category. Must be one of: {', '.join(valid_categories)}"}, status=400)
+                return JsonResponse(
+                    {"detail": f"Invalid category. Must be one of: {', '.join(valid_categories)}"},
+                    status=400,
+                )
             attachment.category = category
 
         if 'description' in body:
@@ -1234,7 +1263,7 @@ class RunAttachmentDetailView(JWTAuthMixin, ReadOrWritePermissionMixin, View):
         try:
             attachment = RunAttachment.objects.get(id=attachment_id, run_id=run_id)
         except RunAttachment.DoesNotExist:
-            return JsonResponse({"error": "Attachment not found"}, status=404)
+            return JsonResponse({"detail": "Attachment not found"}, status=404)
 
         # 删除文件
         if attachment.file:

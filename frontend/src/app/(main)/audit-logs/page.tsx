@@ -10,16 +10,19 @@ import type { AuditLog } from "@/types/api";
 export default function AuditLogsPage() {
   const [username, setUsername] = useState("");
   const [action, setAction] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const logsQ = useQuery<{ data: AuditLog[] }>({
-    queryKey: ["audit-logs", username, action],
+  const logsQ = useQuery<{ data: AuditLog[]; count?: number; pagination?: any }>({
+    queryKey: ["audit-logs", username, action, page, pageSize],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (username) params.set("username", username);
       if (action) params.set("action", action);
-      params.set("limit", "200");
+      params.set("page", String(page));
+      params.set("page_size", String(pageSize));
       
-      const res = await api.get<{ data: AuditLog[] }>(`/audit-logs?${params}`);
+      const res = await api.get<{ data: AuditLog[]; count?: number; pagination?: any }>(`/audit-logs?${params}`);
       return res.data;
     },
   });
@@ -61,7 +64,19 @@ export default function AuditLogsPage() {
           loading={logsQ.isLoading}
           dataSource={logs}
           rowKey="id"
-          pagination={{ pageSize: 50 }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: logsQ.data?.pagination?.total ?? logsQ.data?.count ?? logs.length,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              if (nextPageSize && nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }
+            },
+          }}
           scroll={{ x: 1200 }}
           columns={[
             { title: "时间", dataIndex: "created_at", width: 180, render: (v) => new Date(v).toLocaleString() },

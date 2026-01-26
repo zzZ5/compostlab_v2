@@ -50,7 +50,7 @@ export default function TelemetryExplorePage() {
   ]);
 
   const devicesQ = useDevicesTree(true);
-  const devices = devicesQ.data || [];
+  const devices = devicesQ.data?.data || [];
 
   const deviceOptions: Opt[] = useMemo(() => {
     const list = devices

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
 	Button,
 	Card,
@@ -19,6 +19,7 @@ import {
 	Tag,
 	Typography,
 	Tooltip,
+	Pagination,
 	message,
 } from "antd";
 
@@ -83,13 +84,19 @@ export default function DevicesPage() {
 	const isMobile = !screens.md;
 	const router = useRouter();
 
-	const devicesQ = useDevicesTree(true);
-	const devices = devicesQ.data || [];
-
+	const [page, setPage] = useState(1);
+	const [pageSize, setPageSize] = useState(10);
 	const [q, setQ] = useState("");
+	const devicesQ = useDevicesTree(true, page, pageSize, q.trim() || undefined);
+	const devices = devicesQ.data?.data || [];
+	const total = devicesQ.data?.pagination?.total ?? devicesQ.data?.count ?? devices.length;
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [alertFilter, setAlertFilter] = useState<string>("all");
 	const [manage, setManage] = useState(true);
+
+	useEffect(() => {
+		setPage(1);
+	}, [q, statusFilter, alertFilter]);
 
 	const createDevice = useCreateDevice();
 	const [editing, setEditing] = useState<any | null>(null);
@@ -492,7 +499,36 @@ export default function DevicesPage() {
 					rowKey="device_id"
 					columns={columns as any}
 					dataSource={filtered as any}
-					pagination={{ pageSize: 10 }}
+					pagination={{
+						current: page,
+						pageSize,
+						total,
+						showSizeChanger: true,
+						onChange: (nextPage, nextPageSize) => {
+							setPage(nextPage);
+							if (nextPageSize && nextPageSize !== pageSize) {
+								setPageSize(nextPageSize);
+								setPage(1);
+							}
+						},
+					}}
+				/>
+			)}
+
+			{isMobile && (
+				<Pagination
+					style={{ marginTop: 16, textAlign: "right" }}
+					current={page}
+					pageSize={pageSize}
+					total={total}
+					showSizeChanger
+					onChange={(nextPage, nextPageSize) => {
+						setPage(nextPage);
+						if (nextPageSize && nextPageSize !== pageSize) {
+							setPageSize(nextPageSize);
+							setPage(1);
+						}
+					}}
 				/>
 			)}
 

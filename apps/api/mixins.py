@@ -9,6 +9,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed
 from rest_framework_simplejwt.tokens import AccessToken
 from django.conf import settings
+from apps.accounts.utils import get_user_timezone
 
 
 class BasicAuthMixin:
@@ -19,6 +20,7 @@ class BasicAuthMixin:
     """
 
     def dispatch(self, request, *args, **kwargs):
+        timezone.deactivate()
         auth = request.META.get("HTTP_AUTHORIZATION", "")
         
         if not auth:
@@ -36,6 +38,7 @@ class BasicAuthMixin:
                 if validated:
                     user, token = validated
                     request.user = user
+                    self._activate_user_timezone(user)
                     return super().dispatch(request, *args, **kwargs)
             except (InvalidToken, AuthenticationFailed) as e:
                 return JsonResponse(
@@ -66,12 +69,24 @@ class BasicAuthMixin:
                 )
 
             request.user = user
+            self._activate_user_timezone(user)
             return super().dispatch(request, *args, **kwargs)
         
         return JsonResponse(
             {"detail": "Unsupported authentication method."},
             status=401,
         )
+
+    @staticmethod
+    def _activate_user_timezone(user):
+        if not user or not getattr(user, "is_authenticated", False):
+            timezone.deactivate()
+            return
+        try:
+            tz = get_user_timezone(user)
+            timezone.activate(tz)
+        except Exception:
+            timezone.deactivate()
 
 
 class StaffRequiredMixin:
@@ -137,6 +152,7 @@ class DeviceJWTAuthMixin:
     """
     
     def dispatch(self, request, *args, **kwargs):
+        timezone.deactivate()
         auth = request.META.get("HTTP_AUTHORIZATION", "")
         
         if not auth:
@@ -175,6 +191,7 @@ class DeviceJWTAuthMixin:
                     
                     # 标记为用户注册（管理员代表设备注册）
                     request.device_registration_type = "admin"
+                    BasicAuthMixin._activate_user_timezone(user)
                     return super().dispatch(request, *args, **kwargs)
                 
             except (InvalidToken, AuthenticationFailed) as e:
@@ -206,6 +223,7 @@ class DeviceJWTAuthMixin:
                     
                     # 设备注册不需要 user 对象
                     request.user = None
+                    timezone.deactivate()
                     
                     return super().dispatch(request, *args, **kwargs)
                     

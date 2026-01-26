@@ -3,14 +3,14 @@ import { api, buildQuery, getErrorMessage } from "@/lib/api";
 import type { Run, RunDetailResp, RunListResp, RunTelemetryResp, RunAttachment } from "@/types/api";
 import { runKeys } from "./keys";
 
-export function useRuns(args?: { q?: string }) {
+export function useRuns(args?: { q?: string; page?: number; page_size?: number }) {
 	const q = args?.q || "";
-	return useQuery<Run[]>({
-		queryKey: runKeys.list(q),
+	return useQuery<RunListResp>({
+		queryKey: runKeys.list(`${q}|${args?.page || 0}|${args?.page_size || 0}`),
 		queryFn: async () => {
-			const qs = buildQuery({ q: q || null });
+			const qs = buildQuery({ q: q || null, page: args?.page, page_size: args?.page_size });
 			const res = await api.get<RunListResp>(`/runs${qs}`);
-			return res.data.data;
+			return res.data as any;
 		},
 	});
 }

@@ -24,7 +24,7 @@ export function useCreateAnnouncement() {
 			is_active?: boolean;
 			is_pinned?: boolean;
 		}) => {
-			const response = await api.post("/announcements/create", data);
+			const response = await api.post("/announcements/", data);
 			return response.data;
 		},
 		onSuccess: () => {
@@ -51,7 +51,7 @@ export function useUpdateAnnouncement(id: number) {
 			is_pinned: boolean;
 			expiry_at: string | null;
 		}>) => {
-			const response = await api.put(`/announcements/${id}/update`, data);
+			const response = await api.put(`/announcements/${id}`, data);
 			return response.data;
 		},
 		onSuccess: () => {
@@ -70,7 +70,7 @@ export function useDeleteAnnouncement() {
 
 	return useMutation({
 		mutationFn: async (id: number) => {
-			const response = await api.delete(`/announcements/${id}/delete`);
+			const response = await api.delete(`/announcements/${id}`);
 			return response.data;
 		},
 		onSuccess: () => {

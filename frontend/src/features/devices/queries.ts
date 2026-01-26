@@ -3,13 +3,18 @@ import { api, buildQuery } from "@/lib/api";
 import type { DeviceTreeResp, DeviceTreeItem } from "@/types/api";
 import { deviceKeys } from "./keys";
 
-export function useDevicesTree(withLatest = true) {
-	return useQuery<DeviceTreeItem[]>({
-		queryKey: deviceKeys.tree(withLatest),
+export function useDevicesTree(withLatest = true, page?: number, pageSize?: number, q?: string) {
+	const qs = buildQuery({
+		with_latest: withLatest ? 1 : 0,
+		page,
+		page_size: pageSize,
+		q: q || null,
+	});
+	return useQuery<DeviceTreeResp>({
+		queryKey: [...deviceKeys.tree(withLatest), page || 0, pageSize || 0, q || ""],
 		queryFn: async () => {
-			const qs = buildQuery({ with_latest: withLatest ? 1 : 0 });
 			const res = await api.get<DeviceTreeResp>(`/devices/tree${qs}`);
-			return res.data.data;
+			return res.data;
 		},
 	});
 }

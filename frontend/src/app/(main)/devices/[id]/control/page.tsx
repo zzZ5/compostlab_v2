@@ -34,7 +34,7 @@ export default function DeviceControlPage() {
 	// 获取设备信息（包含 configuration）
 	const devicesQ = useDevicesTree(true);
 	const device = useMemo(() => {
-		return devicesQ.data?.find((d: any) => d.device_id === deviceId) || null;
+		return devicesQ.data?.data?.find((d: any) => d.device_id === deviceId) || null;
 	}, [devicesQ.data, deviceId]);
 
 	const sendMut = useSendDeviceCommand(deviceId);

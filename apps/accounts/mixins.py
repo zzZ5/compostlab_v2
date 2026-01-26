@@ -9,11 +9,12 @@ import base64
 import logging
 from django.contrib.auth import authenticate
 from django.http import JsonResponse
+from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
-from .utils import has_permission
+from .utils import has_permission, get_user_timezone
 from .token_blacklist import TokenBlacklist
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class JWTAuthMixin:
     """
 
     def dispatch(self, request, *args, **kwargs):
+        timezone.deactivate()
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
         # 优先尝试 JWT Token
@@ -51,6 +53,7 @@ class JWTAuthMixin:
                     )
 
                 request.user = user
+                self._activate_user_timezone(user)
                 return super().dispatch(request, *args, **kwargs)
 
             except (InvalidToken, TokenError) as e:
@@ -77,6 +80,7 @@ class JWTAuthMixin:
                 )
 
             request.user = user
+            self._activate_user_timezone(user)
             return super().dispatch(request, *args, **kwargs)
 
         # 无认证信息
@@ -85,6 +89,17 @@ class JWTAuthMixin:
             status=401,
             headers={"WWW-Authenticate": 'Bearer realm="CompostLab API"'},
         )
+
+    @staticmethod
+    def _activate_user_timezone(user):
+        if not user or not getattr(user, "is_authenticated", False):
+            timezone.deactivate()
+            return
+        try:
+            tz = get_user_timezone(user)
+            timezone.activate(tz)
+        except Exception:
+            timezone.deactivate()
 
 
 # 注意：以下是旧的权限 Mixins，保留用于向后兼容

@@ -32,14 +32,18 @@ export default function UsersPage() {
   const screens = useBreakpoint();
   const isMobile = !screens.md;
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [form] = Form.useForm();
 
-  const usersQ = useQuery<{ data: User[] }>({
-    queryKey: ["users"],
+  const usersQ = useQuery<{ data: User[]; count?: number; pagination?: any }>({
+    queryKey: ["users", page, pageSize],
     queryFn: async () => {
-      const res = await api.get<{ data: User[] }>("/users");
+      const res = await api.get<{ data: User[]; count?: number; pagination?: any }>("/users", {
+        params: { page, page_size: pageSize },
+      });
       return res.data;
     },
   });
@@ -60,7 +64,7 @@ export default function UsersPage() {
           phone: values.phone || "",
         };
         console.log("更新用户数据:", updateData);
-        await api.put(`/users/${editingUser.id}/update`, updateData);
+        await api.put(`/users/${editingUser.id}`, updateData);
         message.success("用户更新成功");
         setModalOpen(false);
         form.resetFields();
@@ -81,7 +85,7 @@ export default function UsersPage() {
         console.log("创建用户数据:", createData);
 
         try {
-          const res = await api.post("/users/create", createData);
+          const res = await api.post("/users", createData);
           console.log("创建用户响应:", res.data);
 
           // 检查返回的角色是否与请求的一致
@@ -191,7 +195,19 @@ export default function UsersPage() {
           loading={usersQ.isLoading}
           dataSource={users}
           rowKey="id"
-          pagination={{ pageSize: isMobile ? 10 : 20 }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: usersQ.data?.pagination?.total ?? usersQ.data?.count ?? users.length,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              if (nextPageSize && nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }
+            },
+          }}
           scroll={{ x: isMobile ? 600 : undefined }}
           columns={[
             { title: "ID", dataIndex: "id", width: 60, responsive: ["lg"] },

@@ -43,7 +43,7 @@ export function useAnnouncementsList(params?: {
 			if (params?.created_before) searchParams.append("created_before", params.created_before);
 
 			const queryString = searchParams.toString();
-			const response = await api.get(`/announcements${queryString ? `?${queryString}` : ""}`);
+			const response = await api.get(`/announcements/${queryString ? `?${queryString}` : ""}`);
 			return response.data as PaginatedResp<AnnouncementListItem>;
 		},
 	});

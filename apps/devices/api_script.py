@@ -85,8 +85,8 @@ def _execution_to_dict(execution: ScriptExecution) -> dict:
 class ScriptTemplateListView(
     BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
-    """
     resource_type = ResourceType.SCRIPT
+    """
     GET  /api/v2/scripts
     GET  /api/v2/scripts?device_id=<id>&is_active=1
     POST /api/v2/scripts
@@ -280,8 +280,8 @@ class ScriptTemplateDetailView(
 class ScriptExecutionListView(
     BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
-    """
     resource_type = ResourceType.SCRIPT_EXECUTE
+    """
     GET  /api/v2/scripts/<script_id>/executions?device_id=<id>&status=success
     POST /api/v2/scripts/<script_id>/execute
 

@@ -298,7 +298,7 @@ export default function RunDetailPage() {
 		return Array.from(s);
 	}, [windows]);
 
-	const devices = devicesQ.data || [];
+	const devices = devicesQ.data?.data || [];
 	const deviceMap = useMemo(() => {
 		const m = new Map<number, any>();
 		for (const d of devices) m.set(d.device_id, d);

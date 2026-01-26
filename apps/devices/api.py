@@ -38,6 +38,7 @@ from django.utils.decorators import method_decorator
 from django.db.models import F, Q
 
 from apps.api.mixins import BasicAuthMixin, JsonBodyMixin, DeviceJWTAuthMixin
+from apps.api.pagination import OffsetPaginator
 from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate, ScriptTemplate, ScriptExecution
 from apps.devices.services.mqtt_pub import publish_json
 from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
@@ -341,6 +342,25 @@ class DeviceListView(BasicAuthMixin, View):
 
     def get(self, request):
         qs = Device.objects.all().order_by("id")
+        page = request.GET.get("page")
+        page_size = request.GET.get("page_size")
+
+        if page or page_size:
+            page_num = int(page or 1)
+            size = int(page_size or 50)
+            paginator = OffsetPaginator(qs, page=page_num, page_size=size, max_page_size=500)
+            result = paginator.paginate(with_total=True)
+            data = [_device_to_dict(d) for d in result["data"]]
+            total = result["pagination"].get("total")
+            return JsonResponse(
+                {
+                    "count": total if total is not None else len(data),
+                    "data": data,
+                    "pagination": result["pagination"],
+                },
+                status=200,
+            )
+
         data = [_device_to_dict(d) for d in qs]
         return JsonResponse({"count": len(data), "data": data}, status=200)
 
@@ -704,7 +724,25 @@ class DeviceTreeView(BasicAuthMixin, View):
 
     def get(self, request):
         with_latest = _parse_bool(request.GET.get("with_latest"))
-        devices = list(Device.objects.all().order_by("id"))
+        qs = Device.objects.all().order_by("id")
+        q = (request.GET.get("q") or "").strip()
+        if q:
+            qs = qs.filter(Q(code__icontains=q) | Q(name__icontains=q))
+        page = request.GET.get("page")
+        page_size = request.GET.get("page_size")
+
+        if page or page_size:
+            page_num = int(page or 1)
+            size = int(page_size or 50)
+            paginator = OffsetPaginator(qs, page=page_num, page_size=size, max_page_size=500)
+            result = paginator.paginate(with_total=True)
+            devices = list(result["data"])
+            pagination = result["pagination"]
+            total = pagination.get("total")
+        else:
+            devices = list(qs)
+            pagination = None
+            total = None
 
         out = []
         for d in devices:
@@ -721,7 +759,10 @@ class DeviceTreeView(BasicAuthMixin, View):
             item["channels"] = channels
             out.append(item)
 
-        return JsonResponse({"count": len(out), "data": out}, status=200)
+        payload = {"count": total if total is not None else len(out), "data": out}
+        if pagination:
+            payload["pagination"] = pagination
+        return JsonResponse(payload, status=200)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -994,8 +1035,8 @@ def _command_to_dict(cmd: DeviceCommand) -> dict:
 class DeviceCommandListCreateView(
     BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
-    """
     resource_type = ResourceType.DEVICE_COMMAND
+    """
     GET  /api/v2/devices/<device_id>/commands?status=sent&limit=50
     POST /api/v2/devices/<device_id>/commands
 
@@ -1117,8 +1158,8 @@ def _template_to_dict(tpl: ControlTemplate) -> dict:
 class ControlTemplateListView(
     BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
-    """
     resource_type = ResourceType.SCRIPT
+    """
     GET  /api/v2/control-templates?device_id=<id>&is_active=1
     POST /api/v2/control-templates
 
@@ -1204,8 +1245,8 @@ class ControlTemplateListView(
 class ControlTemplateDetailView(
     BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
-    """
     resource_type = ResourceType.SCRIPT
+    """
     GET    /api/v2/control-templates/<id>
     PATCH  /api/v2/control-templates/<id>
     PUT    /api/v2/control-templates/<id>

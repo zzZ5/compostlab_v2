@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { 
 	Button, 
 	Card, 
@@ -22,7 +22,8 @@ import {
 	Select,
 	Dropdown,
 	Empty,
-	Skeleton 
+	Skeleton,
+	Pagination,
 } from "antd";
 import { 
 	ArrowUpOutlined, 
@@ -94,9 +95,12 @@ export default function RunsPage() {
 	const [sortField, setSortField] = useState<SortField>("run_id");
 	const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 	const [filter, setFilter] = useState<FilterState>({ status: "all" });
+	const [page, setPage] = useState(1);
+	const [pageSize, setPageSize] = useState(20);
 	
-	const runsQ = useRuns({ q: q.trim() || "" });
-	const runs = runsQ.data || [];
+	const runsQ = useRuns({ q: q.trim() || "", page, page_size: pageSize });
+	const runs = runsQ.data?.data || [];
+	const total = runsQ.data?.pagination?.total ?? runsQ.data?.count ?? runs.length;
 	
 	const createRun = useCreateRun();
 	const deleteRun = useDeleteRun();
@@ -150,6 +154,11 @@ export default function RunsPage() {
 		
 		return result;
 	}, [runs, filter, sortField, sortOrder]);
+
+	// 筛选条件改变时回到第一页
+	useEffect(() => {
+		setPage(1);
+	}, [q, filter.status, sortField, sortOrder]);
 
 	function openCreate() {
 		setEditing(null);
@@ -598,14 +607,40 @@ export default function RunsPage() {
 					columns={columnsWithActions as any} 
 					dataSource={filteredAndSortedRuns as any} 
 					pagination={{ 
-						pageSize: 20,
+						current: page,
+						pageSize,
+						total,
 						showSizeChanger: true,
 						pageSizeOptions: ["10", "20", "50", "100"],
-						showTotal: (total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`
+						showTotal: (totalCount, range) => `${range[0]}-${range[1]} / 共 ${totalCount} 条`,
+						onChange: (nextPage, nextPageSize) => {
+							setPage(nextPage);
+							if (nextPageSize && nextPageSize !== pageSize) {
+								setPageSize(nextPageSize);
+								setPage(1);
+							}
+						},
 					}}
 					scroll={{ x: 1200, y: "calc(100vh - 320px)" }}
 					size="middle"
 					sticky
+				/>
+			)}
+
+			{isMobile && (
+				<Pagination
+					style={{ marginTop: 16, textAlign: "right" }}
+					current={page}
+					pageSize={pageSize}
+					total={total}
+					showSizeChanger
+					onChange={(nextPage, nextPageSize) => {
+						setPage(nextPage);
+						if (nextPageSize && nextPageSize !== pageSize) {
+							setPageSize(nextPageSize);
+							setPage(1);
+						}
+					}}
 				/>
 			)}
 

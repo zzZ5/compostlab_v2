@@ -32,6 +32,17 @@ export type PaginationInfo = {
 	total_returned: number;
 };
 
+/** 分页信息（Offset 分页） */
+export type OffsetPaginationInfo = {
+	page: number;
+	page_size: number;
+	has_next: boolean;
+	has_prev: boolean;
+	total_returned: number;
+	total?: number;
+	total_pages?: number;
+};
+
 /** 支持分页的列表响应 */
 export type PaginatedResp<T> = {
 	data: T[];
@@ -148,7 +159,9 @@ export type DeviceTreeItem = Device & {
 	channels: Channel[];
 };
 
-export type DeviceTreeResp = ListResp<DeviceTreeItem>;
+export type DeviceTreeResp = ListResp<DeviceTreeItem> & {
+	pagination?: OffsetPaginationInfo;
+};
 
 /** GET /api/v2/devices/<id>/channels 返回 */
 export type DeviceChannelsResp = {
@@ -383,7 +396,9 @@ export type RunWindow = {
 	note: string;
 };
 
-export type RunListResp = ListResp<Run>;
+export type RunListResp = ListResp<Run> & {
+	pagination?: OffsetPaginationInfo;
+};
 export type RunDetailResp = Run;
 
 export type RunWindowsResp = {

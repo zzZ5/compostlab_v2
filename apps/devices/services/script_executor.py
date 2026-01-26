@@ -252,7 +252,7 @@ class ScriptExecutor:
         返回 (success, result)
         """
         if not commands or not device.response_topic:
-            return False, {"error": "No commands or topic"}
+            return False, {"detail": "No commands or topic"}
 
         payload = {
             "device": device.code,
@@ -268,9 +268,9 @@ class ScriptExecutor:
                 "command_count": len(commands)
             }
         except MqttPublishError as e:
-            return False, {"error": str(e)}
+            return False, {"detail": str(e)}
         except Exception as e:
-            return False, {"error": f"Unexpected: {str(e)}"}
+            return False, {"detail": f"Unexpected: {str(e)}"}
 
 
 class ThresholdMonitor:

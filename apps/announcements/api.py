@@ -239,6 +239,7 @@ class AnnouncementDetailView(JWTAuthMixin, JsonBodyMixin, View):
             announcement.created_by.username if announcement.created_by else "系统"
         )
 
+        user_tz = get_user_timezone(request.user)
         return JsonResponse(
             {
                 "id": announcement.id,
@@ -249,16 +250,12 @@ class AnnouncementDetailView(JWTAuthMixin, JsonBodyMixin, View):
                 "target_role": announcement.target_role,
                 "is_active": announcement.is_active,
                 "is_pinned": announcement.is_pinned,
-                "expiry_at": (
-                    announcement.expiry_at.strftime("%Y-%m-%d %H:%M:%S")
-                    if announcement.expiry_at
-                    else None
-                ),
+                "expiry_at": format_datetime_for_user(announcement.expiry_at, user_tz),
                 "is_expired": announcement.is_expired(),
                 "read_count": read_count,
                 "created_by": created_by_name,
-                "created_at": announcement.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "updated_at": announcement.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "created_at": format_datetime_for_user(announcement.created_at, user_tz),
+                "updated_at": format_datetime_for_user(announcement.updated_at, user_tz),
             }
         )
 
@@ -348,6 +345,9 @@ class AnnouncementUpdateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixi
 
         except Exception as e:
             return JsonResponse({"detail": str(e)}, status=500)
+
+    def patch(self, request, announcement_id):
+        return self.put(request, announcement_id)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

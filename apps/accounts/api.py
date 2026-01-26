@@ -17,6 +17,7 @@ from .mixins import JWTAuthMixin
 from apps.permissions.mixins import AdminRequiredMixin
 from .utils import log_audit, get_or_create_profile, get_client_ip
 from .token_blacklist import TokenBlacklist
+from apps.api.pagination import OffsetPaginator
 from .rate_limit import LoginRateLimitedMixin, AuthRateLimitedMixin
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,8 @@ class UserListView(JWTAuthMixin, AdminRequiredMixin, View):
         q = request.GET.get("q", "").strip()
         role = request.GET.get("role", "").strip()
         is_active = request.GET.get("is_active", "").strip()
+        page = int(request.GET.get("page", 1))
+        page_size = int(request.GET.get("page_size", 50))
         
         users = User.objects.all().select_related("profile").order_by("-date_joined")
         
@@ -315,8 +318,11 @@ class UserListView(JWTAuthMixin, AdminRequiredMixin, View):
             active = is_active.lower() in ["true", "1", "yes"]
             users = users.filter(profile__is_active=active)
         
+        paginator = OffsetPaginator(users, page=page, page_size=page_size, max_page_size=200)
+        result = paginator.paginate(with_total=True)
+
         data = []
-        for user in users:
+        for user in result["data"]:
             profile = get_or_create_profile(user)
             data.append(
                 {
@@ -336,7 +342,11 @@ class UserListView(JWTAuthMixin, AdminRequiredMixin, View):
                 }
             )
         
-        return JsonResponse({"count": len(data), "data": data}, status=200)
+        total = result["pagination"].get("total")
+        return JsonResponse(
+            {"count": total if total is not None else len(data), "data": data, "pagination": result["pagination"]},
+            status=200,
+        )
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -550,6 +560,9 @@ class UserUpdateView(JWTAuthMixin, AdminRequiredMixin, View):
 
         return JsonResponse({"detail": "User updated successfully."}, status=200)
 
+    def patch(self, request, user_id: int):
+        return self.put(request, user_id)
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserToggleActiveView(JWTAuthMixin, AdminRequiredMixin, View):
@@ -610,10 +623,12 @@ class AuditLogListView(JWTAuthMixin, AdminRequiredMixin, View):
         action = request.GET.get("action", "").strip()
         resource_type = request.GET.get("resource_type", "").strip()
         resource_id = request.GET.get("resource_id", "").strip()
-        limit = int(request.GET.get("limit", "100"))
-        limit = max(1, min(limit, 1000))
+        limit = request.GET.get("limit")
+        page = int(request.GET.get("page", 1))
+        page_size = int(request.GET.get("page_size", limit or 100))
+        page_size = max(1, min(page_size, 1000))
         
-        logs = AuditLog.objects.all()
+        logs = AuditLog.objects.all().order_by("-created_at")
         
         if username:
             logs = logs.filter(username__icontains=username)
@@ -627,7 +642,8 @@ class AuditLogListView(JWTAuthMixin, AdminRequiredMixin, View):
         if resource_id:
             logs = logs.filter(resource_id=resource_id)
         
-        logs = logs[:limit]
+        paginator = OffsetPaginator(logs, page=page, page_size=page_size, max_page_size=1000)
+        result = paginator.paginate(with_total=True)
         
         data = [
             {
@@ -644,10 +660,14 @@ class AuditLogListView(JWTAuthMixin, AdminRequiredMixin, View):
                 "error_message": log.error_message,
                 "created_at": log.created_at.isoformat(),
             }
-            for log in logs
+            for log in result["data"]
         ]
         
-        return JsonResponse({"count": len(data), "data": data}, status=200)
+        total = result["pagination"].get("total")
+        return JsonResponse(
+            {"count": total if total is not None else len(data), "data": data, "pagination": result["pagination"]},
+            status=200,
+        )
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -658,10 +678,14 @@ class MyAuditLogListView(JWTAuthMixin, View):
     """
     
     def get(self, request):
-        limit = int(request.GET.get("limit", "50"))
-        limit = max(1, min(limit, 500))
+        limit = request.GET.get("limit")
+        page = int(request.GET.get("page", 1))
+        page_size = int(request.GET.get("page_size", limit or 50))
+        page_size = max(1, min(page_size, 500))
         
-        logs = AuditLog.objects.filter(username=request.user.username)[:limit]
+        logs = AuditLog.objects.filter(username=request.user.username).order_by("-created_at")
+        paginator = OffsetPaginator(logs, page=page, page_size=page_size, max_page_size=500)
+        result = paginator.paginate(with_total=True)
         
         data = [
             {
@@ -675,7 +699,11 @@ class MyAuditLogListView(JWTAuthMixin, View):
                 "success": log.success,
                 "created_at": log.created_at.isoformat(),
             }
-            for log in logs
+            for log in result["data"]
         ]
         
-        return JsonResponse({"count": len(data), "data": data}, status=200)
+        total = result["pagination"].get("total")
+        return JsonResponse(
+            {"count": total if total is not None else len(data), "data": data, "pagination": result["pagination"]},
+            status=200,
+        )

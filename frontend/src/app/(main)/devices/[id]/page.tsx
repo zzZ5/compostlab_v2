@@ -107,7 +107,7 @@ export default function DeviceDetailPage() {
 	// === 基础数据：device / channels ===
 	const devicesQ = useDevicesTree(true);
 	const device = useMemo(() => {
-		return (devicesQ.data || []).find((d) => d.device_id === deviceId) || null;
+		return (devicesQ.data?.data || []).find((d) => d.device_id === deviceId) || null;
 	}, [devicesQ.data, deviceId]);
 
 	const channelsQ = useDeviceChannels(deviceId);

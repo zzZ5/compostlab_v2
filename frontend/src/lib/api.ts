@@ -127,11 +127,17 @@ export const api = axios.create({
 	},
 });
 
+let refreshPromise: Promise<string | null> | null = null;
+
 // request: inject Authorization
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
 	config.headers = config.headers ?? {};
 	const h = authHeader();
 	if (h) config.headers["Authorization"] = h;
+	if (!h && refreshPromise) {
+		const token = await refreshPromise;
+		if (token) config.headers["Authorization"] = `Bearer ${token}`;
+	}
 	return config;
 });
 
@@ -150,16 +156,29 @@ api.interceptors.response.use(
 				originalRequest._retry = true;
 				
 				try {
-					const res = await axios.post(`${getApiBase()}/auth/refresh`, {
-						refresh: refreshToken,
-					});
-					
-					const newAccessToken = res.data.access;
-					setTokens(newAccessToken, refreshToken);
-					
-					// 重试原请求
-					originalRequest.headers["Authorization"] = `Bearer ${newAccessToken}`;
-					return api(originalRequest);
+					if (!refreshPromise) {
+						refreshPromise = axios
+							.post(`${getApiBase()}/auth/refresh`, { refresh: refreshToken })
+							.then((res) => {
+								const newAccessToken = res.data.access;
+								if (newAccessToken) {
+									setTokens(newAccessToken, refreshToken);
+									api.defaults.headers.common["Authorization"] = `Bearer ${newAccessToken}`;
+									return newAccessToken;
+								}
+								return null;
+							})
+							.finally(() => {
+								refreshPromise = null;
+							});
+					}
+
+					const newAccessToken = await refreshPromise;
+					if (newAccessToken) {
+						originalRequest.headers = originalRequest.headers ?? {};
+						originalRequest.headers["Authorization"] = `Bearer ${newAccessToken}`;
+						return api(originalRequest);
+					}
 				} catch (refreshError) {
 					// Refresh 失败，清除 token 并跳转登录
 					clearTokens();
