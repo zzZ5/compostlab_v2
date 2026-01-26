@@ -112,11 +112,12 @@ class ReadOrWritePermissionMixin:
 
         # 根据请求方法确定操作类型
         method = request.method.upper()
-        if method in ('GET', 'HEAD', 'OPTIONS'):
+        if method in ("GET", "HEAD", "OPTIONS"):
             action = ActionType.READ
+        elif method == "DELETE":
+            action = ActionType.DELETE
         else:
-            # POST, PUT, PATCH, DELETE 都视为写操作
-            # 具体的 DELETE 可以用 ResourcePermissionMixin
+            # POST, PUT, PATCH 视为写操作
             action = ActionType.WRITE
 
         if not check_permission(user, self.resource_type, action):

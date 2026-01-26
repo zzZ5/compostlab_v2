@@ -36,14 +36,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.conf import settings
 
-from apps.api.mixins import StaffRequiredMixin, JsonBodyMixin
+from apps.api.mixins import JsonBodyMixin
 from apps.accounts.mixins import JWTAuthMixin
 from apps.api.utils import parse_dt, parse_bucket
 from apps.runs.models import Run, RunWindow, RunAttachment
 from apps.telemetry.models import TelemetryKV
 from apps.devices.models import Device
-from apps.permissions.mixins import ReadOrWritePermissionMixin, ResourceType
-from apps.permissions.config import ActionType
+from apps.permissions.mixins import ReadOrWritePermissionMixin, ResourcePermissionMixin
+from apps.permissions.config import ResourceType, ActionType
 
 # 用于类型提示
 from django.http import HttpRequest
@@ -258,8 +258,10 @@ class RunDetailView(JWTAuthMixin, View):
 
 @method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
-class RunCreateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class RunCreateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """POST /api/v2/runs"""
+    resource_type = ResourceType.RUN
+    action_type = ActionType.CREATE
 
     def post(self, request):
         body = self.json_body(request)
@@ -293,8 +295,10 @@ class RunCreateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 
 @method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
-class RunUpdateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class RunUpdateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """PATCH/PUT /api/v2/runs/<run_id>"""
+    resource_type = ResourceType.RUN
+    action_type = ActionType.WRITE
 
     def patch(self, request, run_id: int):
         body = self.json_body(request)
@@ -352,21 +356,12 @@ class RunUpdateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class RunDeleteView(JWTAuthMixin, View):
+class RunDeleteView(JWTAuthMixin, ResourcePermissionMixin, View):
     """DELETE /api/v2/runs/<run_id>"""
+    resource_type = ResourceType.RUN
+    action_type = ActionType.DELETE
 
     def delete(self, request, run_id: int):
-        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
-        # 直接检查权限
-        from apps.permissions import check_permission, ResourceType, ActionType
-
-        user = getattr(request, "user", None)
-        if not check_permission(user, ResourceType.RUN, ActionType.DELETE):
-            return JsonResponse(
-                {"detail": "Permission denied. Admin role required for run deletion."},
-                status=403,
-            )
-
         run = Run.objects.get(id=run_id)
         run.delete()
         return JsonResponse({"detail": "deleted", "run_id": run_id}, status=200)
@@ -399,8 +394,10 @@ class RunWindowListView(JWTAuthMixin, View):
 
 @method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
-class RunWindowCreateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class RunWindowCreateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """POST /api/v2/runs/<run_id>/windows"""
+    resource_type = ResourceType.RUN
+    action_type = ActionType.CREATE
 
     def post(self, request, run_id: int):
         run = Run.objects.get(id=run_id)
@@ -468,8 +465,10 @@ class RunWindowCreateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 
 @method_decorator(csrf_exempt, name="dispatch")
 @method_decorator(csrf_exempt, name="dispatch")
-class RunWindowUpdateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class RunWindowUpdateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """PATCH/PUT /api/v2/runs/<run_id>/windows/<window_id>"""
+    resource_type = ResourceType.RUN
+    action_type = ActionType.WRITE
 
     def patch(self, request, run_id: int, window_id: int):
         run = Run.objects.get(id=run_id)
@@ -555,20 +554,12 @@ class RunWindowUpdateView(JWTAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class RunWindowDeleteView(JWTAuthMixin, View):
+class RunWindowDeleteView(JWTAuthMixin, ResourcePermissionMixin, View):
     """DELETE /api/v2/runs/<run_id>/windows/<window_id>"""
+    resource_type = ResourceType.RUN
+    action_type = ActionType.DELETE
 
     def delete(self, request, run_id: int, window_id: int):
-        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
-        # 直接检查权限
-        from apps.permissions import check_permission, ResourceType, ActionType
-
-        user = getattr(request, "user", None)
-        if not check_permission(user, ResourceType.RUN, ActionType.DELETE):
-            return JsonResponse(
-                {"detail": "Permission denied. Admin role required for run window deletion."},
-                status=403,
-            )
         run = Run.objects.get(id=run_id)
         w = RunWindow.objects.get(id=window_id, run=run)
         w.delete()

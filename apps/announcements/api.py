@@ -5,27 +5,27 @@ from django.utils.decorators import method_decorator
 from django.http import JsonResponse
 from django.views import View
 
-from apps.accounts.models import UserProfile, AuditLog, UserRole
+from apps.accounts.models import UserProfile, AuditLog
 from apps.accounts.mixins import JWTAuthMixin
 from apps.accounts.utils import log_audit, get_client_ip, get_user_timezone, format_datetime_for_user
 from apps.api.mixins import JsonBodyMixin
 from apps.api.pagination import OffsetPaginator
+from apps.permissions.mixins import ResourcePermissionMixin
+from apps.permissions.config import ResourceType, ActionType
 
 from .models import Announcement, AnnouncementRead
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
+class AnnouncementListView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """
     公告列表（管理员和操作员）
     在 get 方法中手动检查权限，确保在 JWTAuthMixin 认证之后执行
     """
+    resource_type = ResourceType.ANNOUNCEMENT_READ_ALL
+    action_type = ActionType.READ
 
     def get(self, request):
-        # 权限检查：需要 OPERATOR 或 ADMIN
-        from apps.permissions.checks import has_permission
-        if not has_permission(request.user, UserRole.OPERATOR):
-            return JsonResponse({"detail": "Permission denied. Required role: operator"}, status=403)
         # 获取用户时区
         user_tz = get_user_timezone(request.user)
 
@@ -124,18 +124,15 @@ class AnnouncementListView(JWTAuthMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementCreateView(JWTAuthMixin, JsonBodyMixin, View):
+class AnnouncementCreateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """
     创建公告（仅管理员）
     在 post 方法中手动检查权限，确保在 JWTAuthMixin 认证之后执行
     """
+    resource_type = ResourceType.ANNOUNCEMENT_CREATE
+    action_type = ActionType.CREATE
 
     def post(self, request):
-        # 权限检查：需要 ADMIN
-        from apps.permissions.checks import has_permission
-        if not has_permission(request.user, UserRole.ADMIN):
-            return JsonResponse({"detail": "Permission denied. Required role: admin"}, status=403)
-
         try:
             body = self.json_body(request)
 
@@ -267,14 +264,12 @@ class AnnouncementDetailView(JWTAuthMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementUpdateView(JWTAuthMixin, JsonBodyMixin, View):
+class AnnouncementUpdateView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """更新公告"""
+    resource_type = ResourceType.ANNOUNCEMENT_UPDATE
+    action_type = ActionType.WRITE
 
     def put(self, request, announcement_id):
-        # 权限检查：需要 ADMIN
-        from apps.permissions.checks import has_permission
-        if not has_permission(request.user, UserRole.ADMIN):
-            return JsonResponse({"detail": "Permission denied. Required role: admin"}, status=403)
         try:
             announcement = Announcement.objects.get(id=announcement_id)
         except Announcement.DoesNotExist:
@@ -356,14 +351,12 @@ class AnnouncementUpdateView(JWTAuthMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AnnouncementDeleteView(JWTAuthMixin, JsonBodyMixin, View):
+class AnnouncementDeleteView(JWTAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """删除公告"""
+    resource_type = ResourceType.ANNOUNCEMENT_DELETE
+    action_type = ActionType.DELETE
 
     def delete(self, request, announcement_id):
-        # 权限检查：需要 ADMIN
-        from apps.permissions.checks import has_permission
-        if not has_permission(request.user, UserRole.ADMIN):
-            return JsonResponse({"detail": "Permission denied. Required role: admin"}, status=403)
         try:
             announcement = Announcement.objects.get(id=announcement_id)
         except Announcement.DoesNotExist:

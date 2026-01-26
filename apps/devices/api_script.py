@@ -13,11 +13,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.utils import timezone
 
-from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin
+from apps.api.mixins import BasicAuthMixin, JsonBodyMixin
 from apps.devices.models import Device, ScriptTemplate, ScriptExecution
 from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
 from apps.accounts.utils import log_audit
 from apps.accounts.models import AuditLog
+from apps.permissions.mixins import ResourcePermissionMixin, ReadOrWritePermissionMixin
+from apps.permissions.config import ResourceType, ActionType
 
 
 # -------------------------
@@ -81,9 +83,10 @@ def _execution_to_dict(execution: ScriptExecution) -> dict:
 # -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
 class ScriptTemplateListView(
-    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
     """
+    resource_type = ResourceType.SCRIPT
     GET  /api/v2/scripts
     GET  /api/v2/scripts?device_id=<id>&is_active=1
     POST /api/v2/scripts
@@ -170,7 +173,7 @@ class ScriptTemplateListView(
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ScriptTemplateDetailView(
-    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
     """
     GET    /api/v2/scripts/<id>
@@ -178,26 +181,7 @@ class ScriptTemplateDetailView(
     PUT    /api/v2/scripts/<id>
     DELETE  /api/v2/scripts/<id>
     """
-
-    def delete(self, request, script_id: int):
-        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
-        # 对于 DELETE 方法，需要 admin 权限
-        from apps.permissions import check_permission, ResourceType, ActionType
-
-        user = getattr(request, "user", None)
-        if not check_permission(user, ResourceType.SCRIPT, ActionType.DELETE):
-            return JsonResponse(
-                {"detail": "Permission denied. Admin role required for script deletion."},
-                status=403,
-            )
-
-        try:
-            script = ScriptTemplate.objects.get(id=script_id)
-        except ScriptTemplate.DoesNotExist:
-            return JsonResponse({"detail": "Script template not found."}, status=404)
-
-        script.delete()
-        return JsonResponse({"detail": "deleted", "script_id": script_id}, status=200)
+    resource_type = ResourceType.SCRIPT
 
     def get(self, request, script_id: int):
         try:
@@ -294,9 +278,10 @@ class ScriptTemplateDetailView(
 # -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
 class ScriptExecutionListView(
-    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
     """
+    resource_type = ResourceType.SCRIPT_EXECUTE
     GET  /api/v2/scripts/<script_id>/executions?device_id=<id>&status=success
     POST /api/v2/scripts/<script_id>/execute
 
@@ -388,9 +373,11 @@ class ScriptExecutionListView(
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ScriptExecutionDetailView(
-    BasicAuthMixin, StaffRequiredMixin, View
+    BasicAuthMixin, ResourcePermissionMixin, View
 ):
     """GET /api/v2/script-executions/<execution_id>"""
+    resource_type = ResourceType.SCRIPT_EXECUTE
+    action_type = ActionType.READ
 
     def get(self, request, execution_id: int):
         try:
@@ -405,9 +392,11 @@ class ScriptExecutionDetailView(
 # -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
 class AutoControlView(
-    BasicAuthMixin, StaffRequiredMixin, View
+    BasicAuthMixin, ResourcePermissionMixin, View
 ):
     """
+    resource_type = ResourceType.SCRIPT_EXECUTE
+    action_type = ActionType.EXECUTE
     POST /api/v2/scripts/check-and-execute
     POST /api/v2/scripts/check-thresholds
 

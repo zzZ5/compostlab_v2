@@ -13,7 +13,8 @@ from django.db.models import Q
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import UserProfile, AuditLog, UserRole
-from .mixins import JWTAuthMixin, AdminRequiredMixin
+from .mixins import JWTAuthMixin
+from apps.permissions.mixins import AdminRequiredMixin
 from .utils import log_audit, get_or_create_profile, get_client_ip
 from .token_blacklist import TokenBlacklist
 from .rate_limit import LoginRateLimitedMixin, AuthRateLimitedMixin

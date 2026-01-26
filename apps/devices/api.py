@@ -37,10 +37,12 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.db.models import F, Q
 
-from apps.api.mixins import BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, DeviceJWTAuthMixin
+from apps.api.mixins import BasicAuthMixin, JsonBodyMixin, DeviceJWTAuthMixin
 from apps.devices.models import Device, Channel, DeviceCommand, ControlTemplate, ScriptTemplate, ScriptExecution
 from apps.devices.services.mqtt_pub import publish_json
 from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
+from apps.permissions.mixins import ResourcePermissionMixin, ReadOrWritePermissionMixin
+from apps.permissions.config import ResourceType, ActionType
 
 
 # -------------------------
@@ -356,7 +358,7 @@ class DeviceDetailView(BasicAuthMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class DeviceCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class DeviceCreateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """
     POST /api/v2/devices
     body:
@@ -370,6 +372,8 @@ class DeviceCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
         "is_active": true
       }
     """
+    resource_type = ResourceType.DEVICE
+    action_type = ActionType.CREATE
 
     def post(self, request):
         body = self.json_body(request)
@@ -495,8 +499,10 @@ class DeviceCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class DeviceUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class DeviceUpdateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """PATCH/PUT /api/v2/devices/<device_id>"""
+    resource_type = ResourceType.DEVICE
+    action_type = ActionType.WRITE
 
     def patch(self, request, device_id: int):
         body = self.json_body(request)
@@ -638,21 +644,12 @@ class DeviceUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class DeviceDeleteView(BasicAuthMixin, View):
+class DeviceDeleteView(BasicAuthMixin, ResourcePermissionMixin, View):
     """DELETE /api/v2/devices/<device_id>"""
+    resource_type = ResourceType.DEVICE
+    action_type = ActionType.DELETE
 
     def delete(self, request, device_id: int):
-        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
-        # 直接检查权限
-        from apps.permissions import check_permission, ResourceType, ActionType
-        
-        user = getattr(request, "user", None)
-        if not check_permission(user, ResourceType.DEVICE, ActionType.DELETE):
-            return JsonResponse(
-                {"detail": "Permission denied. Admin role required for device deletion."},
-                status=403,
-            )
-        
         try:
             d = Device.objects.get(id=device_id)
         except Device.DoesNotExist:
@@ -767,8 +764,10 @@ class ChannelByCodeView(BasicAuthMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ChannelCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class ChannelCreateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """
+    resource_type = ResourceType.CHANNEL
+    action_type = ActionType.CREATE
     POST /api/v2/devices/<device_id>/channels
     body:
       {
@@ -831,8 +830,10 @@ class ChannelCreateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ChannelUpsertView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class ChannelUpsertView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """
+    resource_type = ResourceType.CHANNEL
+    action_type = ActionType.WRITE
     PUT /api/v2/devices/<device_id>/channels/by-code/<code>
     幂等 upsert：不存在就创建，存在就更新
     """
@@ -892,8 +893,10 @@ class ChannelUpsertView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ChannelUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View):
+class ChannelUpdateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, View):
     """PATCH/PUT /api/v2/devices/<device_id>/channels/<channel_id>"""
+    resource_type = ResourceType.CHANNEL
+    action_type = ActionType.WRITE
 
     def patch(self, request, device_id: int, channel_id: int):
         try:
@@ -949,21 +952,12 @@ class ChannelUpdateView(BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ChannelDeleteView(BasicAuthMixin, View):
+class ChannelDeleteView(BasicAuthMixin, ResourcePermissionMixin, View):
     """DELETE /api/v2/devices/<device_id>/channels/<channel_id>"""
+    resource_type = ResourceType.CHANNEL
+    action_type = ActionType.DELETE
 
     def delete(self, request, device_id: int, channel_id: int):
-        # BasicAuthMixin.dispatch 已经认证了用户并设置了 request.user
-        # 直接检查权限
-        from apps.permissions import check_permission, ResourceType, ActionType
-
-        user = getattr(request, "user", None)
-        if not check_permission(user, ResourceType.CHANNEL, ActionType.DELETE):
-            return JsonResponse(
-                {"detail": "Permission denied. Admin role required for channel deletion."},
-                status=403,
-            )
-
         try:
             Device.objects.get(id=device_id)
         except Device.DoesNotExist:
@@ -998,9 +992,10 @@ def _command_to_dict(cmd: DeviceCommand) -> dict:
 
 @method_decorator(csrf_exempt, name="dispatch")
 class DeviceCommandListCreateView(
-    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
     """
+    resource_type = ResourceType.DEVICE_COMMAND
     GET  /api/v2/devices/<device_id>/commands?status=sent&limit=50
     POST /api/v2/devices/<device_id>/commands
 
@@ -1089,8 +1084,10 @@ class DeviceCommandListCreateView(
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class DeviceCommandDetailView(BasicAuthMixin, StaffRequiredMixin, View):
+class DeviceCommandDetailView(BasicAuthMixin, ResourcePermissionMixin, View):
     """GET /api/v2/devices/<device_id>/commands/<command_id>"""
+    resource_type = ResourceType.DEVICE_COMMAND
+    action_type = ActionType.READ
 
     def get(self, request, device_id: int, command_id: int):
         try:
@@ -1118,9 +1115,10 @@ def _template_to_dict(tpl: ControlTemplate) -> dict:
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ControlTemplateListView(
-    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
     """
+    resource_type = ResourceType.SCRIPT
     GET  /api/v2/control-templates?device_id=<id>&is_active=1
     POST /api/v2/control-templates
 
@@ -1204,9 +1202,10 @@ class ControlTemplateListView(
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ControlTemplateDetailView(
-    BasicAuthMixin, StaffRequiredMixin, JsonBodyMixin, View
+    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
 ):
     """
+    resource_type = ResourceType.SCRIPT
     GET    /api/v2/control-templates/<id>
     PATCH  /api/v2/control-templates/<id>
     PUT    /api/v2/control-templates/<id>
@@ -1278,17 +1277,6 @@ class ControlTemplateDetailView(
         return self.patch(request, template_id)
 
     def delete(self, request, template_id: int):
-        # BasicAuthMixin.dispatch 和 StaffRequiredMixin 已经认证了用户并设置了 request.user
-        # 对于 DELETE 方法，需要 admin 权限
-        from apps.permissions import check_permission, ResourceType, ActionType
-
-        user = getattr(request, "user", None)
-        if not check_permission(user, ResourceType.SCRIPT, ActionType.DELETE):
-            return JsonResponse(
-                {"detail": "Permission denied. Admin role required for control template deletion."},
-                status=403,
-            )
-
         try:
             tpl = ControlTemplate.objects.get(id=template_id)
         except ControlTemplate.DoesNotExist:
