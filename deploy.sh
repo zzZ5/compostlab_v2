@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # CompostLab 部署脚本（Docker 部分）
-set -e
+set -euo pipefail
 
 echo "=========================================="
 echo "  CompostLab 部署工具"
@@ -17,13 +17,22 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# 读取 env 值（支持 KEY=VALUE）
+read_env_value() {
+    local file="$1"
+    local key="$2"
+    if [ -f "$file" ]; then
+        grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2- | tr -d '\r'
+    fi
+}
+
 # 帮助信息
 show_help() {
     cat << EOF
 用法: ./deploy.sh [选项]
 
 选项:
-  build              - 重新构建前端（使用 HTTPS）
+  build              - 重新构建前端（NEXT_PUBLIC_API_BASE 必须是 HTTPS）
   restart            - 重启 Docker 服务
   restart-mqtt       - 重启 MQTT Worker（遥测数据）
   restart-register   - 重启 MQTT Register Worker（设备注册）
@@ -90,25 +99,25 @@ rebuild_frontend() {
         exit 1
     fi
 
-    echo "前端 API 地址："
-    cat frontend/.env.production
+    api_base=$(read_env_value "frontend/.env.production" "NEXT_PUBLIC_API_BASE")
+    echo "前端 API 地址：${api_base:-未配置}"
     echo ""
 
     # 确保是 HTTPS
-    if ! grep -q "https://" frontend/.env.production; then
+    if [ -z "${api_base:-}" ] || ! echo "$api_base" | grep -qE '^https://'; then
         echo -e "${RED}错误: 环境变量不是 HTTPS！${NC}"
         echo "请手动编辑 frontend/.env.production 确保是 https://"
         exit 1
     fi
 
-    # 停止并删除前端容器
+    # 停止并删除前端容器（仅前端）
     echo "停止前端容器..."
     docker compose stop frontend
     docker compose rm -f frontend
 
-    # 清理构建缓存（重要！）
+    # 清理构建缓存（仅构建缓存，避免影响其它服务）
     echo "清理 Docker 构建缓存..."
-    docker system prune -f
+    docker builder prune -f
 
     # 重新构建前端（强制无缓存）
     echo "重新构建前端镜像（无缓存）..."
@@ -124,11 +133,11 @@ rebuild_frontend() {
     # 验证环境变量
     echo ""
     echo "=== 前端环境变量 ==="
-    docker compose exec frontend env | grep NEXT_PUBLIC_API_BASE
+    docker compose exec -T frontend env | grep NEXT_PUBLIC_API_BASE
     echo ""
 
     # 检查是否是 HTTPS
-    if docker compose exec frontend env | grep -q "https://"; then
+    if docker compose exec -T frontend env | grep -qE '^NEXT_PUBLIC_API_BASE=https://'; then
         echo -e "${GREEN}✓ HTTPS 配置正确${NC}"
     else
         echo -e "${RED}✗ 仍然是 HTTP！${NC}"
@@ -159,9 +168,19 @@ show_status() {
     echo ""
 
     echo "=== 访问地址 ==="
-    echo -e "  前端: ${GREEN}https://compostlab-v2.cpolar.cn${NC}"
-    echo -e "  后端: ${GREEN}https://compostlab-backend-v2.cpolar.cn/api/v2${NC}"
-    echo -e "  Admin: ${GREEN}https://compostlab-backend-v2.cpolar.cn/admin${NC}"
+    frontend_url=$(read_env_value "frontend/.env.production" "NEXT_PUBLIC_SITE_URL")
+    backend_api=$(read_env_value "frontend/.env.production" "NEXT_PUBLIC_API_BASE")
+    if [ -z "${backend_api:-}" ]; then
+        backend_api="https://compostlab-backend-v2.cpolar.cn/api/v2"
+    fi
+    if [ -z "${frontend_url:-}" ]; then
+        frontend_url="https://compostlab-v2.cpolar.cn"
+    fi
+    admin_url="${backend_api%/api/v2}/admin"
+
+    echo -e "  前端: ${GREEN}${frontend_url}${NC}"
+    echo -e "  后端: ${GREEN}${backend_api}${NC}"
+    echo -e "  Admin: ${GREEN}${admin_url}${NC}"
     echo ""
 }
 

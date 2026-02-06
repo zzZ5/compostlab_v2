@@ -49,14 +49,6 @@ docker compose exec backend python manage.py migrate
 - `.env.backend` - 后端环境变量（数据库、MQTT 等）
 - `frontend/.env.production` - 前端环境变量（API 地址）
 
-### CPolar 配置
-
-CPolar 隧道已在网页控制台配置：
-- 前端: https://compostlab-v2.cpolar.cn (端口 3000)
-- 后端: https://compostlab-backend-v2.cpolar.cn (端口 8001)
-
-如需修改，请访问：https://dashboard.cpolar.com/
-
 ## 常用命令
 
 ### Docker 服务
