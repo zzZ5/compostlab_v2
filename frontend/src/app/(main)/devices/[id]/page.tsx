@@ -195,7 +195,7 @@ export default function DeviceDetailPage() {
 	// bucket: "" 表示 raw
 	const [bucket, setBucket] = useState<string>("");
 	// 数据量限制
-	const [dataLimit, setDataLimit] = useState<number>(10000);
+	const [dataLimit, setDataLimit] = useState<number>(5000);
 
 	const from = range?.[0] ? fmt(range[0]) : null;
 	const to = range?.[1] ? fmt(range[1]) : null;
