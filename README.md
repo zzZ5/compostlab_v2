@@ -5,6 +5,11 @@
 ### 1. 首次部署
 
 ```bash
+# 配置环境变量（必要）
+cp .env.backend.example .env.backend
+cp frontend/.env.production.example frontend/.env.production
+# 按需修改其中的数据库与 API 地址
+
 # 启动 Docker 服务
 docker compose up -d
 
@@ -27,9 +32,11 @@ docker compose exec backend python manage.py migrate
 
 ## 访问地址
 
-- ✅ **前端**: https://compostlab-v2.cpolar.cn
-- ✅ **后端**: https://compostlab-backend-v2.cpolar.cn/api/v2
-- ✅ **Admin**: https://compostlab-backend-v2.cpolar.cn/admin
+以 `frontend/.env.production` 为准（推荐配置）：
+
+- ✅ **前端**: `NEXT_PUBLIC_SITE_URL`
+- ✅ **后端**: `NEXT_PUBLIC_API_BASE`
+- ✅ **Admin**: `${NEXT_PUBLIC_API_BASE%/api/v2}/admin`
 
 ## 脚本说明
 
@@ -44,10 +51,18 @@ docker compose exec backend python manage.py migrate
 
 ## 配置文件
 
-### 环境变量
+### 环境变量（必配）
 
 - `.env.backend` - 后端环境变量（数据库、MQTT 等）
-- `frontend/.env.production` - 前端环境变量（API 地址）
+- `frontend/.env.production` - 前端环境变量（站点与 API 地址）
+
+### CPolar 配置（如使用）
+
+CPolar 隧道在网页控制台配置（示例）：
+- 前端: https://compostlab-v2.cpolar.cn (端口 3000)
+- 后端: https://compostlab-backend-v2.cpolar.cn (端口 8001)
+
+如需修改，请访问：https://dashboard.cpolar.com/
 
 ## 常用命令
 
