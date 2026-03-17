@@ -51,7 +51,7 @@ import {
 import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
 import { emptyObjectToUndefined } from "@/lib/kv";
 import { channelByMetric } from "@/lib/channel";
-import { MetricKey, getChannelDisplayName } from "@/lib/metrics";
+import { MetricKey, getChannelDisplayName, metricLabel, normalizeMetric } from "@/lib/metrics";
 import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey, sortChannels } from "@/lib/channelGroups";
 
 import type { Channel } from "@/types/api";
@@ -62,21 +62,15 @@ function getMetricColor(metric: MetricKey): string {
 		temperature: "#1890ff",  // 蓝色 - 温度
 		o2: "#52c41a",          // 绿色 - 氧气
 		co2: "#fa8c16",         // 橙色 - CO2
-		ch4: "#eb2f96",          // 粉色 - 甲烷
-		nh3: "#722ed1",          // 紫色 - 氨气
+		ch4: "#eb2f96",          // 粉色 - CH4
+		co: "#f5222d",           // 红色 - CO
+		h2s: "#722ed1",          // 紫色 - H2S
+		nh3: "#9254de",          // 紫色 - NH3
 		moisture: "#13c2c2",     // 青色 - 水分
 		humidity: "#13c2c2",     // 青色 - 湿度
 		ph: "#faad14",           // 黄色 - pH
-		pressure: "#fadb14",      // 黄色 - 压力
 		flow: "#52c41a",          // 绿色 - 流量
-		speed: "#1890ff",         // 蓝色 - 速度
-		voltage: "#fa8c16",       // 橙色 - 电压
-		current: "#722ed1",       // 紫色 - 电流
-		power: "#eb2f96",        // 粉色 - 功率
-		wind_speed: "#1890ff",    // 蓝色 - 风速
-		wind_direction: "#52c41a", // 绿色 - 风向
 		switch: "#fa8c16",       // 橙色 - 开关
-		level: "#eb2f96",        // 粉色 - 液位
 		unknown: "#d9d9d9",
 	};
 	return colors[metric] || colors.unknown;
@@ -751,7 +745,10 @@ export default function DeviceDetailPage() {
 			title: "Metric",
 			dataIndex: "metric",
 			key: "metric",
-			render: (v: any) => <Tag>{v || "-"}</Tag>,
+			render: (v: any) => {
+				const norm = normalizeMetric(v);
+				return <Tag>{norm !== "unknown" ? metricLabel(norm) : "-"}</Tag>;
+			},
 		},
 		{
 			title: "Unit",
@@ -1767,23 +1764,17 @@ export default function DeviceDetailPage() {
 									optionFilterProp="label"
 									options={[
 										{ value: "temperature", label: "temperature (温度)" },
-										{ value: "o2", label: "o2 (氧气)" },
-										{ value: "co2", label: "co2 (二氧化碳)" },
-										{ value: "ch4", label: "ch4 (甲烷)" },
-										{ value: "nh3", label: "nh3 (氨气)" },
+										{ value: "o2", label: "O2 (氧气)" },
+										{ value: "co2", label: "CO2 (二氧化碳)" },
+										{ value: "ch4", label: "CH4 (甲烷)" },
+										{ value: "co", label: "CO (一氧化碳)" },
+										{ value: "h2s", label: "H2S (硫化氢)" },
+										{ value: "nh3", label: "NH3 (氨气)" },
 										{ value: "moisture", label: "moisture (含水率)" },
 										{ value: "humidity", label: "humidity (湿度)" },
-										{ value: "ph", label: "ph (pH值)" },
-										{ value: "pressure", label: "pressure (压力)" },
-										{ value: "wind_speed", label: "wind_speed (风速)" },
-										{ value: "wind_direction", label: "wind_direction (风向)" },
+										{ value: "ph", label: "pH (酸碱度)" },
 										{ value: "flow", label: "flow (流量)" },
 										{ value: "switch", label: "switch (开关)" },
-										{ value: "voltage", label: "voltage (电压)" },
-										{ value: "current", label: "current (电流)" },
-										{ value: "power", label: "power (功率)" },
-										{ value: "speed", label: "speed (转速)" },
-										{ value: "level", label: "level (液位)" },
 										{ value: "unknown", label: "unknown (未分类)" },
 									]}
 								/>

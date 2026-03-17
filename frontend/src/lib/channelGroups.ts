@@ -1,5 +1,5 @@
 import type { Channel } from "@/types/api";
-import { MetricKey, metricLabel, normalizeMetric } from "@/lib/metrics";
+import { MetricKey, metricLabel, normalizeMetric, isIgnoredMetricRaw } from "@/lib/metrics";
 
 export type ChannelGroup = {
 	key: string;
@@ -9,7 +9,7 @@ export type ChannelGroup = {
 	channels: Channel[];
 };
 
-const KNOWN_ORDER: MetricKey[] = ["temperature", "o2", "co2", "moisture", "unknown"];
+const KNOWN_ORDER: MetricKey[] = ["temperature", "o2", "co2", "ch4", "co", "h2s", "nh3", "moisture", "humidity", "ph", "flow", "switch", "unknown"];
 
 /**
  * channel 排序：display_name > name > code
@@ -52,7 +52,8 @@ export function getChannelGroupKey(ch: Channel): string {
 	const norm = normalizeMetric(ch.metric);
 	if (norm !== "unknown") return norm;
 	const raw = String(ch.metric || "").trim().toLowerCase();
-	return raw ? `metric:${raw}` : "unknown";
+	if (!raw || isIgnoredMetricRaw(raw)) return "unknown";
+	return `metric:${raw}`;
 }
 
 export function getChannelGroupLabel(key: string, sample?: Channel): string {
