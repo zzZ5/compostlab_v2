@@ -99,13 +99,22 @@ function getTextTokens(...values: unknown[]): string {
 		.toLowerCase();
 }
 
-function inferDeviceProfile(device: Record<string, unknown> | null | undefined, channels: Channel[]): DeviceProfile {
+function asRecord(value: unknown): Record<string, unknown> | null {
+	return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function getRecordValue(record: unknown, key: string): unknown {
+	return asRecord(record)?.[key];
+}
+
+function inferDeviceProfile(device: DeviceTreeItem | null | undefined, channels: Channel[]): DeviceProfile {
+	const meta = asRecord(device?.meta);
 	const text = getTextTokens(
 		device?.code,
 		device?.name,
-		device?.meta?.profile,
-		device?.meta?.model,
-		device?.meta?.device_type,
+		getRecordValue(meta, "profile"),
+		getRecordValue(meta, "model"),
+		getRecordValue(meta, "device_type"),
 		device?.configuration
 	);
 	const channelCodes = new Set(channels.map((channel) => String(channel.code || "").toLowerCase()));
@@ -193,7 +202,7 @@ function getDeviceChannelValue(device: DeviceTreeItem | null | undefined, codes:
 	for (const code of codes) {
 		const channel = device.channels.find((item) => String(item.code || "").toLowerCase() === code.toLowerCase());
 		const value = channel?.latest?.value;
-		if (value !== undefined && value !== null && value !== "") {
+		if (value !== undefined && value !== null) {
 			return `${value}${channel?.unit ? ` ${channel.unit}` : ""}`;
 		}
 	}
