@@ -82,7 +82,7 @@ type CmdBody = {
 
 type DeviceProfile = "cp500-v3" | "smart-compost" | "mmcgs" | "generic";
 
-function fmt(dt?: unknown | null) {
+function fmt(dt?: string | number | Date | dayjs.Dayjs | null) {
 	if (!dt) return null;
 	return dayjs(dt).format("YYYY-MM-DD HH:mm:ss");
 }
