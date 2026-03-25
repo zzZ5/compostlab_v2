@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
-import { MetricKey, metricLabel, normalizeMetric, getChannelDisplayName } from "@/lib/metrics";
+import { MetricKey, metricLabel, getChannelDisplayName, detectChannelMetric } from "@/lib/metrics";
 import { groupChannelsByMetric, sortChannels } from "@/lib/channelGroups";
 
 const { Text } = Typography;
@@ -134,8 +134,8 @@ export default function DashboardPage() {
       if (statusFilter !== "all" && state !== statusFilter) return false;
 
       // alerts (O2 + Temp) —— 不再假设每台设备一定有且仅有一个温度/氧气
-      const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-      const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+      const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
+      const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
 
       // 过滤掉数据质量差的通道
       const validTempChs = tempChs.filter((ch: any) => !getQualityInfo(ch).isBad);
@@ -167,8 +167,8 @@ export default function DashboardPage() {
       const st = getOnlineState(d.last_seen_at);
       if (st === "online") online++;
 
-		const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-		const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+		const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
+		const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
 		const tempV = maxLatest(tempChs);
 		const o2V = minLatest(o2Chs);
       const tA = evalTemp(tempV);
@@ -274,8 +274,8 @@ export default function DashboardPage() {
           const st = onlineTag(getOnlineState(d.last_seen_at));
 
 			// 多路指标（如多点温度）支持：告警用"最保守"的 maxTemp / minO2
-			const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-			const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+			const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
+			const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
 
 			// 过滤掉数据质量差的通道
 			const validTempChs = tempChs.filter((ch: any) => {
@@ -340,7 +340,7 @@ export default function DashboardPage() {
                             {idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '8px 0' }} />}
                             {/* 该metric下的所有channels */}
                             {sortChannels(group.channels).map((ch: any) => {
-                              const mk = normalizeMetric(ch.metric) as MetricKey;
+                              const mk = detectChannelMetric(ch) as MetricKey;
                               const v = latestNumber(ch);
                               const isTemp = mk === "temperature";
                               const isO2 = mk === "o2";

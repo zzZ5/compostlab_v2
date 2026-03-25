@@ -27,6 +27,7 @@ Device / Channel API
 from __future__ import annotations
 
 import time
+import re
 from typing import Dict, Optional
 
 from django.db import connection
@@ -323,6 +324,97 @@ def _apply_channel_semantic_fields(c: Channel, body: dict) -> Optional[JsonRespo
                 if unit_key in unit or unit in unit_key:
                     auto_metric = metric
                     break
+        if auto_metric:
+            c.metric = auto_metric
+
+    if "role" in body:
+        _set_if_exists(c, "role", (body.get("role") or "").strip())
+    if "display_name" in body:
+        _set_if_exists(c, "display_name", (body.get("display_name") or "").strip())
+    return None
+
+
+def _apply_channel_semantic_fields(c: Channel, body: dict) -> Optional[JsonResponse]:
+    def _tokens(value: str) -> list[str]:
+        return [x for x in re.split(r"[^a-z0-9]+", (value or "").strip().lower()) if x]
+
+    def _contains(text: str, patterns: list[str]) -> bool:
+        if not text:
+            return False
+        return any(re.search(pattern, text) for pattern in patterns)
+
+    def _infer_metric(code: str, name: str, display_name: str, unit: str) -> str:
+        code_text = (code or "").strip().lower()
+        compact_code = re.sub(r"[^a-z0-9]+", "", code_text)
+        name_text = (name or "").strip().lower()
+        display_text = (display_name or "").strip().lower()
+        combined_text = " ".join(x for x in [display_text, name_text] if x)
+        combined_tokens = set(_tokens(display_text) + _tokens(name_text))
+        unit_text = (unit or "").strip().lower()
+
+        exact_code_to_metric = {
+            "co2": "co2",
+            "co": "co",
+            "h2s": "h2s",
+            "o2": "o2",
+            "ch4": "ch4",
+            "heater": "switch",
+            "pump": "switch",
+            "aeration": "switch",
+        }
+        if compact_code in exact_code_to_metric:
+            return exact_code_to_metric[compact_code]
+
+        checks = [
+            ("co2", [r"\bco2\b", r"carbon[_\s-]*dioxide"]),
+            ("o2", [r"\bo2\b", r"\boxygen\b"]),
+            ("temperature", [r"\btemp\b", r"\btemperature\b", r"\bt[1-9]\b"]),
+            ("ch4", [r"\bch4\b", r"\bmethane\b"]),
+            ("h2s", [r"\bh2s\b", r"\bsulfide\b", r"\bsulphide\b"]),
+            ("nh3", [r"\bnh3\b", r"\bammonia\b"]),
+            ("co", [r"\bco\b", r"carbon[_\s-]*monoxide"]),
+            ("moisture", [r"\bmois\b", r"\bmoisture\b", r"water[_\s-]*content", r"\bmc\b"]),
+            ("humidity", [r"\bhumid\b", r"\bhumidity\b", r"\brh\b"]),
+            ("ph", [r"\bph\b"]),
+            ("flow", [r"\bflow\b"]),
+            ("switch", [r"\bswitch\b", r"\brelay\b", r"\bon[_\s-]*off\b"]),
+        ]
+
+        for metric, patterns in checks:
+            if _contains(code_text, patterns) or _contains(combined_text, patterns):
+                return metric
+            if metric in combined_tokens:
+                return metric
+
+        unit_to_metric = {
+            "°c": "temperature",
+            "℃": "temperature",
+            "c": "temperature",
+            "rh": "humidity",
+            "%rh": "humidity",
+            "ph": "ph",
+        }
+        if unit_text in ("%vol", "vol%") and compact_code == "o2":
+            return "o2"
+        if unit_text == "ppm" and compact_code == "co2":
+            return "co2"
+        if unit_text == "ppm" and compact_code == "co":
+            return "co"
+        if unit_text == "ppm" and compact_code == "h2s":
+            return "h2s"
+        if unit_text in ("%lel", "lel%") and compact_code == "ch4":
+            return "ch4"
+        return unit_to_metric.get(unit_text, "")
+
+    if "metric" in body and body.get("metric"):
+        _set_if_exists(c, "metric", (body.get("metric") or "").strip())
+    elif hasattr(c, "metric"):
+        auto_metric = _infer_metric(
+            str(body.get("code") or getattr(c, CHANNEL_CODE_FIELD, "") or ""),
+            str(body.get("name") or getattr(c, "name", "") or ""),
+            str(body.get("display_name") or getattr(c, "display_name", "") or ""),
+            str(body.get("unit") or getattr(c, "unit", "") or ""),
+        )
         if auto_metric:
             c.metric = auto_metric
 
@@ -1459,4 +1551,3 @@ class DeviceRegisterView(DeviceJWTAuthMixin, JsonBodyMixin, View):
         response["registration_type"] = registration_type  # 标识注册方式：'self' 或 'admin'
 
         return JsonResponse(response, status=201 if is_new else 200)
-

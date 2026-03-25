@@ -34,7 +34,7 @@ import { getErrorMessage } from "@/lib/errors";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
-import { MetricKey, metricLabel, normalizeMetric } from "@/lib/metrics";
+import { MetricKey, metricLabel, detectChannelMetric } from "@/lib/metrics";
 import { groupChannelsByMetric, sortChannels } from "@/lib/channelGroups";
 
 const { Text } = Typography;
@@ -173,8 +173,8 @@ export default function DevicesPage() {
 				const state = getOnlineState(d.last_seen_at);
 				if (statusFilter !== "all" && state !== statusFilter) return false;
 
-				const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-				const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+				const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
+				const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
 				const tempV = maxLatest(tempChs);
 				const o2V = minLatest(o2Chs);
 
@@ -220,8 +220,8 @@ export default function DevicesPage() {
 				key: "alerts",
 				width: 160,
 				render: (_: any, d: any) => {
-					const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-					const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+					const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
+					const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
 					const tempV = maxLatest(tempChs);
 					const o2V = minLatest(o2Chs);
 
@@ -274,7 +274,7 @@ export default function DevicesPage() {
 								<div key={group.key}>
 									{idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '6px 0' }} />}
 									{sortChannels(group.channels).slice(0, 4).map((ch: any) => {
-										const mk = normalizeMetric(ch.metric) as MetricKey;
+										const mk = detectChannelMetric(ch) as MetricKey;
 										const v = latestNumber(ch);
 										const isTemp = mk === "temperature";
 										const isO2 = mk === "o2";
@@ -396,8 +396,8 @@ export default function DevicesPage() {
 					{filtered.map((d) => {
 						const st = onlineTag(getOnlineState(d.last_seen_at));
 
-						const tempChs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "temperature");
-						const o2Chs = (d.channels || []).filter((ch: any) => normalizeMetric(ch.metric) === "o2");
+						const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
+						const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
 						const tempV = maxLatest(tempChs);
 						const o2V = minLatest(o2Chs);
 						const tA = evalTemp(tempV);
@@ -435,7 +435,7 @@ export default function DevicesPage() {
 												<div key={group.key}>
 													{idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '6px 0' }} />}
 													{sortChannels(group.channels).slice(0, 5).map((ch: any) => {
-														const mk = normalizeMetric(ch.metric) as MetricKey;
+														const mk = detectChannelMetric(ch) as MetricKey;
 														const v = latestNumber(ch);
 														const isTemp = mk === "temperature";
 														const isO2 = mk === "o2";
