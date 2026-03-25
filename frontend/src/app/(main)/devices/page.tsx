@@ -33,12 +33,72 @@ import { useDeleteDevice } from "@/features/devices/mutations";
 import { getErrorMessage } from "@/lib/errors";
 
 import { getOnlineState, onlineTag } from "@/lib/status";
-import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
+import { evalO2, evalTemp } from "@/lib/alerts";
 import { MetricKey, metricLabel, detectChannelMetric } from "@/lib/metrics";
-import { groupChannelsByMetric, sortChannels } from "@/lib/channelGroups";
+import { groupChannelsByMetric } from "@/lib/channelGroups";
 
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
+
+type DeviceProfile = "cp500-v3" | "smart-compost" | "mmcgs" | "generic";
+
+function inferDeviceProfile(device: any): DeviceProfile {
+	const text = `${device?.code || ""} ${device?.name || ""} ${device?.meta?.profile || ""} ${device?.meta?.model || ""} ${device?.meta?.device_type || ""}`.toLowerCase();
+	const channelCodes = new Set((device?.channels || []).map((channel: any) => String(channel.code || "").toLowerCase()));
+
+	if (text.includes("mmcgs") || channelCodes.has("point1") || channelCodes.has("point2") || channelCodes.has("purge")) {
+		return "mmcgs";
+	}
+	if (text.includes("cp500") || channelCodes.has("tempin") || channelCodes.has("tanktemp") || channelCodes.has("heater")) {
+		return "cp500-v3";
+	}
+	if (text.includes("smartcompost") || text.includes("smart-compost") || channelCodes.has("roomtemp") || channelCodes.has("airhumidity")) {
+		return "smart-compost";
+	}
+	return "generic";
+}
+
+function getProfileLabel(profile: DeviceProfile): string {
+	switch (profile) {
+		case "cp500-v3":
+			return "CP500 控制器";
+		case "smart-compost":
+			return "Smart Compost";
+		case "mmcgs":
+			return "MMCGS";
+		default:
+			return "通用设备";
+	}
+}
+
+function getProfileColor(profile: DeviceProfile): string {
+	switch (profile) {
+		case "cp500-v3":
+			return "blue";
+		case "smart-compost":
+			return "green";
+		case "mmcgs":
+			return "purple";
+		default:
+			return "default";
+	}
+}
+
+function getMmcgsControllerCode(code: string | null | undefined): string {
+	if (!code) return "";
+	return String(code).replace(/-P\d+$/i, "");
+}
+
+function getMmcgsPointIndex(code: string | null | undefined): number | null {
+	if (!code) return null;
+	const match = String(code).match(/-P(\d+)$/i);
+	return match ? Number(match[1]) : null;
+}
+
+function isMmcgsDevice(d: any): boolean {
+	const text = `${d?.code || ""} ${d?.name || ""} ${d?.meta?.profile || ""} ${d?.meta?.model || ""}`.toLowerCase();
+	return text.includes("mmcgs");
+}
 
 function sevRank(sev: "danger" | "warn" | "ok" | "none") {
 	if (sev === "danger") return 3;
@@ -190,6 +250,37 @@ export default function DevicesPage() {
 			.sort((a, b) => b.device_id - a.device_id); // 按device_id降序排列，新设备在前
 	}, [devices, q, statusFilter, alertFilter]);
 
+	const displayDevices = useMemo(() => {
+		const mmcgsGroups = new Map<string, any[]>();
+		const normalDevices: any[] = [];
+
+		for (const device of filtered) {
+			if (!isMmcgsDevice(device)) {
+				normalDevices.push(device);
+				continue;
+			}
+			const controllerCode = getMmcgsControllerCode(device.code);
+			if (!mmcgsGroups.has(controllerCode)) mmcgsGroups.set(controllerCode, []);
+			mmcgsGroups.get(controllerCode)!.push(device);
+		}
+
+		const mmcgsControllers = Array.from(mmcgsGroups.values()).map((group) => {
+			const controller =
+				group.find((item) => getMmcgsPointIndex(item.code) === null) ||
+				group.slice().sort((a, b) => a.device_id - b.device_id)[0];
+			const points = group
+				.filter((item) => getMmcgsPointIndex(item.code) !== null)
+				.sort((a, b) => (getMmcgsPointIndex(a.code) || 0) - (getMmcgsPointIndex(b.code) || 0));
+			return {
+				...controller,
+				mmcgs_points: points,
+				mmcgs_controller_code: getMmcgsControllerCode(controller.code),
+			};
+		});
+
+		return [...normalDevices, ...mmcgsControllers].sort((a, b) => b.device_id - a.device_id);
+	}, [filtered]);
+
 	const columns = useMemo(() => {
 		const cols: any[] = [
 			{
@@ -203,6 +294,16 @@ export default function DevicesPage() {
 						<Text type="secondary" style={{ fontSize: 12 }}>
 							{d.code}
 						</Text>
+						{d.mmcgs_points?.length ? (
+							<Space wrap size={4}>
+								<Tag color="purple">MMCGS</Tag>
+								{d.mmcgs_points.map((point: any) => (
+									<Link key={point.device_id} href={`/devices/${point.device_id}`}>
+										<Tag style={{ cursor: "pointer" }}>{`P${getMmcgsPointIndex(point.code) ?? "?"}`}</Tag>
+									</Link>
+								))}
+							</Space>
+						) : null}
 					</Space>
 				),
 			},
@@ -213,6 +314,15 @@ export default function DevicesPage() {
 				render: (_: any, d: any) => {
 					const st = onlineTag(getOnlineState(d.last_seen_at));
 					return <Tag color={st.color}>{st.text}</Tag>;
+				},
+			},
+			{
+				title: "Type",
+				key: "type",
+				width: 150,
+				render: (_: any, d: any) => {
+					const profile = inferDeviceProfile(d);
+					return <Tag color={getProfileColor(profile)}>{getProfileLabel(profile)}</Tag>;
 				},
 			},
 			{
@@ -261,47 +371,16 @@ export default function DevicesPage() {
 				},
 			},
 			{
-				title: "Latest",
-				key: "latest",
-				width: 320,
-				render: (_: any, d: any) => {
-					const metricGroups = groupChannelsByMetric(d.channels || []);
-					if (!metricGroups.length) return <Tag>-</Tag>;
-
-					return (
-						<div>
-							{metricGroups.slice(0, 3).map((group, idx) => (
-								<div key={group.key}>
-									{idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '6px 0' }} />}
-									{sortChannels(group.channels).slice(0, 4).map((ch: any) => {
-										const mk = detectChannelMetric(ch) as MetricKey;
-										const v = latestNumber(ch);
-										const isTemp = mk === "temperature";
-										const isO2 = mk === "o2";
-										const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-										const tag = ch?.latest ? `${ch.latest.value ?? "-"} ${ch.unit || ""}` : "-";
-										return (
-											<div
-												key={ch.code}
-												style={{
-													display: "flex",
-													justifyContent: "space-between",
-													alignItems: "center",
-													padding: "2px 0",
-												}}
-											>
-												<Text type="secondary" style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>
-													{ch.display_name || ch.code}
-												</Text>
-												<Tag color={a ? sevToColor(a.sev) : undefined} style={{ fontSize: 12 }}>{tag}</Tag>
-											</div>
-										);
-									})}
-								</div>
-							))}
-						</div>
-					);
-				},
+				title: "Structure",
+				key: "structure",
+				width: 220,
+				render: (_: any, d: any) => (
+					<Space wrap size={6}>
+						<Tag>{`${d.channels?.length || 0} 通道`}</Tag>
+						{d.mmcgs_points?.length ? <Tag color="purple">{`${d.mmcgs_points.length} 点位`}</Tag> : null}
+						{d.is_active === false ? <Tag color="default">已停用</Tag> : <Tag color="green">启用中</Tag>}
+					</Space>
+				),
 			},
 			{
 				title: "Last seen",
@@ -393,19 +472,9 @@ export default function DevicesPage() {
 			{/* Mobile CardList */}
 			{isMobile ? (
 				<Row gutter={[12, 12]}>
-					{filtered.map((d) => {
+					{displayDevices.map((d) => {
 						const st = onlineTag(getOnlineState(d.last_seen_at));
-
-						const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
-						const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
-						const tempV = maxLatest(tempChs);
-						const o2V = minLatest(o2Chs);
-						const tA = evalTemp(tempV);
-						const oA = evalO2(o2V);
-						const ov = overallSev(tA.sev, oA.sev);
-
-						const ovTagColor = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
-						const ovText = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
+						const profile = inferDeviceProfile(d);
 
 						const metricGroups = groupChannelsByMetric(d.channels || []);
 
@@ -425,41 +494,38 @@ export default function DevicesPage() {
 										<Space size={4} wrap>
 											<Tag color={st.color}>{st.text}</Tag>
 											<Tag color="blue">{d.code}</Tag>
-											<Tag color={ovTagColor}>{ovText}</Tag>
+											<Tag color={getProfileColor(profile)}>{getProfileLabel(profile)}</Tag>
+											{d.mmcgs_points?.length ? <Tag color="purple">{`MMCGS · ${d.mmcgs_points.length} 点位`}</Tag> : null}
+											<Tag>{`${d.channels?.length || 0} 通道`}</Tag>
 										</Space>
 									</div>
 
+									{d.mmcgs_points?.length ? (
+										<div style={{ marginBottom: 10 }}>
+											<Space wrap size={6}>
+												{d.mmcgs_points.map((point: any) => (
+													<Button
+														key={point.device_id}
+														size="small"
+														onClick={(e) => {
+															e.stopPropagation();
+															router.push(`/devices/${point.device_id}`);
+														}}
+													>
+														{`P${getMmcgsPointIndex(point.code) ?? "?"}`}
+													</Button>
+												))}
+											</Space>
+										</div>
+									) : null}
+
 									{metricGroups.length > 0 && (
 										<div style={{ marginTop: 8 }}>
-											{metricGroups.slice(0, 3).map((group, idx) => (
-												<div key={group.key}>
-													{idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '6px 0' }} />}
-													{sortChannels(group.channels).slice(0, 5).map((ch: any) => {
-														const mk = detectChannelMetric(ch) as MetricKey;
-														const v = latestNumber(ch);
-														const isTemp = mk === "temperature";
-														const isO2 = mk === "o2";
-														const a = isTemp ? evalTemp(v) : isO2 ? evalO2(v) : null;
-														const tag = ch?.latest
-															? `${ch.latest.value ?? "-"} ${ch.unit || ""}`
-															: "-";
-														return (
-															<div
-																key={ch.code}
-																style={{
-																	display: "flex",
-																	justifyContent: "space-between",
-																	padding: "3px 0",
-																	fontSize: 13,
-																}}
-															>
-																<Text type="secondary">{ch.display_name || ch.code}</Text>
-																<Tag color={a ? sevToColor(a.sev) : undefined}>{tag}</Tag>
-															</div>
-														);
-													})}
-												</div>
-											))}
+											<Space wrap size={6}>
+												{metricGroups.map((group) => (
+													<Tag key={group.key}>{`${metricLabel(group.key as MetricKey)} · ${group.channels.length}`}</Tag>
+												))}
+											</Space>
 										</div>
 									)}
 
@@ -495,10 +561,10 @@ export default function DevicesPage() {
 				</Row>
 			) : (
 				// Desktop Table
-				<Table
-					rowKey="device_id"
-					columns={columns as any}
-					dataSource={filtered as any}
+					<Table
+						rowKey="device_id"
+						columns={columns as any}
+						dataSource={displayDevices as any}
 					pagination={{
 						current: page,
 						pageSize,
@@ -541,6 +607,7 @@ export default function DevicesPage() {
 						? {
 							code: editing.code,
 							name: editing.name,
+							device_type: editing.meta?.profile || editing.meta?.device_type || undefined,
 							post_topic: editing.post_topic || "",
 							response_topic: editing.response_topic || "",
 							note: editing.note || "",

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Card, Col, Grid, Input, Row, Select, Space, Spin, Tag, Tooltip, Typography, Alert } from "antd";
+import { Card, Col, Grid, Input, Row, Select, Space, Spin, Tag, Tooltip, Typography } from "antd";
 import { InfoCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 
 import Page from "@/components/Page";
@@ -77,14 +77,12 @@ export default function DashboardPage() {
   const runsQ = useRuns();
   const runs = runsQ.data?.data || [];
   const [windowsMap, setWindowsMap] = useState<Map<number, any[]>>(new Map());
-  const [isLoadingWindows, setIsLoadingWindows] = useState(false);
 
   // 加载所有 run 的 windows
   useEffect(() => {
     const loadRunWindows = async () => {
       if (runs.length === 0) return;
 
-      setIsLoadingWindows(true);
       const map = new Map<number, any[]>();
 
       await Promise.all(
@@ -99,7 +97,6 @@ export default function DashboardPage() {
       );
 
       setWindowsMap(map);
-      setIsLoadingWindows(false);
     };
 
     loadRunWindows();
@@ -302,7 +299,6 @@ export default function DashboardPage() {
 
 			// show metrics present - 使用metricGroups的顺序，确保与下方显示一致
           const ms = metricGroups.map((g) => g.key).filter((m) => m !== "unknown") as MetricKey[];
-
           return (
             <Col key={d.device_id} xs={24} md={12} lg={6}>
               <Link href={`/devices/${d.device_id}`} style={{ display: "block" }}>
@@ -330,15 +326,13 @@ export default function DashboardPage() {
                     {ms.length ? ms.map((m) => <Tag key={m} style={{ fontSize: 11, padding: '0 4px', margin: 0, marginRight: 4 }}>{metricLabel(m)}</Tag>) : <Tag style={{ fontSize: 11, padding: '0 4px' }}>未分类</Tag>}
                   </div>
 
-                          {/* values (dynamic) */}
+                  {/* values (dynamic) */}
                   <div style={{ marginTop: 8 }}>
                     {metricGroups.length ? (
                       <div>
                         {metricGroups.map((group, idx) => (
                           <div key={group.key}>
-                            {/* 不同metric分组之间加分隔线 */}
                             {idx > 0 && <div style={{ height: 1, background: '#f0f0f0', margin: '8px 0' }} />}
-                            {/* 该metric下的所有channels */}
                             {sortChannels(group.channels).map((ch: any) => {
                               const mk = detectChannelMetric(ch) as MetricKey;
                               const v = latestNumber(ch);
@@ -389,7 +383,7 @@ export default function DashboardPage() {
                                         )}
                                       </Tooltip>
                                     )}
-                                    </Space>
+                                  </Space>
                                 </div>
                               );
                             })}

@@ -10,7 +10,6 @@ import {
 	Col,
 	Collapse,
 	DatePicker,
-	Descriptions,
 	Divider,
 	Form,
 	Grid,
@@ -18,6 +17,7 @@ import {
 	Modal,
 	Row,
 	Select,
+	Slider,
 	Space,
 	Spin,
 	Switch,
@@ -26,7 +26,6 @@ import {
 	Tag,
 	Typography,
 	message,
-	Statistic,
 } from "antd";
 import dayjs from "dayjs";
 
@@ -49,12 +48,11 @@ import {
 } from "@/features/templates/queries";
 
 import { api, buildQuery, downloadBlob, getErrorMessage } from "@/lib/api";
-import { emptyObjectToUndefined } from "@/lib/kv";
 import { channelByMetric } from "@/lib/channel";
 import { MetricKey, getChannelDisplayName, metricLabel, normalizeMetric } from "@/lib/metrics";
 import { getChannelGroupKey, groupChannelsByMetric, isKnownMetricKey, sortChannels } from "@/lib/channelGroups";
 
-import type { Channel } from "@/types/api";
+import type { Channel, DeviceTreeItem } from "@/types/api";
 
 // Metric 颜色映射（简洁配色）
 function getMetricColor(metric: MetricKey): string {
@@ -79,12 +77,127 @@ function getMetricColor(metric: MetricKey): string {
 const { Text } = Typography;
 
 type CmdBody = {
-	commands: any[];
+	commands: Record<string, unknown>[];
 };
 
-function fmt(dt?: any | null) {
+type DeviceProfile = "cp500-v3" | "smart-compost" | "mmcgs" | "generic";
+
+function fmt(dt?: unknown | null) {
 	if (!dt) return null;
 	return dayjs(dt).format("YYYY-MM-DD HH:mm:ss");
+}
+
+function getTextTokens(...values: unknown[]): string {
+	return values
+		.flatMap((value) => {
+			if (typeof value === "string") return [value];
+			if (value && typeof value === "object") return Object.values(value);
+			return [];
+		})
+		.filter((value): value is string => typeof value === "string")
+		.join(" ")
+		.toLowerCase();
+}
+
+function inferDeviceProfile(device: Record<string, unknown> | null | undefined, channels: Channel[]): DeviceProfile {
+	const text = getTextTokens(
+		device?.code,
+		device?.name,
+		device?.meta?.profile,
+		device?.meta?.model,
+		device?.meta?.device_type,
+		device?.configuration
+	);
+	const channelCodes = new Set(channels.map((channel) => String(channel.code || "").toLowerCase()));
+
+	if (
+		text.includes("mmcgs") ||
+		channelCodes.has("point1") ||
+		channelCodes.has("point2") ||
+		channelCodes.has("purge")
+	) {
+		return "mmcgs";
+	}
+
+	if (
+		text.includes("cp500") ||
+		channelCodes.has("tempin") ||
+		channelCodes.has("tanktemp") ||
+		channelCodes.has("heater") ||
+		channelCodes.has("aeration")
+	) {
+		return "cp500-v3";
+	}
+
+	if (
+		text.includes("smartcompost") ||
+		text.includes("smart-compost") ||
+		channelCodes.has("roomtemp") ||
+		channelCodes.has("airtemp") ||
+		channelCodes.has("airhumidity")
+	) {
+		return "smart-compost";
+	}
+
+	return "generic";
+}
+
+function getProfileLabel(profile: DeviceProfile): string {
+	switch (profile) {
+		case "cp500-v3":
+			return "CP500 控制器";
+		case "smart-compost":
+			return "Smart Compost";
+		case "mmcgs":
+			return "MMCGS";
+		default:
+			return "通用设备";
+	}
+}
+
+function getProfileDescription(profile: DeviceProfile): string {
+	switch (profile) {
+		case "cp500-v3":
+			return "适合堆体控温场景，优先提供加热、循环泵和曝气的常用操作。";
+		case "smart-compost":
+			return "适合气体监测和气路控制场景，优先提供曝气、排气和重启操作。";
+		case "mmcgs":
+			return "适合多点采样设备，优先提供各采样点和清洗泵的直接操作。";
+		default:
+			return "这里保留基础控制；更复杂的命令请使用下方开发者工具。";
+	}
+}
+
+function getConfigValue(source: unknown, path: string[]): unknown {
+	let current: unknown = source;
+	for (const key of path) {
+		if (!current || typeof current !== "object") return undefined;
+		current = (current as Record<string, unknown>)[key];
+	}
+	return current;
+}
+
+function getMmcgsPointIndex(code: string | null | undefined): number | null {
+	if (!code) return null;
+	const match = String(code).match(/-P(\d+)$/i);
+	return match ? Number(match[1]) : null;
+}
+
+function getMmcgsControllerCode(code: string | null | undefined): string {
+	if (!code) return "";
+	return String(code).replace(/-P\d+$/i, "");
+}
+
+function getDeviceChannelValue(device: DeviceTreeItem | null | undefined, codes: string[]): string {
+	if (!device?.channels?.length) return "-";
+	for (const code of codes) {
+		const channel = device.channels.find((item) => String(item.code || "").toLowerCase() === code.toLowerCase());
+		const value = channel?.latest?.value;
+		if (value !== undefined && value !== null && value !== "") {
+			return `${value}${channel?.unit ? ` ${channel.unit}` : ""}`;
+		}
+	}
+	return "-";
 }
 
 export default function DeviceDetailPage() {
@@ -100,9 +213,10 @@ export default function DeviceDetailPage() {
 
 	// === 基础数据：device / channels ===
 	const devicesQ = useDevicesTree(true);
+	const allDevices = useMemo(() => devicesQ.data?.data || [], [devicesQ.data]);
 	const device = useMemo(() => {
-		return (devicesQ.data?.data || []).find((d) => d.device_id === deviceId) || null;
-	}, [devicesQ.data, deviceId]);
+		return allDevices.find((d) => d.device_id === deviceId) || null;
+	}, [allDevices, deviceId]);
 
 	const channelsQ = useDeviceChannels(deviceId);
 	const channelsFromApi: Channel[] = channelsQ.data || [];
@@ -132,6 +246,39 @@ export default function DeviceDetailPage() {
 	function getLatest(ch: Channel): any | null {
 		return latestMap.get(ch.code) || (ch as any).latest || latestByCode.get(ch.code) || null;
 	}
+
+	const deviceProfile = useMemo(() => inferDeviceProfile(device, channels), [device, channels]);
+	const mmcgsControllerCode = useMemo(() => getMmcgsControllerCode(String(device?.code || "")), [device?.code]);
+	const mmcgsFamilyDevices = useMemo(() => {
+		if (deviceProfile !== "mmcgs" || !mmcgsControllerCode) return [];
+		return allDevices
+			.filter((item) => getMmcgsControllerCode(String(item.code || "")) === mmcgsControllerCode)
+			.sort((a, b) => {
+				const aIndex = getMmcgsPointIndex(String(a.code || ""));
+				const bIndex = getMmcgsPointIndex(String(b.code || ""));
+				if (aIndex === null && bIndex === null) return String(a.code).localeCompare(String(b.code));
+				if (aIndex === null) return -1;
+				if (bIndex === null) return 1;
+				return aIndex - bIndex;
+			});
+	}, [allDevices, deviceProfile, mmcgsControllerCode]);
+	const mmcgsControllerDevice = useMemo(() => {
+		if (deviceProfile !== "mmcgs") return null;
+		return mmcgsFamilyDevices.find((item) => getMmcgsPointIndex(String(item.code || "")) === null) || device;
+	}, [deviceProfile, mmcgsFamilyDevices, device]);
+	const mmcgsPointDevices = useMemo(() => {
+		if (deviceProfile !== "mmcgs") return [];
+		return mmcgsFamilyDevices.filter((item) => getMmcgsPointIndex(String(item.code || "")) !== null);
+	}, [deviceProfile, mmcgsFamilyDevices]);
+	const effectiveConfigDevice = useMemo(() => {
+		if (deviceProfile === "mmcgs") return mmcgsControllerDevice || device;
+		return device;
+	}, [deviceProfile, mmcgsControllerDevice, device]);
+	const [quickDurationMinutes, setQuickDurationMinutes] = useState<number>(10);
+	const [cp500AutoIntervalMinutes, setCp500AutoIntervalMinutes] = useState<number>(10);
+	const [cp500AutoDurationMinutes, setCp500AutoDurationMinutes] = useState<number>(5);
+	const [smartReadIntervalMinutes, setSmartReadIntervalMinutes] = useState<number>(10);
+	const [mmcgsSampleSeconds, setMmcgsSampleSeconds] = useState<number>(60);
 
 	// === Telemetry: metric(group) + channels selector（支持多通道对比） ===
 	// activeMetric 既可以是标准 MetricKey（temperature/o2/...），也可以是自定义 metric:* 分组
@@ -202,7 +349,6 @@ export default function DeviceDetailPage() {
 		channels: effectiveCodes.length ? effectiveCodes : null,
 		limit: dataLimit,
 	});
-
 	const points = (telemetryQ.isSuccess && effectiveCodes.length > 0) ? (telemetryQ.data?.data || []) : [];
 
 	// ✅ 按时间倒序排列（最新的在前），用于数据表展示
@@ -306,8 +452,7 @@ export default function DeviceDetailPage() {
 
 	// 顶部 KPI：不再预设 4 个传感器，而是按设备实际通道分组展示（温度可多路）
 	const kpiGroups = useMemo(() => {
-		// 优先展示前 4 个分组（已按温度/氧气/CO2/水分优先排序）
-		return metricGroups.slice(0, 4);
+		return metricGroups;
 	}, [metricGroups]);
 
 	// === Export ===
@@ -556,10 +701,15 @@ export default function DeviceDetailPage() {
 
 	// 打开配置编辑
 	function openConfigEdit() {
-		if (!device) return;
+		if (!effectiveConfigDevice) return;
+		if (deviceProfile === "mmcgs" && effectiveConfigDevice.device_id !== deviceId) {
+			message.info(`MMCGS 配置统一在控制器 ${effectiveConfigDevice.code} 上维护，正在跳转。`);
+			router.push(`/devices/${effectiveConfigDevice.device_id}`);
+			return;
+		}
 		configForm.resetFields();
 		configForm.setFieldsValue({
-			configuration: device.configuration || {},
+			configuration: effectiveConfigDevice.configuration || {},
 		});
 		setConfigModalOpen(true);
 	}
@@ -717,6 +867,26 @@ export default function DeviceDetailPage() {
 		}
 	}
 
+	async function sendQuickCommands(commands: Record<string, unknown>[], successText: string) {
+		if (!device || !commands.length) return;
+		try {
+			await sendCmd.mutateAsync({ commands });
+			message.success(successText);
+		} catch (e) {
+			message.error(getErrorMessage(e, "下发失败"));
+		}
+	}
+
+	async function sendQuickToggle(command: string, action: "on" | "off", durationMs?: number) {
+		const body: Record<string, unknown> = { command, action };
+		if (durationMs && durationMs > 0) body.duration = durationMs;
+		await sendQuickCommands([body], `${command} 已${action === "on" ? "开启" : "关闭"}`);
+	}
+
+	async function sendQuickConfigUpdate(config: Record<string, unknown>, successText: string) {
+		await sendQuickCommands([{ command: "config_update", config }], successText);
+	}
+
 	// === Channels table ===
 	const channelRows = useMemo(() => {
 		// 先按 metric 分组，然后对每个组内的通道进行排序
@@ -808,6 +978,142 @@ export default function DeviceDetailPage() {
 		},
 	];
 
+	const controlStatusChannels = useMemo(() => {
+		const preferredCodes =
+			deviceProfile === "cp500-v3"
+				? ["TempIn", "TankTemp", "Heater", "Pump", "Aeration", "EmergencyState"]
+				: deviceProfile === "smart-compost"
+					? ["CO2", "O2", "AirTemp", "AirHumidity"]
+					: deviceProfile === "mmcgs"
+						? ["CO2", "Temp", "Humidity", "Pump"]
+						: [];
+
+		const fromPreferred = preferredCodes
+			.map((code) => channels.find((channel) => channel.code === code))
+			.filter((channel): channel is Channel => Boolean(channel));
+
+		if (fromPreferred.length) return fromPreferred;
+
+		return channels
+			.filter((channel) => normalizeMetric(channel.metric as any) !== "unknown")
+			.slice(0, 5);
+	}, [channels, deviceProfile]);
+
+	const controlStatusMap = useMemo(() => {
+		const map = new Map<string, { label: string; value: string; active: boolean; tone: string }>();
+		for (const channel of controlStatusChannels) {
+			const latest = getLatest(channel);
+			const metric = normalizeMetric(channel.metric as any);
+			const rawValue = latest?.value;
+			let value = rawValue ?? "-";
+			let active = false;
+			let tone = "#d9d9d9";
+
+			if (channel.code === "EmergencyState") {
+				active = Number(rawValue) > 0;
+				value = active ? "急停中" : "正常";
+				tone = active ? "#ff4d4f" : "#52c41a";
+			} else if (metric === "switch") {
+				active = Number(rawValue) > 0;
+				value = active ? "开启" : "关闭";
+				tone = active ? "#1677ff" : "#bfbfbf";
+			} else if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
+				value = `${rawValue}${channel.unit ? ` ${channel.unit}` : ""}`;
+				tone = "#1677ff";
+			}
+
+			map.set(channel.code, {
+				label: getChannelDisplayName(channel),
+				value: String(value),
+				active,
+				tone,
+			});
+		}
+		return map;
+	}, [controlStatusChannels, latestMap]);
+
+	const profileConfigSummary = useMemo(() => {
+		const configuration = effectiveConfigDevice?.configuration || {};
+		switch (deviceProfile) {
+			case "cp500-v3":
+				return [
+					{ label: "定时曝气", value: getConfigValue(configuration, ["aeration_timer", "enabled"]) ? "启用" : "停用" },
+					{ label: "曝气间隔", value: getConfigValue(configuration, ["aeration_timer", "interval"]) ? `${Math.round(Number(getConfigValue(configuration, ["aeration_timer", "interval"])) / 60000)} 分钟` : "-" },
+					{ label: "曝气时长", value: getConfigValue(configuration, ["aeration_timer", "duration"]) ? `${Math.round(Number(getConfigValue(configuration, ["aeration_timer", "duration"])) / 60000)} 分钟` : "-" },
+					{ label: "加热最短开机", value: getConfigValue(configuration, ["heater_guard", "min_on_ms"]) ? `${Math.round(Number(getConfigValue(configuration, ["heater_guard", "min_on_ms"])) / 1000)} 秒` : "-" },
+				];
+			case "smart-compost":
+				return [
+					{ label: "抽气时长", value: configuration.pump_run_time ? `${Math.round(Number(configuration.pump_run_time) / 1000)} 秒` : "-" },
+					{ label: "采集周期", value: configuration.read_interval ? `${Math.round(Number(configuration.read_interval) / 1000)} 秒` : "-" },
+				];
+			case "mmcgs":
+				return [
+					{ label: "采样泵时长", value: configuration.sample_pump_time ? `${Math.round(Number(configuration.sample_pump_time) / 1000)} 秒` : "-" },
+					{ label: "清洗泵时长", value: configuration.purge_pump_time ? `${Math.round(Number(configuration.purge_pump_time) / 1000)} 秒` : "-" },
+					{ label: "轮询周期", value: configuration.read_interval ? `${Math.round(Number(configuration.read_interval) / 1000)} 秒` : "-" },
+				];
+			default:
+				return Object.entries(configuration)
+					.slice(0, 4)
+					.map(([label, value]) => ({
+						label,
+						value: typeof value === "object" ? JSON.stringify(value) : String(value),
+					}));
+		}
+	}, [effectiveConfigDevice?.configuration, deviceProfile]);
+
+	useEffect(() => {
+		const configuration = effectiveConfigDevice?.configuration || {};
+		const cpInterval = Number(getConfigValue(configuration, ["aeration_timer", "interval"]));
+		const cpDuration = Number(getConfigValue(configuration, ["aeration_timer", "duration"]));
+		const smartInterval = Number(configuration.read_interval);
+		const mmcgsSample = Number(configuration.sample_pump_time);
+
+		if (Number.isFinite(cpInterval) && cpInterval > 0) {
+			setCp500AutoIntervalMinutes(Math.max(1, Math.round(cpInterval / 60000)));
+		}
+		if (Number.isFinite(cpDuration) && cpDuration > 0) {
+			setCp500AutoDurationMinutes(Math.max(1, Math.round(cpDuration / 60000)));
+		}
+		if (Number.isFinite(smartInterval) && smartInterval > 0) {
+			setSmartReadIntervalMinutes(Math.max(1, Math.round(smartInterval / 60000)));
+		}
+		if (Number.isFinite(mmcgsSample) && mmcgsSample > 0) {
+			setMmcgsSampleSeconds(Math.max(5, Math.round(mmcgsSample / 1000)));
+		}
+	}, [effectiveConfigDevice?.configuration]);
+
+	const durationSliderMarks = {
+		1: "1m",
+		10: "10m",
+		30: "30m",
+		60: "60m",
+	};
+
+	const cp500IntervalMarks = {
+		5: "5m",
+		15: "15m",
+		30: "30m",
+		60: "60m",
+	};
+
+	const cp500DurationMarks = {
+		1: "1m",
+		5: "5m",
+		10: "10m",
+		20: "20m",
+	};
+
+	const mmcgsSampleMarks = {
+		5: "5s",
+		30: "30s",
+		60: "60s",
+		120: "120s",
+		180: "180s",
+	};
+
+
 	// === 分开的数据表tab管理 ===
 	const [activeDataTableTab, setActiveDataTableTab] = useState<string>("all");
 
@@ -871,6 +1177,14 @@ export default function DeviceDetailPage() {
 										<Tag color={device.is_active === false ? 'red' : 'green'}>
 											{device.is_active === false ? '未激活' : '已激活'}
 										</Tag>
+										<Tag color={deviceProfile === "cp500-v3" ? "blue" : deviceProfile === "smart-compost" ? "green" : deviceProfile === "mmcgs" ? "purple" : "default"}>
+											{getProfileLabel(deviceProfile)}
+										</Tag>
+										{deviceProfile === "mmcgs" ? (
+											<Tag color="purple">
+												{getMmcgsPointIndex(String(device.code || "")) !== null ? `点位 P${getMmcgsPointIndex(String(device.code || ""))}` : "控制器"}
+											</Tag>
+										) : null}
 									</Space>
 									<Text type="secondary">通道: {channels.length}</Text>
 									{device.ip_address && (
@@ -942,6 +1256,48 @@ export default function DeviceDetailPage() {
 				</Card>
 			)}
 
+			{deviceProfile === "mmcgs" && mmcgsFamilyDevices.length > 0 && (
+				<Card
+					size="small"
+					title="MMCGS 快速切换"
+					style={{ marginBottom: 12, borderRadius: 16, background: "#fafcff" }}
+				>
+					<Space direction="vertical" size={10} style={{ width: "100%" }}>
+						<Text type="secondary">
+							当前系统：{mmcgsControllerCode}。配置统一在控制器维护，数据可按点位快速切换查看。
+						</Text>
+						<Space wrap size={8}>
+							{mmcgsControllerDevice ? (
+								<Button
+									type={mmcgsControllerDevice.device_id === deviceId ? "primary" : "default"}
+									style={{ borderRadius: 999 }}
+									onClick={() => router.push(`/devices/${mmcgsControllerDevice.device_id}`)}
+								>
+									控制器
+								</Button>
+							) : null}
+							{mmcgsPointDevices.map((pointDevice) => {
+								const pointIndex = getMmcgsPointIndex(String(pointDevice.code || ""));
+								const isCurrent = pointDevice.device_id === deviceId;
+								return (
+									<Button
+										key={pointDevice.device_id}
+										type={isCurrent ? "primary" : "default"}
+										style={{ borderRadius: 999 }}
+										onClick={() => router.push(`/devices/${pointDevice.device_id}`)}
+									>
+										{`P${pointIndex ?? "?"}`}
+									</Button>
+								);
+							})}
+						</Space>
+						<Text type="secondary" style={{ fontSize: 12 }}>
+							当前页面：{getMmcgsPointIndex(String(device.code || "")) ? `点位 P${getMmcgsPointIndex(String(device.code || ""))}` : "控制器"}
+						</Text>
+					</Space>
+				</Card>
+			)}
+
 			<Tabs
 				defaultActiveKey="telemetry"
 				items={[
@@ -963,7 +1319,7 @@ export default function DeviceDetailPage() {
 										const isSelected = g.key === activeMetric;
 
 										return (
-											<Col xs={24} sm={12} md={6} key={g.key}>
+											<Col xs={24} sm={12} md={8} lg={6} xl={6} xxl={4} key={g.key}>
 												<Card
 													size="small"
 													hoverable
@@ -1252,7 +1608,7 @@ export default function DeviceDetailPage() {
 														children: (
 															<Table
 																size="small"
-																rowKey={(r: any) => `${r.code}-${r.ts}-${r.value}`}
+																rowKey={(r: any) => `${r.device_id || deviceId}-${r.code}-${r.ts}-${r.value}`}
 																dataSource={pointsDesc as any}
 																pagination={{
 																	pageSize: 50,
@@ -1313,7 +1669,7 @@ export default function DeviceDetailPage() {
 															children: (
 															<Table
 																size="small"
-																rowKey={(r: any) => `${r.code}-${r.ts}-${r.value}`}
+																rowKey={(r: any) => `${r.device_id || deviceId}-${r.code}-${r.ts}-${r.value}`}
 																dataSource={pointsDesc.filter((p: any) => p.code === code) as any}
 																pagination={{
 																	pageSize: 50,
@@ -1401,7 +1757,481 @@ export default function DeviceDetailPage() {
 						label: "Control",
 						children: (
 							<Row gutter={[12, 12]}>
+								{deviceProfile === "mmcgs" && (
+									<Col xs={24}>
+										<Card
+											title="MMCGS 系统总览"
+											style={{ borderRadius: 20, background: "linear-gradient(135deg, #f7fbff 0%, #f9f7ff 100%)" }}
+										>
+											<Space direction="vertical" size={14} style={{ width: "100%" }}>
+												<Row gutter={[12, 12]}>
+													<Col xs={24} lg={8}>
+														<Card
+															size="small"
+															title="控制器"
+															style={{ borderRadius: 16 }}
+															extra={
+																mmcgsControllerDevice && mmcgsControllerDevice.device_id !== deviceId ? (
+																	<Button size="small" onClick={() => router.push(`/devices/${mmcgsControllerDevice.device_id}`)}>
+																		前往控制器
+																	</Button>
+																) : null
+															}
+														>
+															<Space direction="vertical" size={8} style={{ width: "100%" }}>
+																<Text strong>{mmcgsControllerDevice?.name || mmcgsControllerCode}</Text>
+																<Text type="secondary">设备编码：{mmcgsControllerCode}</Text>
+																<Text type="secondary">点位数量：{mmcgsPointDevices.length}</Text>
+																<Text type="secondary">采样泵时长：{mmcgsControllerDevice?.configuration?.sample_pump_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.sample_pump_time) / 1000)} 秒` : "-"}</Text>
+																<Text type="secondary">清洗泵时长：{mmcgsControllerDevice?.configuration?.purge_pump_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.purge_pump_time) / 1000)} 秒` : "-"}</Text>
+																<Text type="secondary">轮询周期：{mmcgsControllerDevice?.configuration?.read_interval ? `${Math.round(Number(mmcgsControllerDevice.configuration.read_interval) / 1000)} 秒` : "-"}</Text>
+															</Space>
+														</Card>
+													</Col>
+													<Col xs={24} lg={16}>
+														<Row gutter={[12, 12]}>
+															{mmcgsPointDevices.map((pointDevice) => {
+																const pointIndex = getMmcgsPointIndex(String(pointDevice.code || ""));
+																return (
+																	<Col xs={24} sm={12} xl={8} key={pointDevice.device_id}>
+																		<Card
+																			size="small"
+																			title={`点位 ${pointIndex ?? "-"}`}
+																			extra={
+																				pointDevice.device_id === deviceId ? (
+																					<Tag color="blue">当前</Tag>
+																				) : (
+																					<Button size="small" onClick={() => router.push(`/devices/${pointDevice.device_id}`)}>
+																						查看
+																					</Button>
+																				)
+																			}
+																			style={{ borderRadius: 16, height: "100%" }}
+																		>
+																			<Space direction="vertical" size={6} style={{ width: "100%" }}>
+																				<Text strong>{pointDevice.name || pointDevice.code}</Text>
+																				<div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+																					<Text type="secondary">CO2</Text>
+																					<Text>{getDeviceChannelValue(pointDevice, ["CO2"])}</Text>
+																				</div>
+																				<div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+																					<Text type="secondary">O2</Text>
+																					<Text>{getDeviceChannelValue(pointDevice, ["O2"])}</Text>
+																				</div>
+																				<div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+																					<Text type="secondary">温度</Text>
+																					<Text>{getDeviceChannelValue(pointDevice, ["AirTemp", "Temp"])}</Text>
+																				</div>
+																				<div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+																					<Text type="secondary">湿度</Text>
+																					<Text>{getDeviceChannelValue(pointDevice, ["AirHumidity", "Humidity"])}</Text>
+																				</div>
+																			</Space>
+																		</Card>
+																	</Col>
+																);
+															})}
+														</Row>
+													</Col>
+												</Row>
+												<Text type="secondary">
+													这一组点位属于同一个 MMCGS 系统。建议后续把它按“1 个控制器 + 多个采样点”管理，而不是当成多个独立设备分别配置。
+												</Text>
+												{effectiveConfigDevice && effectiveConfigDevice.device_id !== deviceId ? (
+													<Text type="secondary">
+														当前页面是点位设备，配置参数统一读取控制器 {effectiveConfigDevice.code}。
+													</Text>
+												) : null}
+											</Space>
+										</Card>
+									</Col>
+								)}
+
 								<Col xs={24}>
+									<Card
+										title="设备控制"
+										style={{
+											borderRadius: 20,
+											overflow: "hidden",
+											background: "linear-gradient(135deg, #f7fbff 0%, #f7f8f2 100%)",
+										}}
+									>
+										<Row gutter={[16, 16]}>
+											<Col xs={24} lg={15}>
+												<Space direction="vertical" size={10} style={{ width: "100%" }}>
+													<Space wrap>
+														<Tag color="blue" style={{ borderRadius: 999, paddingInline: 10 }}>
+															{getProfileLabel(deviceProfile)}
+														</Tag>
+														<Tag color={device.is_active === false ? "red" : "green"} style={{ borderRadius: 999, paddingInline: 10 }}>
+															{device.is_active === false ? "未启用" : "可控制"}
+														</Tag>
+														{device.last_seen_at ? (
+															<Tag style={{ borderRadius: 999, paddingInline: 10 }}>最近上线: {device.last_seen_at}</Tag>
+														) : null}
+													</Space>
+													<Text strong style={{ fontSize: 18 }}>
+														面向设备操作的详情页控制
+													</Text>
+													<Text type="secondary" style={{ fontSize: 14 }}>
+														{getProfileDescription(deviceProfile)}
+													</Text>
+													<Text type="secondary" style={{ fontSize: 13 }}>
+														这里优先提供研究人员日常会用到的操作。原始 JSON、模板编辑和完整配置在下方“开发者工具”里。
+													</Text>
+												</Space>
+											</Col>
+											<Col xs={24} lg={9}>
+												<Card
+													size="small"
+													title="当前状态"
+													style={{ borderRadius: 16, background: "#ffffffcc" }}
+													bodyStyle={{ paddingBlock: 14 }}
+												>
+													<Space direction="vertical" size={8} style={{ width: "100%" }}>
+														{deviceProfile === "cp500-v3" && (
+															<Space wrap size={8}>
+																{["Heater", "Pump", "Aeration", "EmergencyState"].map((code) => {
+																	const item = controlStatusMap.get(code);
+																	if (!item) return null;
+																	return (
+																		<Tag
+																			key={code}
+																			style={{
+																				borderRadius: 999,
+																				padding: "6px 12px",
+																				background: item.tone,
+																				color: "#fff",
+																				border: "none",
+																				fontSize: 12,
+																			}}
+																		>
+																			{item.label}: {item.value}
+																		</Tag>
+																	);
+																})}
+															</Space>
+														)}
+														{deviceProfile === "smart-compost" && (
+															<Space wrap size={8}>
+																{["CO2", "O2", "AirTemp", "AirHumidity"].map((code) => {
+																	const item = controlStatusMap.get(code);
+																	if (!item) return null;
+																	return (
+																		<Tag key={code} style={{ borderRadius: 999, padding: "6px 12px", background: "#eef4ff", borderColor: "#d6e4ff" }}>
+																			{item.label}: {item.value}
+																		</Tag>
+																	);
+																})}
+															</Space>
+														)}
+														{controlStatusChannels.length ? (
+															controlStatusChannels.map((channel) => {
+																const item = controlStatusMap.get(channel.code);
+																return (
+																	<div
+																		key={channel.channel_id || channel.code}
+																		style={{
+																			display: "flex",
+																			justifyContent: "space-between",
+																			gap: 12,
+																			padding: "8px 10px",
+																			borderRadius: 12,
+																			background: "#f7f8fa",
+																		}}
+																	>
+																		<Text>{getChannelDisplayName(channel)}</Text>
+																		<Text strong>{item?.value || "-"}</Text>
+																	</div>
+																);
+															})
+														) : (
+															<Text type="secondary">暂无状态数据</Text>
+														)}
+													</Space>
+												</Card>
+											</Col>
+										</Row>
+									</Card>
+								</Col>
+
+								<Col xs={24} lg={14}>
+									<Card title="常用操作" style={{ borderRadius: 20 }}>
+										<Space direction="vertical" size={16} style={{ width: "100%" }}>
+											{deviceProfile === "cp500-v3" && (
+												<>
+													<Card size="small" title="手动控制" style={{ borderRadius: 16, background: "#fafcff" }}>
+														<Space wrap size={10}>
+															<Button type="primary" style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("heater", "on")}>开启加热</Button>
+															<Button style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("heater", "off")}>关闭加热</Button>
+															<Button type="primary" style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("pump", "on")}>开启循环泵</Button>
+															<Button style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("pump", "off")}>关闭循环泵</Button>
+														</Space>
+													</Card>
+													<Card size="small" title="曝气任务" style={{ borderRadius: 16, background: "#fffdf7" }}>
+														<Space direction="vertical" size={10} style={{ width: "100%" }}>
+															<Text type="secondary">拖动滑块设置本轮曝气时长，然后一键执行。</Text>
+															<div>
+																<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+																	<Text>曝气时长</Text>
+																	<Text strong>
+																		当前设定 {quickDurationMinutes} 分钟
+																		{controlStatusMap.get("Aeration") ? ` · 状态 ${controlStatusMap.get("Aeration")?.value}` : ""}
+																	</Text>
+																</div>
+																<Slider min={1} max={60} marks={durationSliderMarks} value={quickDurationMinutes} onChange={setQuickDurationMinutes} tooltip={{ open: false }} />
+															</div>
+															<Space wrap align="center">
+																<Button
+																	type="primary"
+																	style={{ minWidth: 132, height: 40, borderRadius: 12 }}
+																	onClick={() => sendQuickToggle("aeration", "on", quickDurationMinutes * 60 * 1000)}
+																>
+																	开始定时曝气
+																</Button>
+																<Button style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("aeration", "off")}>
+																	停止曝气
+																</Button>
+															</Space>
+														</Space>
+													</Card>
+													<Card size="small" title="自动模式" style={{ borderRadius: 16, background: "#f7fbf7" }}>
+														<Space direction="vertical" size={12} style={{ width: "100%" }}>
+															<div>
+																<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+																	<Text>曝气间隔</Text>
+																	<Text strong>当前配置 {cp500AutoIntervalMinutes} 分钟</Text>
+																</div>
+																<Slider min={5} max={60} step={5} marks={cp500IntervalMarks} value={cp500AutoIntervalMinutes} onChange={setCp500AutoIntervalMinutes} tooltip={{ open: false }} />
+															</div>
+															<div>
+																<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+																	<Text>单次曝气时长</Text>
+																	<Text strong>当前配置 {cp500AutoDurationMinutes} 分钟</Text>
+																</div>
+																<Slider min={1} max={20} marks={cp500DurationMarks} value={cp500AutoDurationMinutes} onChange={setCp500AutoDurationMinutes} tooltip={{ open: false }} />
+															</div>
+															<Space wrap size={10}>
+																<Button
+																	type="primary"
+																	style={{ minWidth: 152, height: 40, borderRadius: 12 }}
+																	onClick={() =>
+																		sendQuickConfigUpdate(
+																			{
+																				aeration_timer: {
+																					enabled: true,
+																					interval: cp500AutoIntervalMinutes * 60 * 1000,
+																					duration: cp500AutoDurationMinutes * 60 * 1000,
+																				},
+																			},
+																			"已更新自动曝气参数"
+																		)
+																	}
+																>
+																	保存自动曝气
+																</Button>
+															<Button style={{ minWidth: 132, height: 40, borderRadius: 12 }} onClick={() => sendQuickConfigUpdate({ aeration_timer: { enabled: true } }, "已启用定时曝气")}>
+																启用自动曝气
+															</Button>
+															<Button style={{ minWidth: 132, height: 40, borderRadius: 12 }} onClick={() => sendQuickConfigUpdate({ aeration_timer: { enabled: false } }, "已停用定时曝气")}>
+																停用自动曝气
+															</Button>
+															</Space>
+														</Space>
+													</Card>
+													<Card size="small" title="安全控制" style={{ borderRadius: 16, background: "#fff6f6", borderColor: "#ffd6d6" }}>
+														<Space direction="vertical" size={10} style={{ width: "100%" }}>
+															<Text type="secondary">急停会立即阻止手动控制，适合异常情况下快速切断操作。</Text>
+															<Space wrap size={10}>
+																<Button
+																	danger
+																	type="primary"
+																	style={{ minWidth: 132, height: 42, borderRadius: 12 }}
+																	onClick={() => sendQuickCommands([{ command: "emergency", action: "on" }], "已发送急停命令")}
+																>
+																	立即急停
+																</Button>
+																<Button
+																	style={{ minWidth: 132, height: 42, borderRadius: 12 }}
+																	onClick={() => sendQuickCommands([{ command: "emergency", action: "off" }], "已发送解除急停命令")}
+																>
+																	解除急停
+																</Button>
+															</Space>
+														</Space>
+													</Card>
+												</>
+											)}
+
+											{deviceProfile === "smart-compost" && (
+												<>
+													<Card size="small" title="气路控制" style={{ borderRadius: 16, background: "#fafcff" }}>
+														<Space direction="vertical" size={10} style={{ width: "100%" }}>
+															<Text type="secondary">按分钟设置本轮动作时长，适合实验过程中的临时干预。</Text>
+															<div>
+																<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+																	<Text>动作时长</Text>
+																	<Text strong>当前设定 {quickDurationMinutes} 分钟</Text>
+																</div>
+																<Slider min={1} max={60} marks={durationSliderMarks} value={quickDurationMinutes} onChange={setQuickDurationMinutes} tooltip={{ open: false }} />
+															</div>
+															<Space wrap align="center">
+																<Button
+																	type="primary"
+																	style={{ minWidth: 118, height: 40, borderRadius: 12 }}
+																	onClick={() => sendQuickToggle("aeration", "on", quickDurationMinutes * 60 * 1000)}
+																>
+																	曝气运行
+																</Button>
+																<Button
+																	style={{ minWidth: 118, height: 40, borderRadius: 12 }}
+																	onClick={() => sendQuickToggle("exhaust", "on", quickDurationMinutes * 60 * 1000)}
+																>
+																	排气运行
+																</Button>
+															</Space>
+															<div>
+																<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+																	<Text>采集周期</Text>
+																	<Text strong>当前配置 {smartReadIntervalMinutes} 分钟</Text>
+																</div>
+																<Slider min={1} max={60} marks={durationSliderMarks} value={smartReadIntervalMinutes} onChange={setSmartReadIntervalMinutes} tooltip={{ open: false }} />
+															</div>
+															<Space wrap size={10}>
+																<Button
+																	type="primary"
+																	style={{ minWidth: 132, height: 40, borderRadius: 12 }}
+																	onClick={() =>
+																		sendQuickConfigUpdate(
+																			{ read_interval: smartReadIntervalMinutes * 60 * 1000 },
+																			"已更新采集周期"
+																		)
+																	}
+																>
+																	保存采集周期
+																</Button>
+																<Button style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("aeration", "off")}>停止曝气</Button>
+																<Button style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickToggle("exhaust", "off")}>停止排气</Button>
+																<Button danger style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}>
+																	重启设备
+																</Button>
+															</Space>
+														</Space>
+													</Card>
+												</>
+											)}
+
+											{deviceProfile === "mmcgs" && (
+												<>
+													<Card size="small" title="采样任务" style={{ borderRadius: 16, background: "#fafcff" }}>
+														<Space direction="vertical" size={10} style={{ width: "100%" }}>
+															<Text type="secondary">点击采样点后，会自动运行对应时长。</Text>
+															<div>
+																<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+																	<Text>采样时长</Text>
+																	<Text strong>当前设定 {mmcgsSampleSeconds} 秒</Text>
+																</div>
+																<Slider min={5} max={180} step={5} marks={mmcgsSampleMarks} value={mmcgsSampleSeconds} onChange={setMmcgsSampleSeconds} tooltip={{ open: false }} />
+															</div>
+															<Space wrap size={10}>
+																{Array.from({ length: 6 }, (_, index) => (
+																	<Button
+																		key={`point-${index + 1}`}
+																		style={{ minWidth: 110, height: 40, borderRadius: 12 }}
+																		onClick={() => sendQuickToggle(`point${index + 1}`, "on", mmcgsSampleSeconds * 1000)}
+																	>
+																		采样点 {index + 1}
+																	</Button>
+																))}
+																<Button
+																	type="primary"
+																	style={{ minWidth: 118, height: 40, borderRadius: 12 }}
+																	onClick={() => sendQuickToggle("purge", "on", mmcgsSampleSeconds * 1000)}
+																>
+																	清洗泵
+																</Button>
+															</Space>
+															<Button danger style={{ width: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}>
+																重启设备
+															</Button>
+														</Space>
+													</Card>
+												</>
+											)}
+
+											{deviceProfile === "generic" && (
+												<>
+													<Card size="small" title="基础操作" style={{ borderRadius: 16, background: "#fafcff" }}>
+														<Space direction="vertical" size={10} style={{ width: "100%" }}>
+															<Text type="secondary">
+																当前设备还没有专属控制面板，建议先通过“编辑配置”或下方开发者工具进行操作。
+															</Text>
+															<Space wrap>
+																<Button type="primary" style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={openConfigEdit}>编辑配置</Button>
+																<Button danger style={{ minWidth: 118, height: 40, borderRadius: 12 }} onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}>
+															重启设备
+																</Button>
+															</Space>
+														</Space>
+													</Card>
+												</>
+											)}
+										</Space>
+									</Card>
+								</Col>
+
+								<Col xs={24} lg={10}>
+									<Card
+										title="常用参数"
+										style={{ borderRadius: 20 }}
+										extra={
+											<Button type="primary" onClick={openConfigEdit}>
+												编辑配置
+											</Button>
+										}
+									>
+										<Space direction="vertical" size={10} style={{ width: "100%" }}>
+											{profileConfigSummary.length ? (
+												profileConfigSummary.map((item) => (
+													<div
+														key={item.label}
+														style={{
+															display: "flex",
+															justifyContent: "space-between",
+															gap: 12,
+															padding: "10px 12px",
+															borderRadius: 12,
+															background: "#f7f8fa",
+														}}
+													>
+														<Text>{item.label}</Text>
+														<Text strong>{item.value || "-"}</Text>
+													</div>
+												))
+											) : (
+												<Text type="secondary">暂无可展示的参数</Text>
+											)}
+											{deviceProfile === "mmcgs" && effectiveConfigDevice ? (
+												<Text type="secondary">
+													当前参数来源：{effectiveConfigDevice.code}
+												</Text>
+											) : null}
+											<Text type="secondary">
+												这里只展示适合研究人员理解的摘要，完整配置对象请展开开发者工具。
+											</Text>
+										</Space>
+									</Card>
+								</Col>
+
+								<Col xs={24}>
+									<Collapse
+										items={[
+											{
+												key: "developer-tools",
+												label: "开发者工具",
+												children: (
+													<Row gutter={[12, 12]}>
+														<Col xs={24}>
 									<Card
 										title="设备配置管理"
 										extra={
@@ -1630,6 +2460,12 @@ export default function DeviceDetailPage() {
 											loading={commandsQ.isLoading}
 										/>
 									</Card>
+														</Col>
+													</Row>
+												),
+											},
+										]}
+									/>
 								</Col>
 							</Row>
 						),
