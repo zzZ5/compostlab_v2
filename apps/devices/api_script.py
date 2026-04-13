@@ -18,7 +18,11 @@ from apps.accounts.models import AuditLog
 from apps.accounts.utils import log_audit
 from apps.api.mixins import BasicAuthMixin, JsonBodyMixin
 from apps.devices.models import Device, ScriptExecution, ScriptTemplate
-from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
+from apps.devices.services.script_executor import (
+    ScheduleMonitor,
+    ScriptExecutor,
+    ThresholdMonitor,
+)
 from apps.permissions.config import ActionType, ResourceType
 from apps.permissions.mixins import ReadOrWritePermissionMixin, ResourcePermissionMixin
 
@@ -425,6 +429,27 @@ class ScriptExecutionListView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonBo
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class ScriptExecutionGlobalListView(BasicAuthMixin, ResourcePermissionMixin, View):
+    resource_type = ResourceType.SCRIPT_EXECUTE
+    action_type = ActionType.READ
+
+    def get(self, request):
+        qs = ScriptExecution.objects.select_related("script", "device").order_by("-created_at")
+
+        trigger_reason = request.GET.get("trigger_reason")
+        if trigger_reason:
+            qs = qs.filter(trigger_reason=trigger_reason)
+
+        status = request.GET.get("status")
+        if status:
+            qs = qs.filter(status=status)
+
+        limit = max(1, min(int(request.GET.get("limit", "50")), 200))
+        items = [_execution_to_dict(item) for item in qs[:limit]]
+        return JsonResponse({"count": len(items), "data": items}, status=200)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class ScriptExecutionDetailView(BasicAuthMixin, ResourcePermissionMixin, View):
     resource_type = ResourceType.SCRIPT_EXECUTE
     action_type = ActionType.READ
@@ -444,4 +469,14 @@ class AutoControlView(BasicAuthMixin, ResourcePermissionMixin, View):
 
     def post(self, request):
         monitor = ThresholdMonitor()
+        return JsonResponse(monitor.check_and_execute_all(), status=200)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ScheduleControlView(BasicAuthMixin, ResourcePermissionMixin, View):
+    resource_type = ResourceType.SCRIPT_EXECUTE
+    action_type = ActionType.EXECUTE
+
+    def post(self, request):
+        monitor = ScheduleMonitor()
         return JsonResponse(monitor.check_and_execute_all(), status=200)

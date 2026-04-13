@@ -16,11 +16,120 @@ from apps.telemetry.models import TelemetryKV
 logger = logging.getLogger(__name__)
 
 
+def _cron_field_matches(field: str, value: int) -> bool:
+    field = (field or "").strip()
+    if not field or field == "*":
+        return True
+
+    for part in field.split(","):
+        token = part.strip()
+        if not token:
+            continue
+
+        if token == "*":
+            return True
+
+        if "/" in token:
+            base, step_text = token.split("/", 1)
+            try:
+                step = int(step_text)
+            except ValueError:
+                continue
+            if step <= 0:
+                continue
+            if base in ("", "*"):
+                if value % step == 0:
+                    return True
+                continue
+            if "-" in base:
+                try:
+                    start_text, end_text = base.split("-", 1)
+                    start = int(start_text)
+                    end = int(end_text)
+                except ValueError:
+                    continue
+                if start <= value <= end and (value - start) % step == 0:
+                    return True
+                continue
+            try:
+                start = int(base)
+            except ValueError:
+                continue
+            if value >= start and (value - start) % step == 0:
+                return True
+            continue
+
+        if "-" in token:
+            try:
+                start_text, end_text = token.split("-", 1)
+                start = int(start_text)
+                end = int(end_text)
+            except ValueError:
+                continue
+            if start <= value <= end:
+                return True
+            continue
+
+        try:
+            if int(token) == value:
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
+def _cron_matches_now(expr: str, dt: datetime) -> bool:
+    parts = [part.strip() for part in str(expr or "").split() if part.strip()]
+    if len(parts) == 5:
+        minute, hour, day, month, weekday = parts
+        return (
+            _cron_field_matches(minute, dt.minute)
+            and _cron_field_matches(hour, dt.hour)
+            and _cron_field_matches(day, dt.day)
+            and _cron_field_matches(month, dt.month)
+            and _cron_field_matches(weekday, (dt.weekday() + 1) % 7)
+        )
+
+    if len(parts) == 6:
+        second, minute, hour, day, month, weekday = parts
+        return (
+            _cron_field_matches(second, dt.second)
+            and _cron_field_matches(minute, dt.minute)
+            and _cron_field_matches(hour, dt.hour)
+            and _cron_field_matches(day, dt.day)
+            and _cron_field_matches(month, dt.month)
+            and _cron_field_matches(weekday, (dt.weekday() + 1) % 7)
+        )
+
+    return False
+
+
 class ScriptExecutor:
     """脚本执行引擎"""
 
     def __init__(self):
         self.result_cache = {}
+
+    def _resolve_source_device(self, script: ScriptTemplate, fallback_device: Device) -> Device:
+        source_device_id = None
+        if isinstance(script.threshold_config, dict):
+            source_device_id = script.threshold_config.get("source_device_id")
+        if not source_device_id and isinstance(script.schedule_config, dict):
+            source_device_id = script.schedule_config.get("source_device_id")
+
+        if isinstance(source_device_id, int):
+            return Device.objects.filter(id=source_device_id, is_active=True).first() or fallback_device
+        return fallback_device
+
+    def _resolve_target_device(self, script: ScriptTemplate, fallback_device: Device) -> Device:
+        target_device_id = None
+        if isinstance(script.command_template, dict):
+            target_device_id = script.command_template.get("target_device_id")
+
+        if isinstance(target_device_id, int):
+            return Device.objects.filter(id=target_device_id, is_active=True).first() or fallback_device
+        return fallback_device
 
     def execute_script(
         self,
@@ -33,10 +142,13 @@ class ScriptExecutor:
         """
         执行脚本并返回执行记录
         """
+        source_device = self._resolve_source_device(script, device)
+        target_device = self._resolve_target_device(script, device)
+
         # 创建执行记录
         execution = ScriptExecution.objects.create(
             script=script,
-            device=device,
+            device=target_device,
             status=ScriptExecution.Status.RUNNING,
             trigger_reason=trigger_reason,
             scheduled_at=scheduled_at,
@@ -47,24 +159,32 @@ class ScriptExecutor:
         try:
             # 根据脚本类型选择执行方式
             if script.script_type == ScriptTemplate.ScriptType.THRESHOLD:
-                commands = self._execute_threshold_script(script, device)
+                commands = self._execute_threshold_script(script, source_device)
             elif script.script_type == ScriptTemplate.ScriptType.SCHEDULE:
                 commands = self._execute_schedule_script(script)
             elif script.script_type == ScriptTemplate.ScriptType.PYTHON:
-                commands = self._execute_python_script(script, device)
+                commands = self._execute_python_script(script, source_device)
             else:
                 # 混合模式：先执行阈值检查，满足条件则执行
-                commands = self._execute_hybrid_script(script, device)
+                commands = self._execute_hybrid_script(script, source_device)
 
             if commands:
                 # 下发命令到设备
-                success, result = self._send_commands(device, commands)
+                success, result = self._send_commands(target_device, commands)
                 execution.commands = commands
-                execution.result = result
+                execution.result = {
+                    **result,
+                    "source_device": source_device.code,
+                    "target_device": target_device.code,
+                }
                 execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
             else:
                 execution.status = ScriptExecution.Status.SKIPPED
-                execution.result = {"message": "No commands generated"}
+                execution.result = {
+                    "message": "No commands generated",
+                    "source_device": source_device.code,
+                    "target_device": target_device.code,
+                }
 
             execution.completed_at = timezone.now()
             execution.save()
@@ -88,6 +208,7 @@ class ScriptExecutor:
         """
         config = script.threshold_config
         metric = config.get("metric")
+        channel_code = config.get("channel_code")
         operator = config.get("operator")  # >, >=, <, <=, ==, !=
         threshold_value = config.get("value")
 
@@ -96,7 +217,7 @@ class ScriptExecutor:
             return []
 
         # 获取设备的最新数据
-        latest_value = self._get_latest_metric_value(device, metric)
+        latest_value = self._get_latest_metric_value(device, metric, channel_code)
 
         if latest_value is None:
             logger.warning(f"No data found for metric {metric} on device {device.code}")
@@ -149,7 +270,8 @@ class ScriptExecutor:
                     "False": False,
                     "None": None,
                 },
-                "get_latest_value": lambda metric: self._get_latest_metric_value(device, metric),
+                "get_latest_value": lambda metric, channel_code=None: self._get_latest_metric_value(device, metric, channel_code),
+                "get_latest_channel_value": lambda channel_code: self._get_latest_channel_value(device, channel_code),
                 "device": device,
                 "datetime": datetime,
                 "timedelta": timedelta,
@@ -195,13 +317,15 @@ class ScriptExecutor:
             return []
 
     def _get_latest_metric_value(
-        self, device: Device, metric: str
+        self, device: Device, metric: str, channel_code: Optional[str] = None
     ) -> Optional[float]:
         """
-        获取设备的指定指标最新值
+        ???????????????????
         """
         try:
-            # 根据metric类型查找对应的通道代码
+            if channel_code:
+                return self._get_latest_channel_value(device, channel_code)
+
             channel = device.channels.filter(
                 metric__iexact=metric
             ).first()
@@ -220,6 +344,31 @@ class ScriptExecutor:
 
         except Exception as e:
             logger.error(f"Failed to get latest value: {e}")
+            return None
+
+    def _get_latest_channel_value(
+        self, device: Device, channel_code: str
+    ) -> Optional[float]:
+        try:
+            code = str(channel_code or "").strip()
+            if not code:
+                return None
+
+            channel = device.channels.filter(code__iexact=code).first()
+            if not channel:
+                return None
+
+            latest = TelemetryKV.objects.filter(
+                device=device,
+                code=channel.code
+            ).order_by("-ts").first()
+
+            if latest:
+                return float(latest.value)
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to get latest channel value: {e}")
             return None
 
     def _check_threshold(
@@ -287,7 +436,10 @@ class ThresholdMonitor:
         # 获取所有启用且未运行的阈值脚本
         scripts = ScriptTemplate.objects.filter(
             is_active=True,
-            script_type=ScriptTemplate.ScriptType.THRESHOLD
+            script_type__in=[
+                ScriptTemplate.ScriptType.THRESHOLD,
+                ScriptTemplate.ScriptType.HYBRID,
+            ]
         ).prefetch_related('devices')
 
         results = {
@@ -337,6 +489,88 @@ class ThresholdMonitor:
 
                 except Exception as e:
                     logger.error(f"Failed to execute script {script.name} on device {device.code}: {e}")
+                    results["failed"] += 1
+
+        return results
+
+
+class ScheduleMonitor:
+    """定时控制检查器，按 cron 表达式触发 schedule / hybrid 脚本。"""
+
+    def __init__(self):
+        self.executor = ScriptExecutor()
+
+    def check_and_execute_all(self, now: Optional[datetime] = None) -> Dict[str, Any]:
+        check_time = now or timezone.localtime()
+        scheduled_at = check_time.replace(second=0, microsecond=0)
+
+        scripts = ScriptTemplate.objects.filter(
+            is_active=True,
+            script_type__in=[
+                ScriptTemplate.ScriptType.SCHEDULE,
+                ScriptTemplate.ScriptType.HYBRID,
+            ],
+        ).prefetch_related("devices")
+
+        results = {
+            "checked": 0,
+            "matched": 0,
+            "executed": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+
+        for script in scripts:
+            results["checked"] += 1
+            schedule_config = script.schedule_config or {}
+            cron = str(schedule_config.get("cron", "")).strip()
+            if not cron or not _cron_matches_now(cron, check_time):
+                continue
+
+            results["matched"] += 1
+
+            already_executed = ScriptExecution.objects.filter(
+                script=script,
+                trigger_reason="schedule_check",
+                scheduled_at=scheduled_at,
+            ).exists()
+            if already_executed:
+                results["skipped"] += 1
+                continue
+
+            running = ScriptExecution.objects.filter(
+                script=script,
+                status=ScriptExecution.Status.RUNNING,
+                created_at__gte=timezone.now() - timedelta(minutes=5),
+            ).exists()
+            if running:
+                results["skipped"] += 1
+                continue
+
+            devices = script.devices.filter(is_active=True)
+            if not devices.exists() and script.run:
+                devices = Device.objects.filter(runwindow__run=script.run, is_active=True).distinct()
+
+            if not devices.exists():
+                results["skipped"] += 1
+                continue
+
+            for device in devices:
+                try:
+                    execution = self.executor.execute_script(
+                        script,
+                        device,
+                        trigger_reason="schedule_check",
+                        scheduled_at=scheduled_at,
+                    )
+                    if execution.status == ScriptExecution.Status.SUCCESS:
+                        results["executed"] += 1
+                    elif execution.status == ScriptExecution.Status.SKIPPED:
+                        results["skipped"] += 1
+                    else:
+                        results["failed"] += 1
+                except Exception as exc:
+                    logger.error(f"Failed to execute scheduled script {script.name} on device {device.code}: {exc}")
                     results["failed"] += 1
 
         return results

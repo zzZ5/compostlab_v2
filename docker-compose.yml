@@ -57,6 +57,22 @@ services:
     command: python manage.py mqtt_register_worker
     restart: unless-stopped
 
+  auto_control_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: compostlab_auto_control_worker
+    env_file:
+      - .env.backend
+    environment:
+      AUTO_CONTROL_INTERVAL_SECONDS: 30
+      AUTO_CONTROL_ENABLE_THRESHOLDS: 1
+      AUTO_CONTROL_ENABLE_SCHEDULES: 1
+    depends_on:
+      - backend
+    command: python manage.py auto_control_worker
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

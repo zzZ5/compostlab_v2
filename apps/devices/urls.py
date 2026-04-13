@@ -187,6 +187,11 @@ urlpatterns = [
         ),
         name="script_execution_list_create",
     ),
+    path(
+        "script-executions",
+        script_views.ScriptExecutionGlobalListView.as_view(),
+        name="script_execution_global_list",
+    ),
     # GET /api/v2/script-executions/<execution_id>
     path(
         "script-executions/<int:execution_id>",
@@ -198,6 +203,11 @@ urlpatterns = [
         "scripts/check-thresholds",
         script_views.AutoControlView.as_view(),
         name="auto_control_check",
+    ),
+    path(
+        "scripts/check-schedules",
+        script_views.ScheduleControlView.as_view(),
+        name="schedule_control_check",
     ),
     # -------- Device Registration --------
     # POST /api/v2/devices/register
