@@ -28,6 +28,7 @@ staticfiles/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+.next/
 
 # 前端环境变量
 frontend/.env.local

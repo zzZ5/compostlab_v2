@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
@@ -14,6 +14,7 @@ import {
 	Form,
 	Grid,
 	Input,
+	InputNumber,
 	Modal,
 	Row,
 	Select,
@@ -41,6 +42,7 @@ import { useDeleteChannel } from "@/features/channels/mutations";
 import { useUpdateDevice } from "@/features/devices/mutations";
 import { useDeleteDevice } from "@/features/devices/mutations";
 import { useSendDeviceCommand } from "@/features/devices/mutations";
+import { deviceKeys } from "@/features/devices/keys";
 import {
 	useControlTemplates,
 	useCreateControlTemplate,
@@ -105,6 +107,55 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function getRecordValue(record: unknown, key: string): unknown {
 	return asRecord(record)?.[key];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (Array.isArray(a) && Array.isArray(b)) {
+		if (a.length !== b.length) return false;
+		return a.every((item, index) => deepEqual(item, b[index]));
+	}
+	if (isPlainObject(a) && isPlainObject(b)) {
+		const aKeys = Object.keys(a);
+		const bKeys = Object.keys(b);
+		if (aKeys.length !== bKeys.length) return false;
+		return aKeys.every((key) => deepEqual(a[key], b[key]));
+	}
+	return false;
+}
+
+function diffObject(current: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
+	const diff: Record<string, unknown> = {};
+	const keys = new Set([...Object.keys(current), ...Object.keys(next)]);
+
+	for (const key of keys) {
+		const currentValue = current[key];
+		const nextHasKey = Object.prototype.hasOwnProperty.call(next, key);
+		const nextValue = next[key];
+
+		if (!nextHasKey) {
+			diff[key] = null;
+			continue;
+		}
+
+		if (isPlainObject(currentValue) && isPlainObject(nextValue)) {
+			const nestedDiff = diffObject(currentValue, nextValue);
+			if (Object.keys(nestedDiff).length > 0) {
+				diff[key] = nestedDiff;
+			}
+			continue;
+		}
+
+		if (!deepEqual(currentValue, nextValue)) {
+			diff[key] = nextValue;
+		}
+	}
+
+	return diff;
 }
 
 function inferDeviceProfile(device: DeviceTreeItem | null | undefined, channels: Channel[]): DeviceProfile {
@@ -209,6 +260,117 @@ function getDeviceChannelValue(device: DeviceTreeItem | null | undefined, codes:
 	return "-";
 }
 
+function ControlStatCard({
+	label,
+	value,
+	tone = "#1677ff",
+	highlight = false,
+}: {
+	label: string;
+	value: string;
+	tone?: string;
+	highlight?: boolean;
+}) {
+	return (
+		<div
+			style={{
+				padding: "12px 14px",
+				borderRadius: 16,
+				background: highlight ? `${tone}12` : "#f7f8fa",
+				border: `1px solid ${highlight ? `${tone}33` : "#eef0f3"}`,
+			}}
+		>
+			<Text type="secondary" style={{ fontSize: 12 }}>
+				{label}
+			</Text>
+			<div style={{ marginTop: 6 }}>
+				<Text strong style={{ fontSize: 16, color: tone }}>
+					{value}
+				</Text>
+			</div>
+		</div>
+	);
+}
+
+function ResearchActionCard({
+	title,
+	description,
+	tint,
+	children,
+}: {
+	title: string;
+	description: string;
+	tint: string;
+	children: ReactNode;
+}) {
+	return (
+		<Card
+			size="small"
+			title={title}
+			style={{
+				borderRadius: 16,
+				background: `linear-gradient(180deg, ${tint} 0%, #ffffff 22%)`,
+				borderColor: "#eef1f4",
+				boxShadow: "none",
+			}}
+			bodyStyle={{ paddingTop: 12, paddingBottom: 14 }}
+		>
+			<Space direction="vertical" size={12} style={{ width: "100%" }}>
+				<Text type="secondary" style={{ fontSize: 13 }}>
+					{description}
+				</Text>
+				{children}
+			</Space>
+		</Card>
+	);
+}
+
+const compactButtonStyle = {
+	height: 38,
+	borderRadius: 12,
+	fontSize: 13,
+} as const;
+
+const compactPrimaryButtonStyle = {
+	...compactButtonStyle,
+	boxShadow: "none",
+} as const;
+
+function MinuteField({
+	label,
+	value,
+	onChange,
+	max,
+	marks,
+	step = 0.5,
+}: {
+	label: string;
+	value: number;
+	onChange: (value: number) => void;
+	max: number;
+	marks: Record<number, string>;
+	step?: number;
+}) {
+	return (
+		<Space direction="vertical" size={8} style={{ width: "100%" }}>
+			<div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+				<Text>{label}</Text>
+				<InputNumber
+					min={0}
+					max={max}
+					step={step}
+					precision={step < 1 ? 1 : 0}
+					value={value}
+					onChange={(next: number | null) => onChange(Number.isFinite(next) ? Number(next) : 0)}
+					addonAfter="分钟"
+					style={{ width: 140 }}
+				/>
+			</div>
+			<Slider min={0} max={max} step={step} marks={marks} value={value} onChange={onChange} tooltip={{ open: false }} />
+		</Space>
+	);
+}
+
 export default function DeviceDetailPage() {
 	const params = useParams<{ id: string }>();
 	const deviceId = Number(params.id);
@@ -283,11 +445,20 @@ export default function DeviceDetailPage() {
 		if (deviceProfile === "mmcgs") return mmcgsControllerDevice || device;
 		return device;
 	}, [deviceProfile, mmcgsControllerDevice, device]);
+	const commandTargetDevice = useMemo(() => {
+		if (deviceProfile === "mmcgs") return mmcgsControllerDevice || device;
+		return device;
+	}, [deviceProfile, mmcgsControllerDevice, device]);
 	const [quickDurationMinutes, setQuickDurationMinutes] = useState<number>(10);
 	const [cp500AutoIntervalMinutes, setCp500AutoIntervalMinutes] = useState<number>(10);
 	const [cp500AutoDurationMinutes, setCp500AutoDurationMinutes] = useState<number>(5);
 	const [smartReadIntervalMinutes, setSmartReadIntervalMinutes] = useState<number>(10);
 	const [mmcgsSampleSeconds, setMmcgsSampleSeconds] = useState<number>(60);
+	const [smartPumpMinutes, setSmartPumpMinutes] = useState<number>(0);
+	const [mmcgsSampleMinutes, setMmcgsSampleMinutes] = useState<number>(1);
+	const [mmcgsStaticMinutes, setMmcgsStaticMinutes] = useState<number>(1);
+	const [mmcgsPurgeMinutes, setMmcgsPurgeMinutes] = useState<number>(1);
+	const [mmcgsReadIntervalMinutes, setMmcgsReadIntervalMinutes] = useState<number>(10);
 
 	// === Telemetry: metric(group) + channels selector（支持多通道对比） ===
 	// activeMetric 既可以是标准 MetricKey（temperature/o2/...），也可以是自定义 metric:* 分组
@@ -528,6 +699,12 @@ export default function DeviceDetailPage() {
 			}
 			// configuration 不在设备编辑中修改，仅在Control页面的配置编辑Modal中修改
 
+			if (Object.keys(body.configuration || {}).length === 0) {
+				message.info("配置未发生变化");
+				setConfigModalOpen(false);
+				return;
+			}
+
 			await updateDevice.mutateAsync(body);
 			message.success("设备已保存");
 			setDeviceModalOpen(false);
@@ -668,6 +845,7 @@ export default function DeviceDetailPage() {
 	// === Commands ===
 	const sendCmd = useSendDeviceCommand(deviceId);
 	const commandsQ = useDeviceCommands(deviceId, 30);
+	const [commandSubmitting, setCommandSubmitting] = useState(false);
 
 	// 控制模板相关
 	const templatesQ = useControlTemplates(deviceId, true);
@@ -730,7 +908,10 @@ export default function DeviceDetailPage() {
 			const v = await configForm.validateFields();
 			const body: any = {
 				// 当configuration为空时，显式设置为null以清空服务器端的configuration
-				configuration: (!v.configuration || Object.keys(v.configuration).length === 0) ? null : v.configuration,
+				configuration: diffObject(
+					isPlainObject(effectiveConfigDevice?.configuration) ? effectiveConfigDevice.configuration : {},
+					isPlainObject(v.configuration) ? v.configuration : {}
+				),
 			};
 
 			await updateDevice.mutateAsync(body);
@@ -852,6 +1033,22 @@ export default function DeviceDetailPage() {
 		});
 	}
 
+	async function dispatchCommands(commands: Record<string, unknown>[]) {
+		if (!commandTargetDevice || !commands.length) return;
+		setCommandSubmitting(true);
+		try {
+			if (commandTargetDevice.device_id === deviceId) {
+				await sendCmd.mutateAsync({ commands });
+			} else {
+				await api.post(`/devices/${commandTargetDevice.device_id}/commands`, { commands });
+				queryClient.invalidateQueries({ queryKey: deviceKeys.commands(commandTargetDevice.device_id) });
+			}
+			queryClient.invalidateQueries({ queryKey: deviceKeys.all });
+		} finally {
+			setCommandSubmitting(false);
+		}
+	}
+
 	async function sendCommand() {
 		if (!device) return;
 
@@ -869,7 +1066,7 @@ export default function DeviceDetailPage() {
 		}
 
 		try {
-			await sendCmd.mutateAsync(body);
+			await dispatchCommands(body.commands);
 			message.success("已下发（MQTT publish 已触发）");
 		} catch (e) {
 			message.error(getErrorMessage(e, "下发失败"));
@@ -879,7 +1076,7 @@ export default function DeviceDetailPage() {
 	async function sendQuickCommands(commands: Record<string, unknown>[], successText: string) {
 		if (!device || !commands.length) return;
 		try {
-			await sendCmd.mutateAsync({ commands });
+			await dispatchCommands(commands);
 			message.success(successText);
 		} catch (e) {
 			message.error(getErrorMessage(e, "下发失败"));
@@ -1072,28 +1269,75 @@ export default function DeviceDetailPage() {
 		}
 	}, [effectiveConfigDevice?.configuration, deviceProfile]);
 
+	const commonConfigExamples = useMemo(() => {
+		const configuration = effectiveConfigDevice?.configuration || {};
+		switch (deviceProfile) {
+			case "cp500-v3":
+				return [
+					{ label: "自动曝气", value: getConfigValue(configuration, ["aeration_timer", "enabled"]) ? "启用" : "停用" },
+					{ label: "曝气间隔", value: getConfigValue(configuration, ["aeration_timer", "interval"]) ? `${Math.round(Number(getConfigValue(configuration, ["aeration_timer", "interval"])) / 60000)} 分钟` : "-" },
+					{ label: "曝气时长", value: getConfigValue(configuration, ["aeration_timer", "duration"]) ? `${Math.round(Number(getConfigValue(configuration, ["aeration_timer", "duration"])) / 60000)} 分钟` : "-" },
+					{ label: "浴槽目标温度", value: getConfigValue(configuration, ["bath_setpoint", "target"]) ? `${Number(getConfigValue(configuration, ["bath_setpoint", "target"])).toFixed(1)} ℃` : "-" },
+				];
+			case "smart-compost":
+				return [
+					{ label: "抽气时长", value: configuration.pump_run_time ? `${Math.round(Number(configuration.pump_run_time) / 6000) / 10} 分钟` : "-" },
+					{ label: "采集周期", value: configuration.read_interval ? `${Math.round(Number(configuration.read_interval) / 6000) / 10} 分钟` : "-" },
+				];
+			case "mmcgs":
+				return [
+					{ label: "采样抽气时长", value: configuration.sample_time ? `${Math.round(Number(configuration.sample_time) / 6000) / 10} 分钟` : "-" },
+					{ label: "静置测量时长", value: configuration.static_measure_time ? `${Math.round(Number(configuration.static_measure_time) / 6000) / 10} 分钟` : "-" },
+					{ label: "清洗时长", value: configuration.purge_pump_time ? `${Math.round(Number(configuration.purge_pump_time) / 6000) / 10} 分钟` : "-" },
+					{ label: "轮询周期", value: configuration.read_interval ? `${Math.round(Number(configuration.read_interval) / 6000) / 10} 分钟` : "-" },
+				];
+			default:
+				return profileConfigSummary;
+		}
+	}, [effectiveConfigDevice?.configuration, deviceProfile, profileConfigSummary]);
+
 	useEffect(() => {
 		const configuration = effectiveConfigDevice?.configuration || {};
 		const cpInterval = Number(getConfigValue(configuration, ["aeration_timer", "interval"]));
 		const cpDuration = Number(getConfigValue(configuration, ["aeration_timer", "duration"]));
 		const smartInterval = Number(configuration.read_interval);
-		const mmcgsSample = Number(configuration.sample_pump_time);
+		const smartPump = Number(configuration.pump_run_time);
+		const mmcgsSample = Number(configuration.sample_time);
+		const mmcgsStatic = Number(configuration.static_measure_time);
+		const mmcgsPurge = Number(configuration.purge_pump_time);
+		const mmcgsReadInterval = Number(configuration.read_interval);
 
-		if (Number.isFinite(cpInterval) && cpInterval > 0) {
-			setCp500AutoIntervalMinutes(Math.max(1, Math.round(cpInterval / 60000)));
+		if (Number.isFinite(cpInterval) && cpInterval >= 0) {
+			setCp500AutoIntervalMinutes(Math.max(0, Math.round(cpInterval / 60000)));
 		}
-		if (Number.isFinite(cpDuration) && cpDuration > 0) {
-			setCp500AutoDurationMinutes(Math.max(1, Math.round(cpDuration / 60000)));
+		if (Number.isFinite(cpDuration) && cpDuration >= 0) {
+			setCp500AutoDurationMinutes(Math.max(0, Math.round(cpDuration / 60000)));
 		}
-		if (Number.isFinite(smartInterval) && smartInterval > 0) {
-			setSmartReadIntervalMinutes(Math.max(1, Math.round(smartInterval / 60000)));
+		if (Number.isFinite(smartInterval) && smartInterval >= 0) {
+			setSmartReadIntervalMinutes(Math.max(0, Math.round(smartInterval / 60000)));
 		}
 		if (Number.isFinite(mmcgsSample) && mmcgsSample > 0) {
 			setMmcgsSampleSeconds(Math.max(5, Math.round(mmcgsSample / 1000)));
 		}
+		if (Number.isFinite(smartPump) && smartPump >= 0) {
+			setSmartPumpMinutes(Math.max(0, Math.round(smartPump / 60000)));
+		}
+		if (Number.isFinite(mmcgsSample) && mmcgsSample >= 0) {
+			setMmcgsSampleMinutes(Math.max(0, Math.round(mmcgsSample / 60000)));
+		}
+		if (Number.isFinite(mmcgsStatic) && mmcgsStatic >= 0) {
+			setMmcgsStaticMinutes(Math.max(0, Math.round(mmcgsStatic / 60000)));
+		}
+		if (Number.isFinite(mmcgsPurge) && mmcgsPurge >= 0) {
+			setMmcgsPurgeMinutes(Math.max(0, Math.round(mmcgsPurge / 60000)));
+		}
+		if (Number.isFinite(mmcgsReadInterval) && mmcgsReadInterval >= 0) {
+			setMmcgsReadIntervalMinutes(Math.max(0, Math.round(mmcgsReadInterval / 60000)));
+		}
 	}, [effectiveConfigDevice?.configuration]);
 
 	const durationSliderMarks = {
+		0: "0",
 		1: "1m",
 		10: "10m",
 		30: "30m",
@@ -1101,6 +1345,7 @@ export default function DeviceDetailPage() {
 	};
 
 	const cp500IntervalMarks = {
+		0: "0",
 		5: "5m",
 		15: "15m",
 		30: "30m",
@@ -1108,10 +1353,19 @@ export default function DeviceDetailPage() {
 	};
 
 	const cp500DurationMarks = {
+		0: "0",
 		1: "1m",
 		5: "5m",
 		10: "10m",
 		20: "20m",
+	};
+
+	const mmcgsMinuteMarks = {
+		0: "0",
+		1: "1m",
+		5: "5m",
+		10: "10m",
+		30: "30m",
 	};
 
 	const mmcgsSampleMarks = {
@@ -1791,9 +2045,10 @@ export default function DeviceDetailPage() {
 																<Text strong>{mmcgsControllerDevice?.name || mmcgsControllerCode}</Text>
 																<Text type="secondary">设备编码：{mmcgsControllerCode}</Text>
 																<Text type="secondary">点位数量：{mmcgsPointDevices.length}</Text>
-																<Text type="secondary">采样泵时长：{mmcgsControllerDevice?.configuration?.sample_pump_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.sample_pump_time) / 1000)} 秒` : "-"}</Text>
-																<Text type="secondary">清洗泵时长：{mmcgsControllerDevice?.configuration?.purge_pump_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.purge_pump_time) / 1000)} 秒` : "-"}</Text>
-																<Text type="secondary">轮询周期：{mmcgsControllerDevice?.configuration?.read_interval ? `${Math.round(Number(mmcgsControllerDevice.configuration.read_interval) / 1000)} 秒` : "-"}</Text>
+																<Text type="secondary">采样抽气时长：{mmcgsControllerDevice?.configuration?.sample_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.sample_time) / 6000) / 10} 分钟` : "-"}</Text>
+																<Text type="secondary">静置测量时长：{mmcgsControllerDevice?.configuration?.static_measure_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.static_measure_time) / 6000) / 10} 分钟` : "-"}</Text>
+																<Text type="secondary">清洗时长：{mmcgsControllerDevice?.configuration?.purge_pump_time ? `${Math.round(Number(mmcgsControllerDevice.configuration.purge_pump_time) / 6000) / 10} 分钟` : "-"}</Text>
+																<Text type="secondary">轮询周期：{mmcgsControllerDevice?.configuration?.read_interval ? `${Math.round(Number(mmcgsControllerDevice.configuration.read_interval) / 6000) / 10} 分钟` : "-"}</Text>
 															</Space>
 														</Card>
 													</Col>
@@ -1890,7 +2145,7 @@ export default function DeviceDetailPage() {
 													</Text>
 												</Space>
 											</Col>
-											<Col xs={24} lg={9}>
+											<Col xs={24} lg={9} style={{ display: "none" }}>
 												<Card
 													size="small"
 													title="当前状态"
@@ -1964,7 +2219,682 @@ export default function DeviceDetailPage() {
 									</Card>
 								</Col>
 
-								<Col xs={24} lg={14}>
+								<Col xs={24} lg={15}>
+									<Card title="参数设置" style={{ borderRadius: 18 }} bodyStyle={{ paddingTop: 16 }}>
+										<Space direction="vertical" size={14} style={{ width: "100%" }}>
+											{deviceProfile === "cp500-v3" && (
+												<>
+													<ResearchActionCard
+														title="曝气参数配置"
+														description="普通人员优先调整这里。按分钟设置曝气间隔和单次时长，保存后设备会按新的实验节奏运行。"
+														tint="#f7fafc"
+													>
+														<MinuteField
+															label="曝气间隔"
+															value={cp500AutoIntervalMinutes}
+															onChange={setCp500AutoIntervalMinutes}
+															max={120}
+															marks={{ 0: "0", 10: "10m", 30: "30m", 60: "60m", 120: "120m" }}
+														/>
+														<MinuteField
+															label="单次曝气时长"
+															value={cp500AutoDurationMinutes}
+															onChange={setCp500AutoDurationMinutes}
+															max={60}
+															marks={durationSliderMarks}
+														/>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={14}>
+																<Button
+																	type="primary"
+																	block
+																	style={compactPrimaryButtonStyle}
+																	onClick={() =>
+																		sendQuickConfigUpdate(
+																			{
+																				aeration_timer: {
+																					enabled: true,
+																					interval: cp500AutoIntervalMinutes * 60 * 1000,
+																					duration: cp500AutoDurationMinutes * 60 * 1000,
+																				},
+																			},
+																			"已保存自动曝气参数"
+																		)
+																	}
+																>
+																	保存并启用
+																</Button>
+															</Col>
+															<Col xs={24} md={10}>
+																<Button
+																	block
+																	style={compactButtonStyle}
+																	onClick={() => sendQuickConfigUpdate({ aeration_timer: { enabled: false } }, "已停用自动曝气")}
+																>
+																	停用自动模式
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="手动干预"
+														description="只有实验中需要临时介入时再用，默认还是以上面的参数配置为主。"
+														tint="#fbfbfc"
+													>
+														<MinuteField
+															label="本轮曝气时长"
+															value={quickDurationMinutes}
+															onChange={setQuickDurationMinutes}
+															max={60}
+															marks={durationSliderMarks}
+														/>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("heater", "on")}>
+																	启动加热
+																</Button>
+															</Col>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("heater", "off")}>
+																	停止加热
+																</Button>
+															</Col>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("pump", "on")}>
+																	启动循环泵
+																</Button>
+															</Col>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("pump", "off")}>
+																	停止循环泵
+																</Button>
+															</Col>
+															<Col xs={24} md={8}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("aeration", "on", quickDurationMinutes * 60 * 1000)}>
+																	启动单次曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={8}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("aeration", "off")}>
+																	停止曝气
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="安全操作"
+														description="出现异常时优先使用急停。解除前建议先确认现场状态和执行器状态。"
+														tint="#fff4f4"
+													>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={12}>
+																<Button
+																	danger
+																	type="primary"
+																	block
+																	style={compactPrimaryButtonStyle}
+																	onClick={() => sendQuickCommands([{ command: "emergency", action: "on" }], "已发送急停命令")}
+																>
+																	立即急停
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button
+																	block
+																	style={compactButtonStyle}
+																	onClick={() => sendQuickCommands([{ command: "emergency", action: "off" }], "已发送解除急停命令")}
+																>
+																	解除急停
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+												</>
+											)}
+
+											{deviceProfile === "smart-compost" && (
+												<>
+													<ResearchActionCard
+														title="采集参数配置"
+														description="优先调整采集周期和抽气时长。普通人员一般只需要维护这两个实验节奏参数。"
+														tint="#f7fafc"
+													>
+														<MinuteField
+															label="抽气时长"
+															value={smartPumpMinutes}
+															onChange={setSmartPumpMinutes}
+															max={60}
+															marks={durationSliderMarks}
+														/>
+														<MinuteField
+															label="采集周期"
+															value={smartReadIntervalMinutes}
+															onChange={setSmartReadIntervalMinutes}
+															max={120}
+															marks={{ 0: "0", 10: "10m", 30: "30m", 60: "60m", 120: "120m" }}
+														/>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={16}>
+																<Button
+																	type="primary"
+																	block
+																	style={compactPrimaryButtonStyle}
+																	onClick={() =>
+																		sendQuickConfigUpdate(
+																			{
+																				pump_run_time: smartPumpMinutes * 60 * 1000,
+																				read_interval: smartReadIntervalMinutes * 60 * 1000,
+																			},
+																			"已保存采集参数"
+																		)
+																	}
+																>
+																	保存采集参数
+																</Button>
+															</Col>
+															<Col xs={24} md={8}>
+																<Button danger block style={compactButtonStyle} onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}>
+																	重启设备
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="手动干预"
+														description="仅在需要现场干预时使用，持续时间同样按分钟设置。"
+														tint="#fbfbfc"
+													>
+														<MinuteField
+															label="动作时长"
+															value={quickDurationMinutes}
+															onChange={setQuickDurationMinutes}
+															max={60}
+															marks={durationSliderMarks}
+														/>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("aeration", "on", quickDurationMinutes * 60 * 1000)}>
+																	启动单次曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("exhaust", "on", quickDurationMinutes * 60 * 1000)}>
+																	启动单次排气
+																</Button>
+															</Col>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("aeration", "off")}>
+																	停止曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={6}>
+																<Button block style={compactButtonStyle} onClick={() => sendQuickToggle("exhaust", "off")}>
+																	停止排气
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+												</>
+											)}
+
+											{deviceProfile === "mmcgs" && (
+												<>
+													<ResearchActionCard
+														title="采样参数配置"
+														description="配置统一写入控制器。样品采集、清洗和轮询周期都按分钟维护，适合普通人员批量调整。"
+														tint="#f7f5ff"
+													>
+														<MinuteField
+															label="采样时长"
+															value={mmcgsSampleMinutes}
+															onChange={setMmcgsSampleMinutes}
+															max={30}
+															marks={mmcgsMinuteMarks}
+														/>
+														<MinuteField
+															label="静置测量时长"
+															value={mmcgsStaticMinutes}
+															onChange={setMmcgsStaticMinutes}
+															max={30}
+															marks={mmcgsMinuteMarks}
+														/>
+														<MinuteField
+															label="清洗时长"
+															value={mmcgsPurgeMinutes}
+															onChange={setMmcgsPurgeMinutes}
+															max={30}
+															marks={mmcgsMinuteMarks}
+														/>
+														<MinuteField
+															label="轮询周期"
+															value={mmcgsReadIntervalMinutes}
+															onChange={setMmcgsReadIntervalMinutes}
+															max={180}
+															marks={{ 0: "0", 10: "10m", 30: "30m", 60: "60m", 180: "180m" }}
+														/>
+														<Button
+															type="primary"
+															block
+															style={compactPrimaryButtonStyle}
+															onClick={() =>
+																sendQuickConfigUpdate(
+																	{
+																		sample_time: mmcgsSampleMinutes * 60 * 1000,
+																		static_measure_time: mmcgsStaticMinutes * 60 * 1000,
+																		purge_pump_time: mmcgsPurgeMinutes * 60 * 1000,
+																		read_interval: mmcgsReadIntervalMinutes * 60 * 1000,
+																	},
+																	"已保存 MMCGS 参数"
+																)
+															}
+														>
+															保存采样参数
+														</Button>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="点位采样"
+														description={`如果需要临时采样，可直接从这里触发，命令会发送到 ${commandTargetDevice?.code || mmcgsControllerCode}。`}
+														tint="#fbfbfc"
+													>
+														<Row gutter={[10, 10]}>
+															{Array.from({ length: 6 }, (_, index) => (
+																<Col xs={12} md={8} key={`point-quick-${index + 1}`}>
+																	<Button
+																		block
+																		style={compactButtonStyle}
+																		onClick={() => sendQuickToggle(`point${index + 1}`, "on", Math.max(0, mmcgsSampleMinutes) * 60 * 1000)}
+																	>
+																		启动 P{index + 1} 采样
+																	</Button>
+																</Col>
+															))}
+														</Row>
+													</ResearchActionCard>
+												</>
+											)}
+
+											{deviceProfile === "generic" && (
+												<ResearchActionCard
+													title="基础设置"
+													description="这台设备暂时没有专用参数面板，可以先编辑配置；需要时再使用开发者工具。"
+													tint="#f8f9fb"
+												>
+													<Button type="primary" block style={compactPrimaryButtonStyle} onClick={openConfigEdit}>
+														编辑配置
+													</Button>
+												</ResearchActionCard>
+											)}
+										</Space>
+									</Card>
+								</Col>
+
+								<Col xs={24} lg={15} style={{ display: "none" }}>
+									<Card
+										title="研究人员操作台"
+										style={{ borderRadius: 20 }}
+										bodyStyle={{ paddingTop: 18 }}
+									>
+										<Space direction="vertical" size={14} style={{ width: "100%" }}>
+											{deviceProfile === "cp500-v3" && (
+												<>
+													<ResearchActionCard
+														title="执行器控制"
+														description="直接控制加热、循环泵和曝气。按钮会优先对应当前设备状态，适合日常值守时快速操作。"
+														tint="#f6fbff"
+													>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={8}>
+																<Button
+																	type={controlStatusMap.get("Heater")?.active ? "default" : "primary"}
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickToggle("heater", controlStatusMap.get("Heater")?.active ? "off" : "on")}
+																>
+																	{controlStatusMap.get("Heater")?.active ? "停止加热" : "启动加热"}
+																</Button>
+															</Col>
+															<Col xs={24} md={8}>
+																<Button
+																	type={controlStatusMap.get("Pump")?.active ? "default" : "primary"}
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickToggle("pump", controlStatusMap.get("Pump")?.active ? "off" : "on")}
+																>
+																	{controlStatusMap.get("Pump")?.active ? "停止循环泵" : "启动循环泵"}
+																</Button>
+															</Col>
+															<Col xs={24} md={8}>
+																<Button
+																	type={controlStatusMap.get("Aeration")?.active ? "default" : "primary"}
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickToggle("aeration", controlStatusMap.get("Aeration")?.active ? "off" : "on")}
+																>
+																	{controlStatusMap.get("Aeration")?.active ? "停止曝气" : "立即曝气"}
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="定时曝气"
+														description="按本轮时长执行一次曝气，适合人工干预；下方自动模式用于保存周期参数。"
+														tint="#fffaf0"
+													>
+														<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+															<Text>本轮曝气时长</Text>
+															<Text strong>{quickDurationMinutes} 分钟</Text>
+														</div>
+														<Slider min={1} max={60} marks={durationSliderMarks} value={quickDurationMinutes} onChange={setQuickDurationMinutes} tooltip={{ open: false }} />
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={12}>
+																<Button
+																	type="primary"
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickToggle("aeration", "on", quickDurationMinutes * 60 * 1000)}
+																>
+																	执行一次定时曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickToggle("aeration", "off")}>
+																	立即停止曝气
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="自动曝气参数"
+														description="保存后会下发到设备。适合调整实验节奏，不需要手写配置 JSON。"
+														tint="#f6fff7"
+													>
+														<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+															<Text>曝气间隔</Text>
+															<Text strong>{cp500AutoIntervalMinutes} 分钟</Text>
+														</div>
+														<Slider min={5} max={60} step={5} marks={cp500IntervalMarks} value={cp500AutoIntervalMinutes} onChange={setCp500AutoIntervalMinutes} tooltip={{ open: false }} />
+														<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+															<Text>单次曝气时长</Text>
+															<Text strong>{cp500AutoDurationMinutes} 分钟</Text>
+														</div>
+														<Slider min={1} max={20} marks={cp500DurationMarks} value={cp500AutoDurationMinutes} onChange={setCp500AutoDurationMinutes} tooltip={{ open: false }} />
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={12}>
+																<Button
+																	type="primary"
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() =>
+																		sendQuickConfigUpdate(
+																			{
+																				aeration_timer: {
+																					enabled: true,
+																					interval: cp500AutoIntervalMinutes * 60 * 1000,
+																					duration: cp500AutoDurationMinutes * 60 * 1000,
+																				},
+																			},
+																			"已保存自动曝气参数"
+																		)
+																	}
+																>
+																	保存并启用自动曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickConfigUpdate({ aeration_timer: { enabled: false } }, "已停用自动曝气")}
+																>
+																	停用自动曝气
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="安全控制"
+														description="急停会优先阻断设备动作，适合异常情况。确认恢复前，先检查现场状态。"
+														tint="#fff4f4"
+													>
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={12}>
+																<Button
+																	danger
+																	type="primary"
+																	block
+																	style={{ height: 46, borderRadius: 14 }}
+																	onClick={() => sendQuickCommands([{ command: "emergency", action: "on" }], "已发送急停命令")}
+																>
+																	立即急停
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button
+																	block
+																	style={{ height: 46, borderRadius: 14 }}
+																	onClick={() => sendQuickCommands([{ command: "emergency", action: "off" }], "已发送解除急停命令")}
+																>
+																	解除急停
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+												</>
+											)}
+
+											{deviceProfile === "smart-compost" && (
+												<>
+													<ResearchActionCard
+														title="气路操作"
+														description="按当前设定时长执行一次曝气或排气，适合实验过程中的临时调节。"
+														tint="#f6fbff"
+													>
+														<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+															<Text>动作时长</Text>
+															<Text strong>{quickDurationMinutes} 分钟</Text>
+														</div>
+														<Slider min={1} max={60} marks={durationSliderMarks} value={quickDurationMinutes} onChange={setQuickDurationMinutes} tooltip={{ open: false }} />
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={12}>
+																<Button type="primary" block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickToggle("aeration", "on", quickDurationMinutes * 60 * 1000)}>
+																	执行一次曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickToggle("exhaust", "on", quickDurationMinutes * 60 * 1000)}>
+																	执行一次排气
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickToggle("aeration", "off")}>
+																	停止曝气
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickToggle("exhaust", "off")}>
+																	停止排气
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+
+													<ResearchActionCard
+														title="采集周期"
+														description="调整设备上报与采集节奏。保存后设备会更新配置并重启生效。"
+														tint="#f6fff7"
+													>
+														<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+															<Text>采集周期</Text>
+															<Text strong>{smartReadIntervalMinutes} 分钟</Text>
+														</div>
+														<Slider min={1} max={60} marks={durationSliderMarks} value={smartReadIntervalMinutes} onChange={setSmartReadIntervalMinutes} tooltip={{ open: false }} />
+														<Row gutter={[10, 10]}>
+															<Col xs={24} md={14}>
+																<Button
+																	type="primary"
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickConfigUpdate({ read_interval: smartReadIntervalMinutes * 60 * 1000 }, "已更新采集周期")}
+																>
+																	保存采集周期
+																</Button>
+															</Col>
+															<Col xs={24} md={10}>
+																<Button danger block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}>
+																	重启设备
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+												</>
+											)}
+
+											{deviceProfile === "mmcgs" && (
+												<>
+													<ResearchActionCard
+														title="采样控制"
+														description={`控制命令统一发送到 ${commandTargetDevice?.code || mmcgsControllerCode}，点位页也可以直接操作。`}
+														tint="#f7f3ff"
+													>
+														<div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+															<Text>采样时长</Text>
+															<Text strong>{mmcgsSampleSeconds} 秒</Text>
+														</div>
+														<Slider min={5} max={180} step={5} marks={mmcgsSampleMarks} value={mmcgsSampleSeconds} onChange={setMmcgsSampleSeconds} tooltip={{ open: false }} />
+														<Row gutter={[10, 10]}>
+															{Array.from({ length: 6 }, (_, index) => (
+																<Col xs={12} md={8} key={`point-run-${index + 1}`}>
+																	<Button
+																		block
+																		style={{ height: 44, borderRadius: 14 }}
+																		onClick={() => sendQuickToggle(`point${index + 1}`, "on", mmcgsSampleSeconds * 1000)}
+																	>
+																		点位 P{index + 1}
+																	</Button>
+																</Col>
+															))}
+															<Col xs={24} md={12}>
+																<Button
+																	type="primary"
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickToggle("purge", "on", mmcgsSampleSeconds * 1000)}
+																>
+																	运行清洗泵
+																</Button>
+															</Col>
+															<Col xs={24} md={12}>
+																<Button
+																	danger
+																	block
+																	style={{ height: 44, borderRadius: 14 }}
+																	onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}
+																>
+																	重启控制器
+																</Button>
+															</Col>
+														</Row>
+													</ResearchActionCard>
+												</>
+											)}
+
+											{deviceProfile === "generic" && (
+												<ResearchActionCard
+													title="基础操作"
+													description="这台设备暂时没有专用面板，建议先从配置和重启开始。需要更细的命令时再展开开发者工具。"
+													tint="#f8f9fb"
+												>
+													<Row gutter={[10, 10]}>
+														<Col xs={24} md={12}>
+															<Button type="primary" block style={{ height: 44, borderRadius: 14 }} onClick={openConfigEdit}>
+																编辑配置
+															</Button>
+														</Col>
+														<Col xs={24} md={12}>
+															<Button danger block style={{ height: 44, borderRadius: 14 }} onClick={() => sendQuickCommands([{ command: "restart" }], "已发送重启命令")}>
+																重启设备
+															</Button>
+														</Col>
+													</Row>
+												</ResearchActionCard>
+											)}
+										</Space>
+									</Card>
+								</Col>
+
+								<Col xs={24} lg={9}>
+									<Space direction="vertical" size={12} style={{ width: "100%" }}>
+										<Card title="当前状态" style={{ borderRadius: 20 }}>
+											<Row gutter={[8, 8]}>
+												{controlStatusChannels.length ? (
+													controlStatusChannels.map((channel) => {
+														const item = controlStatusMap.get(channel.code);
+														if (!item) return null;
+														return (
+															<Col xs={12} key={`summary-${channel.code}`}>
+																<ControlStatCard
+																	label={item.label}
+																	value={item.value}
+																	tone={item.tone}
+																	highlight={item.active || channel.code === "EmergencyState"}
+																/>
+															</Col>
+														);
+													})
+												) : (
+													<Col xs={24}>
+														<Text type="secondary">暂无状态数据</Text>
+													</Col>
+												)}
+											</Row>
+										</Card>
+
+										<Card
+											title="常用参数"
+											style={{ borderRadius: 20 }}
+											extra={
+												<Button type="primary" onClick={openConfigEdit}>
+													编辑配置
+												</Button>
+											}
+										>
+											<Space direction="vertical" size={10} style={{ width: "100%" }}>
+												{commonConfigExamples.length ? (
+													commonConfigExamples.map((item) => (
+														<div
+															key={`summary-side-${item.label}`}
+															style={{
+																display: "flex",
+																justifyContent: "space-between",
+																gap: 12,
+																padding: "10px 12px",
+																borderRadius: 12,
+																background: "#f7f8fa",
+															}}
+														>
+															<Text>{item.label}</Text>
+															<Text strong>{item.value || "-"}</Text>
+														</div>
+													))
+												) : (
+													<Text type="secondary">暂无可展示的参数</Text>
+												)}
+												{deviceProfile === "mmcgs" && effectiveConfigDevice ? (
+													<Text type="secondary">当前参数来源：{effectiveConfigDevice.code}</Text>
+												) : null}
+											</Space>
+										</Card>
+									</Space>
+								</Col>
+
+								<Col xs={24} lg={14} style={{ display: "none" }}>
 									<Card title="常用操作" style={{ borderRadius: 20 }}>
 										<Space direction="vertical" size={16} style={{ width: "100%" }}>
 											{deviceProfile === "cp500-v3" && (
@@ -2189,7 +3119,7 @@ export default function DeviceDetailPage() {
 									</Card>
 								</Col>
 
-								<Col xs={24} lg={10}>
+								<Col xs={24} lg={10} style={{ display: "none" }}>
 									<Card
 										title="常用参数"
 										style={{ borderRadius: 20 }}
@@ -2331,7 +3261,7 @@ export default function DeviceDetailPage() {
 												}}
 											/>
 
-											<Button type="primary" onClick={sendCommand} block loading={sendCmd.isPending}>
+											<Button type="primary" onClick={sendCommand} block loading={commandSubmitting}>
 												下发命令
 											</Button>
 
@@ -2569,13 +3499,52 @@ export default function DeviceDetailPage() {
 					<Text type="secondary" style={{ fontSize: 11 }}>
 						常见配置参数示例：
 					</Text>
-					<ul style={{ fontSize: 12, marginTop: 8, color: "#666", paddingLeft: 20 }}>
+					<ul style={{ display: "none", fontSize: 12, marginTop: 8, color: "#666", paddingLeft: 20 }}>
 						<li>sample_interval: 采样间隔（秒）</li>
 						<li>report_interval: 上报间隔（秒）</li>
 						<li>threshold_temp: 温度阈值</li>
 						<li>threshold_humidity: 湿度阈值</li>
 						<li>auto_start: 自动启动开关</li>
 						<li>mode: 运行模式</li>
+					</ul>
+					<ul style={{ fontSize: 12, marginTop: 8, color: "#666", paddingLeft: 20 }}>
+						{deviceProfile === "cp500-v3" ? (
+							<>
+								<li>`aeration_timer.enabled`: 自动曝气开关</li>
+								<li>`aeration_timer.interval`: 曝气间隔，单位毫秒</li>
+								<li>`aeration_timer.duration`: 单次曝气时长，单位毫秒</li>
+								<li>`bath_setpoint.target`: 浴槽目标温度，单位 ℃</li>
+								<li>`heater_guard.min_on_ms`: 加热最短开启时间，单位毫秒</li>
+								<li>`heater_guard.min_off_ms`: 加热最短关闭时间，单位毫秒</li>
+							</>
+						) : deviceProfile === "smart-compost" ? (
+							<>
+								<li>`pump_run_time`: 抽气时长，单位毫秒</li>
+								<li>`read_interval`: 采集周期，单位毫秒</li>
+								<li>`wifi.ssid`: WiFi 名称</li>
+								<li>`wifi.password`: WiFi 密码</li>
+								<li>`mqtt.server`: MQTT 服务器地址</li>
+								<li>`mqtt.device_code`: 设备编码</li>
+							</>
+						) : deviceProfile === "mmcgs" ? (
+							<>
+								<li>`sample_time`: 采样抽气时长，单位毫秒</li>
+								<li>`static_measure_time`: 静置测量时长，单位毫秒</li>
+								<li>`purge_pump_time`: 清洗时长，单位毫秒</li>
+								<li>`read_interval`: 轮询周期，单位毫秒</li>
+								<li>`mqtt.device_code`: 控制器编码</li>
+								<li>`mqtt.point_device_codes`: 点位设备编码列表</li>
+							</>
+						) : (
+							<>
+								<li>`read_interval`: 采集或轮询周期，单位毫秒</li>
+								<li>`wifi.ssid`: WiFi 名称</li>
+								<li>`wifi.password`: WiFi 密码</li>
+								<li>`mqtt.server`: MQTT 服务器地址</li>
+								<li>`mqtt.port`: MQTT 端口</li>
+								<li>`mqtt.device_code`: 设备编码</li>
+							</>
+						)}
 					</ul>
 				</Form>
 			</Modal>

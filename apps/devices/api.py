@@ -29,6 +29,7 @@ from __future__ import annotations
 import time
 import re
 from typing import Dict, Optional
+from copy import deepcopy
 
 from django.db import connection
 from django.http import JsonResponse
@@ -131,6 +132,31 @@ def _json_404(detail: str = "not found") -> JsonResponse:
 
 def _json_400(detail: str) -> JsonResponse:
     return JsonResponse({"detail": detail}, status=400)
+
+
+def _merge_config_patch(base: Optional[dict], patch: Optional[dict]):
+    """
+    Merge partial configuration updates.
+    - nested dict: recursive merge
+    - value is None: delete the key
+    - other values: replace
+    """
+    if patch is None:
+        return {}
+
+    if not isinstance(base, dict):
+        base = {}
+
+    result = deepcopy(base)
+    for key, value in patch.items():
+        if value is None:
+            result.pop(key, None)
+            continue
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _merge_config_patch(result.get(key), value)
+            continue
+        result[key] = deepcopy(value)
+    return result
 
 
 def _device_to_dict(d: Device) -> dict:
@@ -531,6 +557,7 @@ class DeviceCreateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, V
                 else:
                     # 前端编辑的配置：异步流程
                     # 1. 先下发MQTT命令
+                    expected_configuration = _merge_config_patch(getattr(d, "configuration", {}) or {}, configuration)
                     if not getattr(d, "response_topic", ""):
                         return _json_400("Device.response_topic is empty, cannot send config.")
                     
@@ -575,7 +602,7 @@ class DeviceCreateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, V
                         # 检查 last_seen_at 是否更新（设备重新注册）
                         if d.last_seen_at and d.last_seen_at != last_seen_before:
                             # 设备已重新注册，检查配置是否已更新
-                            if d.configuration == configuration:
+                            if d.configuration == expected_configuration:
                                 # 配置已更新成功
                                 return JsonResponse(
                                     {
@@ -717,7 +744,7 @@ class DeviceUpdateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, V
                         # 检查 last_seen_at 是否更新（设备重新注册）
                         if d.last_seen_at and d.last_seen_at != last_seen_before:
                             # 设备已重新注册，检查配置是否已更新
-                            if d.configuration == configuration:
+                            if d.configuration == expected_configuration:
                                 # 配置已更新成功
                                 return JsonResponse(
                                     {

@@ -20,6 +20,7 @@ export type UpdateDeviceBody = Partial<{
 	response_topic: string | null;
 	note: string;
 	meta: any;
+	configuration: any;
 	is_active: boolean;
 }>;
 
