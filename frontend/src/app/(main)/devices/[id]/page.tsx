@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
@@ -237,6 +237,18 @@ function getConfigValue(source: unknown, path: string[]): unknown {
 	return current;
 }
 
+function msToMinutes(value: unknown): number | null {
+	const numeric = Number(value);
+	if (!Number.isFinite(numeric) || numeric < 0) return null;
+	return Math.round(numeric / 6000) / 10;
+}
+
+function msToSeconds(value: unknown): number | null {
+	const numeric = Number(value);
+	if (!Number.isFinite(numeric) || numeric < 0) return null;
+	return Math.round(numeric / 1000);
+}
+
 function getMmcgsPointIndex(code: string | null | undefined): number | null {
 	if (!code) return null;
 	const match = String(code).match(/-P(\d+)$/i);
@@ -336,7 +348,7 @@ const compactPrimaryButtonStyle = {
 	boxShadow: "none",
 } as const;
 
-function MinuteField({
+const MinuteField = memo(function MinuteField({
 	label,
 	value,
 	onChange,
@@ -351,6 +363,12 @@ function MinuteField({
 	marks: Record<number, string>;
 	step?: number;
 }) {
+	const [draftValue, setDraftValue] = useState<number>(value);
+
+	useEffect(() => {
+		setDraftValue(value);
+	}, [value]);
+
 	return (
 		<Space direction="vertical" size={8} style={{ width: "100%" }}>
 			<div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
@@ -360,16 +378,29 @@ function MinuteField({
 					max={max}
 					step={step}
 					precision={step < 1 ? 1 : 0}
-					value={value}
-					onChange={(next: number | null) => onChange(Number.isFinite(next) ? Number(next) : 0)}
+					value={draftValue}
+					onChange={(next: number | null) => {
+						const normalized = Number.isFinite(next) ? Number(next) : 0;
+						setDraftValue(normalized);
+						onChange(normalized);
+					}}
 					addonAfter="分钟"
 					style={{ width: 140 }}
 				/>
 			</div>
-			<Slider min={0} max={max} step={step} marks={marks} value={value} onChange={onChange} tooltip={{ open: false }} />
+			<Slider
+				min={0}
+				max={max}
+				step={step}
+				marks={marks}
+				value={draftValue}
+				onChange={(next) => setDraftValue(next)}
+				onChangeComplete={(next) => onChange(next)}
+				tooltip={{ open: false }}
+			/>
 		</Space>
 	);
-}
+});
 
 export default function DeviceDetailPage() {
 	const params = useParams<{ id: string }>();
@@ -1298,41 +1329,42 @@ export default function DeviceDetailPage() {
 
 	useEffect(() => {
 		const configuration = effectiveConfigDevice?.configuration || {};
-		const cpInterval = Number(getConfigValue(configuration, ["aeration_timer", "interval"]));
-		const cpDuration = Number(getConfigValue(configuration, ["aeration_timer", "duration"]));
-		const smartInterval = Number(configuration.read_interval);
-		const smartPump = Number(configuration.pump_run_time);
-		const mmcgsSample = Number(configuration.sample_time);
-		const mmcgsStatic = Number(configuration.static_measure_time);
-		const mmcgsPurge = Number(configuration.purge_pump_time);
-		const mmcgsReadInterval = Number(configuration.read_interval);
+		const cpInterval = msToMinutes(getConfigValue(configuration, ["aeration_timer", "interval"]));
+		const cpDuration = msToMinutes(getConfigValue(configuration, ["aeration_timer", "duration"]));
+		const smartInterval = msToMinutes(configuration.read_interval);
+		const smartPump = msToMinutes(configuration.pump_run_time);
+		const mmcgsSampleSeconds = msToSeconds(configuration.sample_time);
+		const mmcgsSample = msToMinutes(configuration.sample_time);
+		const mmcgsStatic = msToMinutes(configuration.static_measure_time);
+		const mmcgsPurge = msToMinutes(configuration.purge_pump_time);
+		const mmcgsReadInterval = msToMinutes(configuration.read_interval);
 
-		if (Number.isFinite(cpInterval) && cpInterval >= 0) {
-			setCp500AutoIntervalMinutes(Math.max(0, Math.round(cpInterval / 60000)));
+		if (cpInterval !== null) {
+			setCp500AutoIntervalMinutes(cpInterval);
 		}
-		if (Number.isFinite(cpDuration) && cpDuration >= 0) {
-			setCp500AutoDurationMinutes(Math.max(0, Math.round(cpDuration / 60000)));
+		if (cpDuration !== null) {
+			setCp500AutoDurationMinutes(cpDuration);
 		}
-		if (Number.isFinite(smartInterval) && smartInterval >= 0) {
-			setSmartReadIntervalMinutes(Math.max(0, Math.round(smartInterval / 60000)));
+		if (smartInterval !== null) {
+			setSmartReadIntervalMinutes(smartInterval);
 		}
-		if (Number.isFinite(mmcgsSample) && mmcgsSample > 0) {
-			setMmcgsSampleSeconds(Math.max(5, Math.round(mmcgsSample / 1000)));
+		if (mmcgsSampleSeconds !== null) {
+			setMmcgsSampleSeconds(Math.max(5, mmcgsSampleSeconds));
 		}
-		if (Number.isFinite(smartPump) && smartPump >= 0) {
-			setSmartPumpMinutes(Math.max(0, Math.round(smartPump / 60000)));
+		if (smartPump !== null) {
+			setSmartPumpMinutes(smartPump);
 		}
-		if (Number.isFinite(mmcgsSample) && mmcgsSample >= 0) {
-			setMmcgsSampleMinutes(Math.max(0, Math.round(mmcgsSample / 60000)));
+		if (mmcgsSample !== null) {
+			setMmcgsSampleMinutes(mmcgsSample);
 		}
-		if (Number.isFinite(mmcgsStatic) && mmcgsStatic >= 0) {
-			setMmcgsStaticMinutes(Math.max(0, Math.round(mmcgsStatic / 60000)));
+		if (mmcgsStatic !== null) {
+			setMmcgsStaticMinutes(mmcgsStatic);
 		}
-		if (Number.isFinite(mmcgsPurge) && mmcgsPurge >= 0) {
-			setMmcgsPurgeMinutes(Math.max(0, Math.round(mmcgsPurge / 60000)));
+		if (mmcgsPurge !== null) {
+			setMmcgsPurgeMinutes(mmcgsPurge);
 		}
-		if (Number.isFinite(mmcgsReadInterval) && mmcgsReadInterval >= 0) {
-			setMmcgsReadIntervalMinutes(Math.max(0, Math.round(mmcgsReadInterval / 60000)));
+		if (mmcgsReadInterval !== null) {
+			setMmcgsReadIntervalMinutes(mmcgsReadInterval);
 		}
 	}, [effectiveConfigDevice?.configuration]);
 

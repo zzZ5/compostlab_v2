@@ -2,40 +2,115 @@
 # -*- coding: utf-8 -*-
 """
 控制脚本管理 API
-支持阈值触发、定时执行、Python脚本等自动化控制
 """
 
 from __future__ import annotations
 
+import json
+
 from django.http import JsonResponse
+from django.utils import timezone
+from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from django.utils import timezone
 
-from apps.api.mixins import BasicAuthMixin, JsonBodyMixin
-from apps.devices.models import Device, ScriptTemplate, ScriptExecution
-from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
-from apps.accounts.utils import log_audit
 from apps.accounts.models import AuditLog
-from apps.permissions.mixins import ResourcePermissionMixin, ReadOrWritePermissionMixin
-from apps.permissions.config import ResourceType, ActionType
+from apps.accounts.utils import log_audit
+from apps.api.mixins import BasicAuthMixin, JsonBodyMixin
+from apps.devices.models import Device, ScriptExecution, ScriptTemplate
+from apps.devices.services.script_executor import ScriptExecutor, ThresholdMonitor
+from apps.permissions.config import ActionType, ResourceType
+from apps.permissions.mixins import ReadOrWritePermissionMixin, ResourcePermissionMixin
 
 
-# -------------------------
-# helpers
-# -------------------------
 def _dt_local_str(dt) -> str:
-    """将 datetime 转成本地时区并输出为字符串"""
     if not dt:
         return ""
-    dt_local = timezone.localtime(dt)
-    return dt_local_str
+    return timezone.localtime(dt).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _json_object_field(data: dict, key: str, default: dict | None = None) -> dict:
+    value = data.get(key, default if default is not None else {})
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception as exc:
+            raise ValueError(f"{key} is not valid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be a JSON object")
+    return value
+
+
+def _validate_command_template(command_template: dict) -> dict:
+    commands = command_template.get("commands")
+    if not isinstance(commands, list):
+        raise ValueError("command_template.commands must be a list")
+
+    for index, item in enumerate(commands, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"command_template.commands[{index}] must be an object")
+
+        command = item.get("command")
+        action = item.get("action")
+        duration = item.get("duration")
+
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError(f"command_template.commands[{index}].command is required")
+
+        if not isinstance(action, str) or not action.strip():
+            raise ValueError(f"command_template.commands[{index}].action is required")
+
+        if duration is not None and (not isinstance(duration, (int, float)) or duration < 0):
+            raise ValueError(f"command_template.commands[{index}].duration must be >= 0")
+
+    return command_template
+
+
+def _is_valid_cron_expression(value: str) -> bool:
+    parts = value.strip().split()
+    return 5 <= len(parts) <= 6
+
+
+def _validate_script_payload(
+    script_type: str,
+    threshold_config: dict,
+    schedule_config: dict,
+    python_code: str,
+) -> None:
+    if script_type in {
+        ScriptTemplate.ScriptType.THRESHOLD,
+        ScriptTemplate.ScriptType.HYBRID,
+    }:
+        metric = threshold_config.get("metric")
+        operator = threshold_config.get("operator")
+        value = threshold_config.get("value")
+        if not metric:
+            raise ValueError("threshold_config.metric is required")
+        if not operator:
+            raise ValueError("threshold_config.operator is required")
+        if value is None:
+            raise ValueError("threshold_config.value is required")
+
+    if script_type in {
+        ScriptTemplate.ScriptType.SCHEDULE,
+        ScriptTemplate.ScriptType.HYBRID,
+    }:
+        cron = str(schedule_config.get("cron", "")).strip()
+        if not cron:
+            raise ValueError("schedule_config.cron is required")
+        if not _is_valid_cron_expression(cron):
+            raise ValueError("schedule_config.cron must contain 5 or 6 parts")
+
+    if script_type == ScriptTemplate.ScriptType.PYTHON:
+        if not python_code.strip():
+            raise ValueError("python_code is required for python scripts")
+        if "commands" not in python_code:
+            raise ValueError("python_code must define commands")
 
 
 def _script_to_dict(script: ScriptTemplate) -> dict:
-    """ScriptTemplate -> dict"""
-    device_ids = list(script.devices.values_list("id", flat=True))
     return {
         "id": script.id,
         "name": script.name,
@@ -46,7 +121,7 @@ def _script_to_dict(script: ScriptTemplate) -> dict:
         "schedule_config": script.schedule_config,
         "python_code": script.python_code,
         "command_template": script.command_template,
-        "device_ids": device_ids,
+        "device_ids": list(script.devices.values_list("id", flat=True)),
         "run_id": script.run.id if script.run else None,
         "is_active": script.is_active,
         "priority": script.priority,
@@ -57,7 +132,6 @@ def _script_to_dict(script: ScriptTemplate) -> dict:
 
 
 def _execution_to_dict(execution: ScriptExecution) -> dict:
-    """ScriptExecution -> dict"""
     return {
         "execution_id": execution.id,
         "script_id": execution.script.id,
@@ -78,42 +152,13 @@ def _execution_to_dict(execution: ScriptExecution) -> dict:
     }
 
 
-# -------------------------
-# Script Templates CRUD
-# -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
-class ScriptTemplateListView(
-    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
-):
+class ScriptTemplateListView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View):
     resource_type = ResourceType.SCRIPT
-    """
-    GET  /api/v2/scripts
-    GET  /api/v2/scripts?device_id=<id>&is_active=1
-    POST /api/v2/scripts
-
-    POST body（阈值触发示例）:
-    {
-      "name": "高温自动降温",
-      "description": "温度超过75度时关闭水泵",
-      "script_type": "threshold",
-      "threshold_config": {
-        "metric": "temperature",
-        "operator": ">=",
-        "value": 75
-      },
-      "command_template": {
-        "commands": [{"command": "pump", "action": "off"}]
-      },
-      "device_ids": [1, 2, 3],
-      "is_active": true,
-      "priority": 10
-    }
-    """
 
     def get(self, request):
         qs = ScriptTemplate.objects.all().order_by("-priority", "-created_at")
 
-        # 筛选
         device_id = request.GET.get("device_id")
         if device_id:
             qs = qs.filter(devices__id=device_id)
@@ -126,7 +171,7 @@ class ScriptTemplateListView(
         if script_type:
             qs = qs.filter(script_type=script_type)
 
-        items = [_script_to_dict(x) for x in qs[:100]]
+        items = [_script_to_dict(item) for item in qs[:100]]
         return JsonResponse({"count": len(items), "data": items}, status=200)
 
     def post(self, request):
@@ -136,29 +181,43 @@ class ScriptTemplateListView(
             return JsonResponse({"detail": "name is required"}, status=400)
 
         script_type = data.get("script_type", ScriptTemplate.ScriptType.THRESHOLD)
-        if script_type not in [choice[0] for choice in ScriptTemplate.ScriptType.choices]:
+        valid_types = {choice[0] for choice in ScriptTemplate.ScriptType.choices}
+        if script_type not in valid_types:
             return JsonResponse({"detail": f"Invalid script_type: {script_type}"}, status=400)
 
-        # 创建脚本
+        try:
+            threshold_config = _json_object_field(data, "threshold_config", {})
+            schedule_config = _json_object_field(data, "schedule_config", {})
+            command_template = _validate_command_template(
+                _json_object_field(data, "command_template", {})
+            )
+            python_code = data.get("python_code", "")
+            _validate_script_payload(
+                script_type,
+                threshold_config,
+                schedule_config,
+                python_code,
+            )
+        except ValueError as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+
         script = ScriptTemplate.objects.create(
             name=name,
             description=data.get("description", "").strip() or "",
             script_type=script_type,
-            threshold_config=data.get("threshold_config", {}),
-            schedule_config=data.get("schedule_config", {}),
-            python_code=data.get("python_code", ""),
-            command_template=data.get("command_template", {}),
-            is_active=data.get("is_active", True),
-            priority=data.get("priority", 0),
+            threshold_config=threshold_config,
+            schedule_config=schedule_config,
+            python_code=python_code,
+            command_template=command_template,
+            is_active=bool(data.get("is_active", True)),
+            priority=int(data.get("priority", 0)),
             created_by=request.user if request.user.is_authenticated else None,
         )
 
-        # 关联设备
         device_ids = data.get("device_ids", [])
         if device_ids:
             script.devices.set(device_ids)
 
-        # 记录审计日志
         log_audit(
             request.user,
             AuditLog.Action.SCRIPT_CREATE,
@@ -172,15 +231,7 @@ class ScriptTemplateListView(
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ScriptTemplateDetailView(
-    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
-):
-    """
-    GET    /api/v2/scripts/<id>
-    PATCH  /api/v2/scripts/<id>
-    PUT    /api/v2/scripts/<id>
-    DELETE  /api/v2/scripts/<id>
-    """
+class ScriptTemplateDetailView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View):
     resource_type = ResourceType.SCRIPT
 
     def get(self, request, script_id: int):
@@ -197,6 +248,35 @@ class ScriptTemplateDetailView(
             return JsonResponse({"detail": "Script template not found."}, status=404)
 
         data = self.json_body(request)
+        next_script_type = data.get("script_type", script.script_type)
+        next_python_code = data.get("python_code", script.python_code or "")
+
+        try:
+            threshold_config = (
+                _json_object_field(data, "threshold_config", script.threshold_config)
+                if "threshold_config" in data
+                else script.threshold_config
+            )
+            schedule_config = (
+                _json_object_field(data, "schedule_config", script.schedule_config)
+                if "schedule_config" in data
+                else script.schedule_config
+            )
+            command_template = (
+                _validate_command_template(
+                    _json_object_field(data, "command_template", script.command_template)
+                )
+                if "command_template" in data
+                else script.command_template
+            )
+            _validate_script_payload(
+                next_script_type,
+                threshold_config,
+                schedule_config,
+                next_python_code,
+            )
+        except ValueError as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
 
         if "name" in data:
             name = data["name"].strip()
@@ -208,21 +288,21 @@ class ScriptTemplateDetailView(
             script.description = data["description"].strip() or ""
 
         if "script_type" in data:
-            script_type = data["script_type"]
-            if script_type in [choice[0] for choice in ScriptTemplate.ScriptType.choices]:
-                script.script_type = script_type
+            valid_types = {choice[0] for choice in ScriptTemplate.ScriptType.choices}
+            if data["script_type"] in valid_types:
+                script.script_type = data["script_type"]
 
         if "threshold_config" in data:
-            script.threshold_config = data["threshold_config"]
+            script.threshold_config = threshold_config
 
         if "schedule_config" in data:
-            script.schedule_config = data["schedule_config"]
+            script.schedule_config = schedule_config
 
         if "python_code" in data:
             script.python_code = data["python_code"]
 
         if "command_template" in data:
-            script.command_template = data["command_template"]
+            script.command_template = command_template
 
         if "is_active" in data:
             script.is_active = bool(data["is_active"])
@@ -230,14 +310,11 @@ class ScriptTemplateDetailView(
         if "priority" in data:
             script.priority = int(data["priority"])
 
-        # 更新设备关联
         if "device_ids" in data:
-            device_ids = data["device_ids"]
-            script.devices.set(device_ids)
+            script.devices.set(data["device_ids"])
 
         script.save()
 
-        # 记录审计日志
         log_audit(
             request.user,
             AuditLog.Action.SCRIPT_UPDATE,
@@ -258,38 +335,24 @@ class ScriptTemplateDetailView(
         except ScriptTemplate.DoesNotExist:
             return JsonResponse({"detail": "Script template not found."}, status=404)
 
+        script_name = script.name
         script.delete()
 
-        # 记录审计日志
         log_audit(
             request.user,
             AuditLog.Action.SCRIPT_DELETE,
             resource_type="script_template",
             resource_id=script_id,
-            description=f"删除控制脚本：{script.name}",
+            description=f"删除控制脚本：{script_name}",
             request=request,
         )
 
         return JsonResponse({"detail": "deleted", "id": script_id}, status=200)
 
 
-# -------------------------
-# Script Execution
-# -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
-class ScriptExecutionListView(
-    BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View
-):
+class ScriptExecutionListView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View):
     resource_type = ResourceType.SCRIPT_EXECUTE
-    """
-    GET  /api/v2/scripts/<script_id>/executions?device_id=<id>&status=success
-    POST /api/v2/scripts/<script_id>/execute
-
-    POST body（手动执行）:
-    {
-      "device_ids": [1, 2, 3]  // 可选，默认使用脚本关联的所有设备
-    }
-    """
 
     def get(self, request, script_id: int):
         try:
@@ -299,7 +362,6 @@ class ScriptExecutionListView(
 
         qs = ScriptExecution.objects.filter(script=script).order_by("-created_at")
 
-        # 筛选
         device_id = request.GET.get("device_id")
         if device_id:
             qs = qs.filter(device_id=device_id)
@@ -308,14 +370,11 @@ class ScriptExecutionListView(
         if status:
             qs = qs.filter(status=status)
 
-        limit = int(request.GET.get("limit", "50"))
-        limit = max(1, min(limit, 500))
-
-        items = [_execution_to_dict(x) for x in qs[:limit]]
+        limit = max(1, min(int(request.GET.get("limit", "50")), 500))
+        items = [_execution_to_dict(item) for item in qs[:limit]]
         return JsonResponse({"count": len(items), "data": items}, status=200)
 
     def post(self, request, script_id: int):
-        """手动执行脚本"""
         try:
             script = ScriptTemplate.objects.get(id=script_id)
         except ScriptTemplate.DoesNotExist:
@@ -327,36 +386,30 @@ class ScriptExecutionListView(
         data = self.json_body(request)
         executor = ScriptExecutor()
 
-        # 确定目标设备列表
         device_ids = data.get("device_ids", [])
         if device_ids:
             devices = Device.objects.filter(id__in=device_ids, is_active=True)
         else:
             devices = script.devices.filter(is_active=True)
             if not devices.exists():
-                return JsonResponse(
-                    {"detail": "No devices configured for this script"},
-                    status=400
-                )
+                return JsonResponse({"detail": "No devices configured for this script"}, status=400)
 
-        # 批量执行
         results = []
         for device in devices:
             execution = executor.execute_script(
                 script,
                 device,
                 trigger_reason="manual",
-                created_by=request.user if request.user.is_authenticated else None
+                created_by=request.user if request.user.is_authenticated else None,
             )
             results.append(_execution_to_dict(execution))
 
-        # 记录审计日志
         log_audit(
             request.user,
             AuditLog.Action.SCRIPT_EXECUTE,
             resource_type="script_execution",
             resource_id=script_id,
-            description=f"手动执行脚本：{script.name}，设备数：{len(devices)}",
+            description=f"手动执行脚本：{script.name}，设备数：{len(results)}",
             request=request,
         )
 
@@ -365,17 +418,14 @@ class ScriptExecutionListView(
                 "script_id": script_id,
                 "script_name": script.name,
                 "executed_count": len(results),
-                "executions": results
+                "executions": results,
             },
-            status=201
+            status=201,
         )
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ScriptExecutionDetailView(
-    BasicAuthMixin, ResourcePermissionMixin, View
-):
-    """GET /api/v2/script-executions/<execution_id>"""
+class ScriptExecutionDetailView(BasicAuthMixin, ResourcePermissionMixin, View):
     resource_type = ResourceType.SCRIPT_EXECUTE
     action_type = ActionType.READ
 
@@ -387,24 +437,11 @@ class ScriptExecutionDetailView(
         return JsonResponse(_execution_to_dict(execution), status=200)
 
 
-# -------------------------
-# Auto Control / Monitoring
-# -------------------------
 @method_decorator(csrf_exempt, name="dispatch")
-class AutoControlView(
-    BasicAuthMixin, ResourcePermissionMixin, View
-):
-    """
+class AutoControlView(BasicAuthMixin, ResourcePermissionMixin, View):
     resource_type = ResourceType.SCRIPT_EXECUTE
     action_type = ActionType.EXECUTE
-    POST /api/v2/scripts/check-and-execute
-    POST /api/v2/scripts/check-thresholds
-
-    检查所有阈值脚本并执行（由定时任务调用）
-    """
 
     def post(self, request):
-        """手动触发阈值检查"""
         monitor = ThresholdMonitor()
-        results = monitor.check_and_execute_all()
-        return JsonResponse(results, status=200)
+        return JsonResponse(monitor.check_and_execute_all(), status=200)

@@ -1,636 +1,90 @@
-"use client";
+﻿"use client";
 
-import { useState } from "react";
-
-const COMMAND_EXAMPLE = `{"commands": [{"command": "pump", "action": "on", "duration": 60000}]}`;
-const COMMAND_TEMPLATE_EXAMPLE = `示例1：开启水泵60秒
-{
-  "commands": [
-    {
-      "command": "pump",
-      "action": "on",
-      "duration": 60000
-    }
-  ]
-}
-
-示例2：开启风扇运行2分钟
-{
-  "commands": [
-    {
-      "command": "fan",
-      "action": "on",
-      "duration": 120000
-    }
-  ]
-}
-
-示例3：组合控制（水泵+风扇+阀门）
-{
-  "commands": [
-    {
-      "command": "pump",
-      "action": "on",
-      "duration": 30000
-    },
-    {
-      "command": "fan",
-      "action": "on",
-      "duration": 60000
-    },
-    {
-      "command": "valve",
-      "action": "on",
-      "duration": 30000
-    }
-  ]
-}
-
-支持的命令类型（纯开关控制）：
-• pump: 水泵
-• fan: 风扇
-• valve: 阀门
-• heater: 加热器
-• light: 照明
-• mixer: 搅拌器
-
-注意：所有命令都是简单的 on/off 开关，无需额外参数`;
-
-// 类型辅助：将 Form.Item 的 name 属性转为任意类型以绕过 TypeScript 检查
-type FormName<T extends string> = T;
-
-// 类型辅助：允许 setEditingScript 接受 Script | null
-type ScriptOrNull = Script | null;
-import {
-    Button,
-    Card,
-    Form,
-    Input,
-    Select,
-    Modal,
-    Space,
-    Table,
-    Tag,
-    Typography,
-    message,
-    Switch,
-    InputNumber,
-    Tooltip,
-    Alert,
-    Divider,
-} from "antd";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from "antd";
+import type { ColumnsType } from "antd/es/table";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Page from "@/components/Page";
 import { api } from "@/lib/api";
 
-const { Title, Text } = Typography;
+const { Paragraph, Text, Title } = Typography;
 
-const scriptTypeOptions = [
-    { value: "threshold", label: "阈值触发" },
-    { value: "schedule", label: "定时执行" },
-    { value: "hybrid", label: "混合模式" },
-    { value: "python", label: "Python脚本" },
-];
+type ScriptType = "threshold" | "schedule" | "hybrid" | "python";
+type Device = { device_id: number; name?: string; code?: string };
+type CommandRow = { command: string; action: string; duration?: number };
+type LinkageDraft = { id: string; linkage_type: ScriptType; sourceDeviceId?: number; sourceMetric?: string; operator?: string; threshold?: number; scheduleCron?: string; pythonCode?: string; targetDeviceId?: number; actionCommand?: string; actionType?: string; duration?: number };
+type Script = { id?: number; name: string; description?: string; script_type: ScriptType; script_type_display: string; is_active: boolean; priority: number; threshold_config?: Record<string, unknown>; schedule_config?: Record<string, unknown>; python_code?: string; command_template?: Record<string, unknown>; device_ids: number[] };
+type ScriptExecution = { execution_id: number; device_code: string; status: string; status_display: string; trigger_reason: string; result?: Record<string, unknown> | null; error_message?: string | null; started_at?: string };
+type ScriptFormValues = { name: string; description?: string; script_type: ScriptType; is_active: boolean; priority: number; threshold_config?: { metric?: string; operator?: string; value?: number }; schedule_config?: { cron?: string }; python_code?: string; command_template: string; target_device_id?: number };
+type LinkageFormValues = Omit<LinkageDraft, "id">;
 
-const operatorOptions = [
-    { value: ">", label: ">" },
-    { value: ">=", label: ">=" },
-    { value: "<", label: "<" },
-    { value: "<=", label: "<=" },
-    { value: "==", label: "=" },
-    { value: "!=", label: "!=" },
-];
+const typeOptions = [{ value: "threshold", label: "阈值触发" }, { value: "schedule", label: "定时执行" }, { value: "hybrid", label: "混合模式" }, { value: "python", label: "脚本模式" }] as const;
+const typeColor: Record<ScriptType, string> = { threshold: "blue", schedule: "green", hybrid: "orange", python: "purple" };
+const operatorOptions = [">", ">=", "<", "<=", "==", "!="].map((value) => ({ value, label: value }));
+const metricOptions = [{ value: "temperature", label: "温度" }, { value: "humidity", label: "湿度" }, { value: "o2", label: "氧气" }, { value: "co2", label: "二氧化碳" }];
+const commandOptions = ["pump", "fan", "heater", "valve", "light", "mixer", "aeration", "exhaust"].map((value) => ({ value, label: value }));
+const actionOptions = [{ value: "on", label: "开启" }, { value: "off", label: "关闭" }];
+const commandExamples: Record<ScriptType, string> = { threshold: `{"commands":[{"command":"fan","action":"on","duration":300000}]}`, schedule: `{"commands":[{"command":"pump","action":"on","duration":60000}]}`, hybrid: `{"commands":[{"command":"pump","action":"on","duration":60000},{"command":"fan","action":"on","duration":120000}]}`, python: `{"commands":[{"command":"fan","action":"on","duration":180000}]}` };
+const pythonExample = `temp = get_latest_value("temperature")\ncommands = []\n\nif temp is not None and temp >= 75:\n    commands.append({"command": "fan", "action": "on", "duration": 300000})`;
+const linkagePythonExample = `# 这里先写联动判断思路\n# 例如：A设备高温时，触发B设备排风\nif source_temperature >= 75:\n    action = "fan_on"`;
 
-interface Script {
-    id?: number;
-    name: string;
-    description?: string;
-    script_type: string;
-    script_type_display: string;
-    is_active: boolean;
-    priority: number;
-    threshold_config?: any;
-    schedule_config?: any;
-    python_code?: string;
-    command_template?: any;
-    device_ids: number[];
-    run_id?: number | null;
-    created_by?: string | null;
-    created_at: string;
-    updated_at: string;
+function deviceLabel(device?: Device) { return device ? `${device.name || device.code || `设备 ${device.device_id}`} (${device.device_id})` : "-"; }
+function typeLabel(type: ScriptType) { return typeOptions.find((item) => item.value === type)?.label || type; }
+function parseCommandTemplate(text: string) { const parsed = JSON.parse(text); if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("命令模板必须是 JSON 对象"); if (!Array.isArray((parsed as Record<string, unknown>).commands)) throw new Error("命令模板必须包含 commands 数组"); return parsed as Record<string, unknown>; }
+function parseCommandRows(text: string): CommandRow[] { try { const parsed = parseCommandTemplate(text); return (parsed.commands as unknown[]).filter((item) => item && typeof item === "object" && !Array.isArray(item)).map((item) => { const row = item as Record<string, unknown>; return { command: typeof row.command === "string" ? row.command : "pump", action: typeof row.action === "string" ? row.action : "on", duration: typeof row.duration === "number" ? row.duration : undefined }; }); } catch { return []; } }
+function rowsToText(rows: CommandRow[]) { return JSON.stringify({ commands: rows }, null, 2); }
+function toScriptPayload(values: ScriptFormValues) { if ((values.script_type === "threshold" || values.script_type === "hybrid") && !values.threshold_config?.metric) throw new Error("请补全阈值条件"); if ((values.script_type === "schedule" || values.script_type === "hybrid") && !values.schedule_config?.cron?.trim()) throw new Error("请填写 Cron 表达式"); if (values.script_type === "python" && !(values.python_code || "").includes("commands")) throw new Error("Python 脚本中至少需要定义 commands"); return { ...values, command_template: parseCommandTemplate(values.command_template), device_ids: values.target_device_id ? [values.target_device_id] : [] }; }
+function validateLinkage(values: LinkageFormValues) { if (values.linkage_type === "threshold" || values.linkage_type === "hybrid") { if (!values.sourceDeviceId || !values.sourceMetric || !values.operator || values.threshold === undefined) throw new Error("请补全联动的阈值条件"); } if (values.linkage_type === "schedule" || values.linkage_type === "hybrid") { if (!(values.scheduleCron || "").trim()) throw new Error("请填写联动的定时表达式"); } if (values.linkage_type === "python") { if (!(values.pythonCode || "").trim()) throw new Error("请填写联动脚本"); } if (!values.targetDeviceId || !values.actionCommand || !values.actionType) throw new Error("请补全联动动作"); }
+function getErrorMessage(error: unknown, fallback: string) { if (error && typeof error === "object" && "response" in error && error.response && typeof error.response === "object" && "data" in error.response && error.response.data && typeof error.response.data === "object" && "detail" in error.response.data && typeof error.response.data.detail === "string") return error.response.data.detail; return fallback; }
+
+function CommandEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const rows = useMemo(() => parseCommandRows(value), [value]);
+  const updateRows = (nextRows: CommandRow[]) => onChange(rowsToText(nextRows));
+  return <Card size="small" title="命令编辑" extra={<Button size="small" onClick={() => updateRows([...rows, { command: "pump", action: "on", duration: 60000 }])}>新增命令</Button>}><Space direction="vertical" style={{ width: "100%" }}>{!rows.length ? <Alert type="info" showIcon message="先新增一条命令，或者直接编辑下面的 JSON。" /> : null}{rows.map((row, index) => <Space key={`${row.command}-${index}`} wrap><Select style={{ width: 140 }} options={commandOptions} value={row.command} onChange={(next) => updateRows(rows.map((item, i) => i === index ? { ...item, command: next } : item))} /><Select style={{ width: 100 }} options={actionOptions} value={row.action} onChange={(next) => updateRows(rows.map((item, i) => i === index ? { ...item, action: next } : item))} /><InputNumber style={{ width: 160 }} min={0} value={row.duration} placeholder="持续时间(ms)" onChange={(next) => updateRows(rows.map((item, i) => i === index ? { ...item, duration: typeof next === "number" ? next : undefined } : item))} /><Button danger size="small" onClick={() => updateRows(rows.filter((_, i) => i !== index))}>删除</Button></Space>)}</Space></Card>;
 }
 
-interface Device {
-    device_id: number;
-    name?: string;
-    code?: string;
+function ScriptModal({ open, script, devices, loading, onClose, onSubmit }: { open: boolean; script: Script | null; devices: Device[]; loading: boolean; onClose: () => void; onSubmit: (values: ReturnType<typeof toScriptPayload>) => void }) {
+  const [form] = Form.useForm<ScriptFormValues>();
+  const currentType = Form.useWatch("script_type", form) ?? "threshold";
+  const commandText = Form.useWatch("command_template", form) ?? "";
+  useEffect(() => { if (!open) return; const type = script?.script_type ?? "threshold"; form.setFieldsValue({ name: script?.name ?? "", description: script?.description ?? "", script_type: type, is_active: script?.is_active ?? true, priority: script?.priority ?? 0, threshold_config: (script?.threshold_config as ScriptFormValues["threshold_config"]) ?? { metric: "temperature", operator: ">=", value: 75 }, schedule_config: (script?.schedule_config as ScriptFormValues["schedule_config"]) ?? { cron: "0 9 * * *" }, python_code: script?.python_code ?? pythonExample, command_template: JSON.stringify(script?.command_template || parseCommandTemplate(commandExamples[type]), null, 2), target_device_id: script?.device_ids?.[0] }); }, [form, open, script]);
+  return <Modal open={open} title={script ? "编辑控制脚本" : "新建控制脚本"} onCancel={onClose} onOk={() => form.submit()} okText={script ? "保存修改" : "创建脚本"} confirmLoading={loading} width={980} destroyOnHidden><Row gutter={[20, 20]}><Col xs={24} xl={15}><Form form={form} layout="vertical" onFinish={(values) => { try { onSubmit(toScriptPayload(values)); } catch (error) { message.error(error instanceof Error ? error.message : "保存失败"); } }}><Form.Item label="脚本名称" name="name" rules={[{ required: true, message: "请输入脚本名称" }]}><Input /></Form.Item><Form.Item label="脚本说明" name="description"><Input.TextArea rows={2} /></Form.Item><Form.Item label="脚本类型" name="script_type" rules={[{ required: true, message: "请选择脚本类型" }]}><Select options={typeOptions as never} /></Form.Item><Space wrap size={[16, 0]}><Form.Item label="启用状态" name="is_active" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item><Form.Item label="优先级" name="priority"><InputNumber min={0} /></Form.Item></Space><Alert style={{ marginBottom: 16 }} type="warning" showIcon message="这里主要做单设备自动控制" description="如果是不同设备之间的联动，可以从顶部“新建”里直接创建联动，或切到“设备联动”标签页。" /><Form.Item label="目标设备" name="target_device_id"><Select allowClear options={devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) }))} /></Form.Item>{(currentType === "threshold" || currentType === "hybrid") ? <Card size="small" title="阈值条件" style={{ marginBottom: 16 }}><Space wrap><Form.Item label="监控指标" name={["threshold_config", "metric"]}><Select style={{ width: 160 }} options={metricOptions} /></Form.Item><Form.Item label="比较符" name={["threshold_config", "operator"]}><Select style={{ width: 100 }} options={operatorOptions} /></Form.Item><Form.Item label="阈值" name={["threshold_config", "value"]}><InputNumber style={{ width: 140 }} /></Form.Item></Space></Card> : null}{(currentType === "schedule" || currentType === "hybrid") ? <Card size="small" title="定时条件" style={{ marginBottom: 16 }}><Form.Item label="Cron 表达式" name={["schedule_config", "cron"]}><Input /></Form.Item></Card> : null}{currentType === "python" ? <Card size="small" title="Python 脚本" style={{ marginBottom: 16 }}><Form.Item label="脚本代码" name="python_code" rules={[{ required: true, message: "请输入 Python 脚本" }]}><Input.TextArea rows={10} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} /></Form.Item></Card> : null}<CommandEditor value={commandText} onChange={(next) => form.setFieldValue("command_template", next)} /><Card size="small" title="命令模板 JSON" extra={<Button size="small" onClick={() => form.setFieldValue("command_template", commandExamples[currentType])}>填入教学示例</Button>}><Form.Item label="命令 JSON" name="command_template" rules={[{ required: true, message: "请输入命令模板" }, { validator: async (_, value?: string) => { if (!value?.trim()) throw new Error("请输入命令模板"); parseCommandTemplate(value); } }]}><Input.TextArea rows={12} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} /></Form.Item></Card></Form></Col><Col xs={24} xl={9}><Card size="small" title="使用说明"><Tag color={typeColor[currentType]}>{typeLabel(currentType)}</Tag><Paragraph style={{ marginTop: 12 }}>{currentType === "threshold" ? "适合按单个指标触发动作。" : currentType === "schedule" ? "适合做固定周期任务。" : currentType === "hybrid" ? "适合定时兜底加阈值保护。" : "适合更复杂的判断逻辑。"}</Paragraph><ul style={{ paddingLeft: 18, marginBottom: 12 }}><li>先选目标设备。</li><li>先做最小示例，再逐步加复杂逻辑。</li><li>保存后先手动执行一次，再看记录。</li></ul><pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>{commandExamples[currentType]}</pre></Card></Col></Row></Modal>;
 }
 
-interface ScriptModalProps {
-    open: boolean;
-    script?: Script | null;
-    devices?: Device[];
-    onClose: () => void;
-    onSubmit: (values: any) => void;
-    loading?: boolean;
+function LinkageModal({ open, devices, onClose, onSubmit }: { open: boolean; devices: Device[]; onClose: () => void; onSubmit: (values: LinkageFormValues) => void }) {
+  const [form] = Form.useForm<LinkageFormValues>();
+  const deviceOptions = useMemo(() => devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) })), [devices]);
+  const linkageType = Form.useWatch("linkage_type", form) ?? "threshold";
+  useEffect(() => { if (!open) return; form.setFieldsValue({ linkage_type: "threshold" }); }, [form, open]);
+  return <Modal open={open} title="新建设备联动" onCancel={onClose} onOk={() => form.submit()} okText="加入草稿" width={900} destroyOnHidden><Alert style={{ marginBottom: 16 }} type="info" showIcon message="联动也支持多种模式" description="现在联动也可以选择阈值、定时、混合、脚本四种模式。先把方式选对，再配置触发与动作会顺很多。" /><Form form={form} layout="vertical" onFinish={(values) => { try { validateLinkage(values); onSubmit(values); } catch (error) { message.error(error instanceof Error ? error.message : "保存失败"); } }}><Form.Item label="联动模式" name="linkage_type" rules={[{ required: true, message: "请选择联动模式" }]}><Select options={typeOptions as never} /></Form.Item>{(linkageType === "threshold" || linkageType === "hybrid") ? <><Title level={5}>阈值条件</Title><Form.Item label="触发设备" name="sourceDeviceId" rules={[{ required: true, message: "请选择触发设备" }]}><Select options={deviceOptions} /></Form.Item><Space wrap><Form.Item label="监控指标" name="sourceMetric" rules={[{ required: true, message: "请选择监控指标" }]}><Select style={{ width: 160 }} options={metricOptions} /></Form.Item><Form.Item label="比较符" name="operator" rules={[{ required: true, message: "请选择比较符" }]}><Select style={{ width: 100 }} options={operatorOptions} /></Form.Item><Form.Item label="阈值" name="threshold" rules={[{ required: true, message: "请输入阈值" }]}><InputNumber style={{ width: 140 }} /></Form.Item></Space></> : null}{(linkageType === "schedule" || linkageType === "hybrid") ? <><Title level={5}>定时条件</Title><Form.Item label="Cron 表达式" name="scheduleCron" rules={[{ required: true, message: "请输入 Cron 表达式" }]}><Input placeholder="例如：0 9 * * *" /></Form.Item></> : null}{linkageType === "python" ? <><Title level={5}>脚本条件</Title><Form.Item label="联动脚本" name="pythonCode" rules={[{ required: true, message: "请输入联动脚本" }]}><Input.TextArea rows={8} placeholder={linkagePythonExample} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} /></Form.Item></> : null}<Title level={5}>执行动作</Title><Form.Item label="目标设备" name="targetDeviceId" rules={[{ required: true, message: "请选择目标设备" }]}><Select options={deviceOptions} /></Form.Item><Space wrap><Form.Item label="动作命令" name="actionCommand" rules={[{ required: true, message: "请选择动作命令" }]}><Select style={{ width: 160 }} options={commandOptions} /></Form.Item><Form.Item label="动作" name="actionType" rules={[{ required: true, message: "请选择动作" }]}><Select style={{ width: 120 }} options={actionOptions} /></Form.Item><Form.Item label="持续时间(ms)" name="duration"><InputNumber style={{ width: 160 }} min={0} /></Form.Item></Space></Form></Modal>;
 }
 
-function ScriptModal({ open, script, devices, onClose, onSubmit, loading }: ScriptModalProps) {
-    const [form] = Form.useForm();
-    const [scriptType, setScriptType] = useState("threshold");
-    const isEdit = !!script;
+function ExecutionHistoryModal({ open, script, onClose }: { open: boolean; script: Script | null; onClose: () => void }) {
+  const executionsQ = useQuery({ queryKey: ["script-executions", script?.id], enabled: open && !!script?.id, queryFn: async () => (await api.get(`/scripts/${script?.id}/executions`, { params: { limit: 20 } })).data as { data: ScriptExecution[] } });
+  const columns: ColumnsType<ScriptExecution> = [{ title: "设备", dataIndex: "device_code", width: 160 }, { title: "状态", width: 100, render: (_, row) => <Tag color={row.status === "success" ? "green" : row.status === "failed" ? "red" : "blue"}>{row.status_display || row.status}</Tag> }, { title: "触发方式", dataIndex: "trigger_reason", width: 120, render: (value: string) => value || "-" }, { title: "开始时间", dataIndex: "started_at", width: 170, render: (value: string) => value || "-" }, { title: "结果", render: (_, row) => row.error_message ? <Text type="danger">{row.error_message}</Text> : typeof row.result?.detail === "string" ? row.result.detail : "已执行" }];
+  return <Modal open={open} title={script ? `执行记录：${script.name}` : "执行记录"} footer={null} onCancel={onClose} width={900} destroyOnHidden><Table rowKey="execution_id" loading={executionsQ.isLoading} dataSource={executionsQ.data?.data || []} columns={columns} pagination={false} locale={{ emptyText: "暂无执行记录" }} scroll={{ x: 760 }} /></Modal>;
+}
 
-    return (
-        <Modal
-            open={open}
-            title={isEdit ? "编辑脚本" : "新建脚本"}
-            onCancel={onClose}
-            onOk={() => form.submit()}
-            width={800}
-            destroyOnHidden
-        >
-            <Form
-                form={form}
-                layout="vertical"
-                initialValues={isEdit && script ? {
-                    name: script.name,
-                    description: script.description,
-                    script_type: script.script_type,
-                    is_active: script.is_active,
-                    priority: script.priority,
-                    threshold_config: script.threshold_config || {},
-                    schedule_config: script.schedule_config || {},
-                    python_code: script.python_code || "",
-                    command_template: script.command_template || {},
-                    device_ids: script.device_ids || [],
-                } : {
-                    name: "",
-                    description: "",
-                    script_type: "threshold",
-                    is_active: true,
-                    priority: 0,
-                    threshold_config: { metric: "temperature", operator: ">=", value: 75 },
-                    schedule_config: {},
-                    python_code: "",
-                    command_template: { commands: [] },
-                    device_ids: [],
-                }}
-                onFinish={(values) => onSubmit({ ...values, script_type: scriptType })}
-            >
-                <Form.Item
-                    label="脚本名称"
-                    name="name"
-                    rules={[{ required: true, message: "请输入脚本名称" }]}
-                >
-                    <Input placeholder="例如：高温自动降温" />
-                </Form.Item>
-
-                <Form.Item label="脚本描述" name="description">
-                    <Input.TextArea rows={2} placeholder="可选，描述脚本的作用" />
-                </Form.Item>
-
-                {/* @ts-ignore */}
-                <Form.Item
-                    label="脚本类型"
-                    name="script_type"
-                    rules={[{ required: true, message: "请选择脚本类型" }]}
-                >
-                    <Select
-                        options={scriptTypeOptions}
-                        onChange={(value) => setScriptType(value)}
-                    />
-                </Form.Item>
-
-                <Form.Item label="是否启用" name="is_active" valuePropName="checked">
-                    <Switch />
-                </Form.Item>
-                <Text type="secondary">禁用后脚本不会自动触发，但仍可手动执行</Text>
-
-                <Form.Item label="优先级" name="priority">
-                    <InputNumber min={0} max={100} placeholder="数字越大越优先执行" />
-                </Form.Item>
-                <Text type="secondary">当多个脚本同时触发时，优先级高的先执行（0-100）</Text>
-
-                {/* @ts-ignore */}
-                <Form.Item
-                    label="关联设备"
-                    name="device_ids"
-                >
-                    <Select
-                        mode="multiple"
-                        placeholder="选择要应用的设备（留空表示应用到所有）"
-                        options={devices?.map((d) => ({ value: d.device_id, label: `${d.name || d.code} (${d.device_id})` }))}
-                    />
-                </Form.Item>
-                <Text type="secondary">留空表示应用到所有设备，也可选择特定设备</Text>
-
-                {scriptType === "threshold" && (
-                    <>
-                        <Title level={5}>阈值配置</Title>
-                        <Alert
-                            title="阈值触发说明"
-                            description="当设备监测的指标达到设定的阈值时，系统会自动执行下方配置的命令模板。例如：温度≥75℃时自动开启降温设备。"
-                            type="info"
-                            showIcon
-                            style={{ marginBottom: 16 }}
-                        />
-                        <Form.Item label="监控指标" name={["threshold_config", "metric"]}>
-                            <Select
-                                placeholder="选择要监控的指标"
-                                options={[
-                                    { value: "temperature", label: "温度" },
-                                    { value: "o2", label: "氧气" },
-                                    { value: "humidity", label: "湿度" },
-                                ]}
-                            />
-                        </Form.Item>
-                        <Space>
-                            <Form.Item label="操作符" name={["threshold_config", "operator"]} noStyle>
-                                <Select style={{ width: 100 }} options={operatorOptions} />
-                            </Form.Item>
-                            <Form.Item label="阈值" name={["threshold_config", "value"]} noStyle>
-                                <InputNumber style={{ width: 150 }} placeholder="阈值数值" />
-                            </Form.Item>
-                        </Space>
-                    </>
-                )}
-
-                {scriptType === "schedule" && (
-                    <>
-                        <Title level={5}>定时配置</Title>
-                        <Alert
-                            title="定时执行说明"
-                            description="使用 cron 表达式定义脚本执行时间，系统会按照设定的时间周期自动执行命令。"
-                            type="info"
-                            showIcon
-                            style={{ marginBottom: 16 }}
-                        />
-                        <Form.Item label="Cron表达式" name={["schedule_config", "cron"]}>
-                            <Input placeholder="例如：0 9 * * * (每天9点)" />
-                        </Form.Item>
-                        <Text type="secondary">
-                            常用示例：0 9 * * * (每天9点) | 0 0 * * 1 (每周一0点) | 0 */6 * * * (每6小时)
-                        </Text>
-                    </>
-                )}
-
-                {scriptType === "python" && (
-                    <>
-                        <Title level={5}>Python脚本</Title>
-                        <Alert
-                            title="Python脚本说明"
-                            description="编写自定义 Python 代码实现复杂的控制逻辑。可以使用预定义的函数获取设备数据，并返回要执行的命令列表。"
-                            type="info"
-                            showIcon
-                            style={{ marginBottom: 16 }}
-                        />
-                        <Form.Item
-                            label="脚本代码"
-                            name="python_code"
-                            rules={[{ required: true, message: "请输入Python代码" }]}
-                        >
-                            <Input.TextArea
-                                rows={16}
-                                placeholder={`# 获取最新温度值
-temp = get_latest_value("temperature")
-humidity = get_latest_value("humidity")
-
-# 初始化命令列表
-commands = []
-
-# 根据温度控制设备
-if temp > 75:
-    # 高温：开启风扇和水泵
-    commands = [
-        {"command": "fan", "action": "on", "duration": 300000},
-        {"command": "pump", "action": "on", "duration": 120000}
-    ]
-elif temp < 50:
-    # 低温：开启加热器
-    commands = [
-        {"command": "heater", "action": "on"}
-    ]
-else:
-    # 温度合适：定时开启搅拌器
-    commands = [
-        {"command": "mixer", "action": "on", "duration": 60000}
-    ]
-
-# 湿度过高时加强通风
-if humidity > 80:
-    commands.append({"command": "fan", "action": "on", "duration": 600000})`}
-                                style={{ fontFamily: "monospace", fontSize: 12 }}
-                            />
-                        </Form.Item>
-                        <Text type="secondary">
-                            可用函数：get_latest_value(metric) - 获取指定指标的最新值<br />
-                            可用变量：device (当前设备信息)、datetime (日期时间)、timedelta (时间差)<br />
-                            必须返回：commands 变量（命令列表，格式：{COMMAND_EXAMPLE}）
-                        </Text>
-                    </>
-                )}
-
-                <Title level={5}>命令模板</Title>
-                <Alert
-                    title="命令模板说明"
-                    description={
-                        <div>
-                            <p>定义当脚本触发时要发送给设备的控制命令。使用 JSON 格式配置，支持多个命令组合。</p>
-                            <p style={{ marginTop: 8 }}>
-                                <strong>命令格式：</strong>
-                                <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 3 }}>
-                                    {`{"commands": [{"command": "pump", "action": "on", "duration": 60000}]}`}
-                                </code>
-                            </p>
-                            <p style={{ marginTop: 8 }}>
-                                <strong>参数说明：</strong>
-                            </p>
-                            <ul style={{ fontSize: 12, marginTop: 4 }}>
-                                <li><code>command</code>: 命令类型（pump/fan/valve/heater/light/mixer）</li>
-                                <li><code>action</code>: 动作类型（on=开启，off=关闭）</li>
-                                <li><code>duration</code>: 持续时间（毫秒，可选，不指定则永久开启）</li>
-                            </ul>
-                            <p style={{ marginTop: 8, fontWeight: 500 }}>
-                                <strong>支持的命令类型：</strong>
-                            </p>
-                            <ul style={{ fontSize: 12, marginTop: 4 }}>
-                                <li><code>pump</code>: 水泵</li>
-                                <li><code>fan</code>: 风扇</li>
-                                <li><code>valve</code>: 阀门</li>
-                                <li><code>heater</code>: 加热器</li>
-                                <li><code>light</code>: 照明</li>
-                                <li><code>mixer</code>: 搅拌器</li>
-                            </ul>
-                            <p style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-                                💡 提示：所有命令都是简单的 on/off 开关，无需额外参数
-                            </p>
-                        </div>
-                    }
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                />
-                <Form.Item label="命令JSON" name="command_template">
-                        <Input.TextArea
-                                rows={12}
-                                placeholder={COMMAND_TEMPLATE_EXAMPLE}
-                                style={{ fontFamily: "monospace", fontSize: 12 }}
-                            />
-                </Form.Item>
-            </Form>
-        </Modal>
-    );
+function LinkagePanel({ devices, drafts, onCreate, onRemove }: { devices: Device[]; drafts: LinkageDraft[]; onCreate: () => void; onRemove: (id: string) => void }) {
+  const columns: ColumnsType<LinkageDraft> = [{ title: "模式", width: 110, render: (_, row) => <Tag color={typeColor[row.linkage_type]}>{typeLabel(row.linkage_type)}</Tag> }, { title: "条件", render: (_, row) => row.linkage_type === "schedule" ? `按定时表达式 ${row.scheduleCron || "-"}` : row.linkage_type === "python" ? "自定义脚本条件" : row.linkage_type === "hybrid" ? `${deviceLabel(devices.find((device) => device.device_id === row.sourceDeviceId))} 的 ${row.sourceMetric || "-"} ${row.operator || ""} ${row.threshold ?? "-"}，并按 ${row.scheduleCron || "-"} 定时检查` : `${deviceLabel(devices.find((device) => device.device_id === row.sourceDeviceId))} 的 ${row.sourceMetric || "-"} ${row.operator || ""} ${row.threshold ?? "-"}` }, { title: "执行动作", render: (_, row) => `${deviceLabel(devices.find((device) => device.device_id === row.targetDeviceId))} 执行 ${row.actionCommand || "-"} ${row.actionType || ""}${row.duration !== undefined ? `，持续 ${row.duration} ms` : ""}` }, { title: "操作", width: 100, render: (_, row) => <Button danger size="small" onClick={() => onRemove(row.id)}>删除</Button> }];
+  return <><Card style={{ marginBottom: 16 }}><Alert type="info" showIcon message="设备联动已经收进控制脚本页" description="现在联动也支持阈值、定时、混合、脚本四种模式，和单设备脚本的心智更接近。" /></Card><Row gutter={[16, 16]}><Col xs={24} xl={14}><Card title="新建设备联动" extra={<Button type="primary" size="small" onClick={onCreate}>新建联动</Button>}><Paragraph style={{ marginBottom: 8 }}>推荐先用草稿的方式把联动关系记下来，再决定后面怎么正式保存和执行。</Paragraph><Paragraph type="secondary" style={{ marginBottom: 0 }}>现在也可以先选联动模式，再配置对应条件。</Paragraph></Card></Col><Col xs={24} xl={10}><Card title="说明"><Paragraph>联动现在支持四种模式：阈值触发、定时执行、混合模式、脚本模式。</Paragraph><Paragraph type="secondary">这会比只有一种触发方式更接近真实使用场景，也更方便你后面继续细化。</Paragraph><ul style={{ paddingLeft: 18, marginBottom: 0 }}><li>阈值：按指标条件触发。</li><li>定时：按 cron 周期触发。</li><li>混合：定时检查并叠加阈值。</li><li>脚本：先写复杂联动思路草稿。</li></ul></Card></Col></Row><Card title="联动草稿" style={{ marginTop: 16 }}>{drafts.length ? <Table rowKey="id" dataSource={drafts} columns={columns} pagination={false} /> : <Empty description="还没有联动草稿" />}<Space style={{ marginTop: 16 }}><Tag color="gold">草稿版</Tag><Text type="secondary">当前先用于整理联动配置方式。</Text></Space></Card></>;
 }
 
 export default function ScriptsPage() {
-    const queryClient = useQueryClient();
-    const [modalOpen, setModalOpen] = useState(false);
-    const [editingScript, setEditingScript] = useState<ScriptOrNull>(null);
-
-    const scriptsQ = useQuery({
-        queryKey: ["scripts"],
-        queryFn: async () => {
-            const res = await api.get("/scripts");
-            return res.data;
-        },
-    });
-
-    const devicesQ = useQuery({
-        queryKey: ["devices"],
-        queryFn: async () => {
-            const res = await api.get("/devices");
-            return res.data;
-        },
-    });
-
-    const createScript = useMutation({
-        mutationFn: async (data: any) => {
-            return await api.post("/scripts", data);
-        },
-        onSuccess: () => {
-            message.success("脚本创建成功");
-            setModalOpen(false);
-            queryClient.invalidateQueries({ queryKey: ["scripts"] });
-        },
-        onError: (err: any) => {
-            message.error(err?.response?.data?.detail || "创建失败");
-        },
-    });
-
-    const updateScript = useMutation({
-        mutationFn: async (data: any) => {
-            return await api.patch(`/scripts/${editingScript?.id}`, data);
-        },
-        onSuccess: () => {
-            message.success("脚本更新成功");
-            setModalOpen(false);
-            setEditingScript(null);
-            queryClient.invalidateQueries({ queryKey: ["scripts"] });
-        },
-        onError: (err: any) => {
-            message.error(err?.response?.data?.detail || "更新失败");
-        },
-    });
-
-    const deleteScript = useMutation({
-        mutationFn: async (scriptId: number) => {
-            return await api.delete(`/scripts/${scriptId}`);
-        },
-        onSuccess: () => {
-            message.success("脚本删除成功");
-            queryClient.invalidateQueries({ queryKey: ["scripts"] });
-        },
-        onError: (err: any) => {
-            message.error(err?.response?.data?.detail || "删除失败");
-        },
-    });
-
-    const executeScript = useMutation({
-        mutationFn: async ({ scriptId, deviceIds }: { scriptId: number; deviceIds?: number[] }) => {
-            return await api.post(`/scripts/${scriptId}/executions`, { device_ids: deviceIds || [] });
-        },
-        onSuccess: () => {
-            message.success("脚本执行成功");
-            queryClient.invalidateQueries({ queryKey: ["scripts"] });
-        },
-        onError: (err: any) => {
-            message.error(err?.response?.data?.detail || "执行失败");
-        },
-    });
-
-    function openCreateModal() {
-        setEditingScript(null);
-        setModalOpen(true);
-    }
-
-    function openEditModal(script: Script) {
-        setEditingScript(script);
-        setModalOpen(true);
-    }
-
-    return (
-        <Page
-            title="控制脚本"
-            extra={<Button type="primary" onClick={openCreateModal}>新建脚本</Button>}
-        >
-            <Card style={{ marginBottom: 16 }}>
-                <Alert
-                    title="脚本说明"
-                    description={
-                        <div style={{ marginTop: 8 }}>
-                            <p style={{ marginBottom: 8, fontWeight: 500 }}>脚本类型说明：</p>
-                            <div style={{ display: 'grid', gap: 8 }}>
-                                <div>
-                                    <Tag color="blue">阈值触发</Tag>
-                                    <Text style={{ marginLeft: 8 }}>当设备监测数据（如温度、氧气、湿度）达到设定阈值时自动执行控制命令</Text>
-                                </div>
-                                <div>
-                                    <Tag color="green">定时执行</Tag>
-                                    <Text style={{ marginLeft: 8 }}>按照 cron 表达式设定的时间定期执行控制命令（如每天 9 点自动开启设备）</Text>
-                                </div>
-                                <div>
-                                    <Tag color="orange">混合模式</Tag>
-                                    <Text style={{ marginLeft: 8 }}>结合阈值触发和定时执行，灵活控制设备</Text>
-                                </div>
-                                <div>
-                                    <Tag color="purple">Python脚本</Tag>
-                                    <Text style={{ marginLeft: 8 }}>编写自定义 Python 代码实现复杂的控制逻辑</Text>
-                                </div>
-                            </div>
-                            <Divider style={{ margin: '12px 0' }} />
-                            <p style={{ marginBottom: 8, fontWeight: 500 }}>使用建议：</p>
-                            <ul style={{ marginLeft: 20, marginBottom: 8 }}>
-                                <li>优先级：数字越大越优先执行，用于解决多个脚本同时触发时的执行顺序</li>
-                                <li>关联设备：留空表示脚本应用到所有设备，也可以指定特定设备</li>
-                                <li>命令模板：使用 JSON 格式定义要发送给设备的控制命令</li>
-                                <li>执行历史：可以在执行记录中查看脚本的执行情况和结果</li>
-                            </ul>
-                            <p style={{ marginBottom: 8, fontWeight: 500 }}>命令格式示例：</p>
-                            <pre style={{
-                                background: '#f5f5f5',
-                                padding: '8px 12px',
-                                borderRadius: 4,
-                                fontSize: 12,
-                                overflowX: 'auto'
-                            }}>
-{`{
-  "commands": [
-    {
-      "command": "pump",
-      "action": "on",
-      "duration": 60000
-    }
-  ]
-}`}
-                            </pre>
-                        </div>
-                    }
-                    type="info"
-                    showIcon
-                />
-            </Card>
-
-            <Card>
-                <Table
-                    loading={scriptsQ.isLoading}
-                    dataSource={scriptsQ.data?.data || []}
-                    rowKey="id"
-                    pagination={{ pageSize: 20 }}
-                    columns={[
-                        {
-                            title: "ID",
-                            dataIndex: "id",
-                            width: 80,
-                        },
-                        {
-                            title: "名称",
-                            dataIndex: "name",
-                            width: 150,
-                        },
-                        {
-                            title: "描述",
-                            dataIndex: "description",
-                            width: 200,
-                            render: (v) => v || "-",
-                        },
-                        {
-                            title: "类型",
-                            dataIndex: "script_type_display",
-                            width: 120,
-                            render: (v, r: Script) => (
-                                <Tag color={r.script_type === "threshold" ? "blue" : r.script_type === "python" ? "purple" : "green"}>
-                                    {v}
-                                </Tag>
-                            ),
-                        },
-                        {
-                            title: "状态",
-                            dataIndex: "is_active",
-                            width: 80,
-                            render: (v) => (
-                                <Tag color={v ? "green" : "red"}>{v ? "启用" : "禁用"}</Tag>
-                            ),
-                        },
-                        {
-                            title: "优先级",
-                            dataIndex: "priority",
-                            width: 80,
-                        },
-                        {
-                            title: "操作",
-                            key: "actions",
-                            width: 250,
-                            render: (_, record) => (
-                                <Space size="small">
-                                    <Tooltip title="执行脚本">
-                                        <Button
-                                            size="small"
-                                            type="primary"
-                                            disabled={!record.is_active}
-                                            onClick={() => executeScript.mutate({ scriptId: record.id || 0 })}
-                                            loading={executeScript.isPending}
-                                        >
-                                            执行
-                                        </Button>
-                                    </Tooltip>
-                                    <Button
-                                        size="small"
-                                        onClick={() => openEditModal(record)}
-                                    >
-                                        编辑
-                                    </Button>
-                                    <Button
-                                        size="small"
-                                        danger
-                                        onClick={() => deleteScript.mutate(record.id || 0)}
-                                        loading={deleteScript.isPending}
-                                    >
-                                        删除
-                                    </Button>
-                                </Space>
-                            ),
-                        },
-                    ]}
-                />
-            </Card>
-
-            <ScriptModal
-                open={modalOpen}
-                script={editingScript}
-                devices={devicesQ.data?.data}
-                onClose={() => {
-                    setModalOpen(false);
-                    setEditingScript(null);
-                }}
-                onSubmit={(values) => {
-                    if (editingScript) {
-                        updateScript.mutate(values);
-                    } else {
-                        createScript.mutate(values);
-                    }
-                }}
-                loading={createScript.isPending || updateScript.isPending}
-            />
-        </Page>
-    );
+  const queryClient = useQueryClient();
+  const [scriptModalOpen, setScriptModalOpen] = useState(false);
+  const [linkageModalOpen, setLinkageModalOpen] = useState(false);
+  const [creatorModalOpen, setCreatorModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("single");
+  const [editingScript, setEditingScript] = useState<Script | null>(null);
+  const [historyScript, setHistoryScript] = useState<Script | null>(null);
+  const [linkageDrafts, setLinkageDrafts] = useState<LinkageDraft[]>([]);
+  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: async () => (await api.get("/scripts")).data as { data: Script[] } });
+  const devicesQ = useQuery({ queryKey: ["devices"], queryFn: async () => (await api.get("/devices")).data as { data: Device[] } });
+  const createScript = useMutation({ mutationFn: async (data: ReturnType<typeof toScriptPayload>) => api.post("/scripts", data), onSuccess: () => { message.success("脚本创建成功"); setScriptModalOpen(false); setEditingScript(null); queryClient.invalidateQueries({ queryKey: ["scripts"] }); }, onError: (error: unknown) => message.error(getErrorMessage(error, "脚本创建失败")) });
+  const updateScript = useMutation({ mutationFn: async (data: ReturnType<typeof toScriptPayload>) => api.patch(`/scripts/${editingScript?.id}`, data), onSuccess: () => { message.success("脚本更新成功"); setScriptModalOpen(false); setEditingScript(null); queryClient.invalidateQueries({ queryKey: ["scripts"] }); }, onError: (error: unknown) => message.error(getErrorMessage(error, "脚本更新失败")) });
+  const deleteScript = useMutation({ mutationFn: async (id: number) => api.delete(`/scripts/${id}`), onSuccess: () => { message.success("脚本删除成功"); queryClient.invalidateQueries({ queryKey: ["scripts"] }); }, onError: (error: unknown) => message.error(getErrorMessage(error, "脚本删除失败")) });
+  const executeScript = useMutation({ mutationFn: async (id: number) => api.post(`/scripts/${id}/executions`, { device_ids: [] }), onSuccess: (_, id) => { message.success("脚本已执行"); queryClient.invalidateQueries({ queryKey: ["scripts"] }); queryClient.invalidateQueries({ queryKey: ["script-executions", id] }); }, onError: (error: unknown) => message.error(getErrorMessage(error, "脚本执行失败")) });
+  const scriptColumns: ColumnsType<Script> = [{ title: "名称", dataIndex: "name", width: 180 }, { title: "类型", width: 120, render: (_, row) => <Tag color={typeColor[row.script_type]}>{row.script_type_display || row.script_type}</Tag> }, { title: "状态", width: 100, render: (_, row) => <Tag color={row.is_active ? "green" : "default"}>{row.is_active ? "启用" : "停用"}</Tag> }, { title: "优先级", dataIndex: "priority", width: 90 }, { title: "设备数", width: 90, render: (_, row) => row.device_ids?.length ?? 0 }, { title: "说明", dataIndex: "description", render: (value: string) => value || "-" }, { title: "操作", width: 280, render: (_, row) => <Space size="small" wrap><Button size="small" type="primary" disabled={!row.is_active} loading={executeScript.isPending && executeScript.variables === row.id} onClick={() => executeScript.mutate(row.id || 0)}>执行</Button><Button size="small" onClick={() => setHistoryScript(row)}>记录</Button><Button size="small" onClick={() => { setEditingScript(row); setScriptModalOpen(true); }}>编辑</Button><Button size="small" danger loading={deleteScript.isPending && deleteScript.variables === row.id} onClick={() => deleteScript.mutate(row.id || 0)}>删除</Button></Space> }];
+  return <Page title="控制脚本" extra={<Button type="primary" onClick={() => setCreatorModalOpen(true)}>新建</Button>}><Card style={{ marginBottom: 16 }}><Row gutter={[16, 16]}><Col xs={24} xl={12}><Title level={5} style={{ marginTop: 0 }}>怎么用更顺手</Title><ul style={{ paddingLeft: 18, marginBottom: 0 }}><li>单设备自动控制，放在第一个标签页。</li><li>不同设备之间的联动，放在第二个标签页。</li><li>现在也可以直接从顶部“新建”里选择创建哪一种。</li></ul></Col><Col xs={24} xl={12}><Alert type="info" showIcon message="建议先从简单示例开始" description="例如先做一条“高温开启风机”的阈值脚本，确认设备命令正常，再继续叠加复杂逻辑。" /></Col></Row></Card><Tabs activeKey={activeTab} onChange={setActiveTab} items={[{ key: "single", label: "单设备自动控制", children: <Card><Table rowKey="id" loading={scriptsQ.isLoading} dataSource={scriptsQ.data?.data || []} columns={scriptColumns} pagination={{ pageSize: 20 }} scroll={{ x: 1100 }} /></Card> }, { key: "linkage", label: "设备联动", children: <LinkagePanel devices={devicesQ.data?.data || []} drafts={linkageDrafts} onCreate={() => setLinkageModalOpen(true)} onRemove={(id) => setLinkageDrafts((current) => current.filter((item) => item.id !== id))} /> }]} /><ScriptModal open={scriptModalOpen} script={editingScript} devices={devicesQ.data?.data || []} loading={createScript.isPending || updateScript.isPending} onClose={() => { setScriptModalOpen(false); setEditingScript(null); }} onSubmit={(values) => { if (editingScript) updateScript.mutate(values); else createScript.mutate(values); }} /><LinkageModal open={linkageModalOpen} devices={devicesQ.data?.data || []} onClose={() => setLinkageModalOpen(false)} onSubmit={(values) => { setLinkageDrafts((current) => [{ ...values, id: String(Date.now()) }, ...current]); setLinkageModalOpen(false); setActiveTab("linkage"); message.success("已加入联动草稿"); }} /><ExecutionHistoryModal open={!!historyScript} script={historyScript} onClose={() => setHistoryScript(null)} /><Modal open={creatorModalOpen} title="新建内容" footer={null} onCancel={() => setCreatorModalOpen(false)} destroyOnHidden><Space direction="vertical" style={{ width: "100%" }} size={12}><Card size="small" title="单设备脚本"><Paragraph type="secondary">适合单台设备的阈值、定时、Python 自动控制。</Paragraph><Button type="primary" onClick={() => { setCreatorModalOpen(false); setActiveTab("single"); setEditingScript(null); setScriptModalOpen(true); }}>创建单设备脚本</Button></Card><Card size="small" title="设备联动"><Paragraph type="secondary">现在也支持阈值、定时、混合、脚本四种联动模式。</Paragraph><Button onClick={() => { setCreatorModalOpen(false); setActiveTab("linkage"); setLinkageModalOpen(true); }}>创建设备联动</Button></Card></Space></Modal></Page>;
 }

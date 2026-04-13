@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -36,6 +36,7 @@ function getSelectedKey(pathname: string) {
     if (pathname.startsWith("/runs")) return "/runs";
     if (pathname.startsWith("/telemetry")) return "/telemetry";
     if (pathname.startsWith("/scripts")) return "/scripts";
+    if (pathname.startsWith("/linkages")) return "/scripts";
     if (pathname.startsWith("/announcements/history")) return "/announcements/history";
     if (pathname.startsWith("/announcements")) return "/announcements";
     if (pathname.startsWith("/users")) return "/users";
@@ -55,16 +56,16 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
 
-  // 使用 useMe query 获取当前用户信息
+  // 浣跨敤 useMe query 鑾峰彇褰撳墠鐢ㄦ埛淇℃伅
   const { data: meData, isLoading: isLoadingMe } = useMe();
 
-  // 尝试从 sessionStorage 获取用户信息（避免频繁 API 请求）
+  // 灏濊瘯浠?sessionStorage 鑾峰彇鐢ㄦ埛淇℃伅锛堥伩鍏嶉绻?API 璇锋眰锛?
   const sessionStorageUser = getUser();
 
-  // 优先使用 sessionStorage 中的用户信息，如果没有则使用 API 返回的数据
+  // 浼樺厛浣跨敤 sessionStorage 涓殑鐢ㄦ埛淇℃伅锛屽鏋滄病鏈夊垯浣跨敤 API 杩斿洖鐨勬暟鎹?
   const currentUser = sessionStorageUser || meData || null;
 
-  // 当从 API 获取到用户信息时，保存到 sessionStorage
+  // 褰撲粠 API 鑾峰彇鍒扮敤鎴蜂俊鎭椂锛屼繚瀛樺埌 sessionStorage
   useEffect(() => {
     if (meData && !sessionStorageUser) {
       setUser(meData);
@@ -73,7 +74,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const selectedKey = useMemo(() => getSelectedKey(pathname), [pathname]);
 
-  // 初始化折叠状态（桌面端记忆但默认打开；移动端默认折叠）
+  // 鍒濆鍖栨姌鍙犵姸鎬侊紙妗岄潰绔蹇嗕絾榛樿鎵撳紑锛涚Щ鍔ㄧ榛樿鎶樺彔锛?
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isMobile) {
@@ -81,12 +82,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       setMobileDrawerOpen(false);
       return;
     }
-    // 从 localStorage 读取折叠状态，如果不存在或不是 "1" 则默认打开
+    // 浠?localStorage 璇诲彇鎶樺彔鐘舵€侊紝濡傛灉涓嶅瓨鍦ㄦ垨涓嶆槸 "1" 鍒欓粯璁ゆ墦寮€
     const v = window.localStorage.getItem("compostlab:siderCollapsed");
     if (v === "1") {
       setCollapsed(true);
     } else {
-      // 默认打开，并设置 localStorage 为 "0"
+      // 榛樿鎵撳紑锛屽苟璁剧疆 localStorage 涓?"0"
       setCollapsed(false);
       if (!v) {
         window.localStorage.setItem("compostlab:siderCollapsed", "0");
@@ -101,7 +102,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.replace(`/login?next=${next}`);
       return;
     }
-    // 设置 ready 状态（用户信息会通过 useMe query 异步获取）
+    // 璁剧疆 ready 鐘舵€侊紙鐢ㄦ埛淇℃伅浼氶€氳繃 useMe query 寮傛鑾峰彇锛?
     setReady(true);
   }, [pathname, router]);
 
@@ -199,7 +200,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         />
       </Sider>
 
-      {/* 移动端遮罩层 */}
+      {/* 绉诲姩绔伄缃╁眰 */}
       {isMobile && mobileDrawerOpen && (
         <div
           onClick={closeMobileDrawer}
@@ -308,3 +309,4 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     </Layout>
   );
 }
+
