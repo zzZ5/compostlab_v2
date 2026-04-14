@@ -118,6 +118,11 @@ type RuleFormIdentityFields = {
 	priority: number;
 };
 
+type RuleActionFormFields = {
+	primaryActions?: CommandRow[];
+	elseCommands?: CommandRow[];
+};
+
 type ThresholdConfigFormValue = {
 	condition_mode?: "all" | "any";
 	metric?: string;
@@ -142,7 +147,20 @@ type SharedRuleDraftInput = RuleFormIdentityFields & {
 	commandTemplate: Record<string, unknown>;
 };
 
-type ScriptFormValues = RuleFormIdentityFields & {
+type SharedRuleEditorValues = RuleFormIdentityFields &
+	RuleActionFormFields & {
+		type: ScriptType;
+		sourceDeviceId?: number;
+		targetDeviceId?: number;
+		conditions?: RuleConditionFormValue[];
+		conditionMode?: "all" | "any";
+		cron?: string;
+		pythonCode?: string;
+		commandTemplateText?: string;
+	};
+
+type ScriptFormValues = RuleFormIdentityFields &
+	RuleActionFormFields & {
 	script_type: ScriptType;
 	threshold_config?: ThresholdConfigFormValue;
 	schedule_config?: ScheduleConfigFormValue;
@@ -151,16 +169,25 @@ type ScriptFormValues = RuleFormIdentityFields & {
 	target_device_id?: number;
 };
 
-type LinkageActionFormValue = {
-	actionCommand?: string;
-	actionType?: string;
-	duration?: number;
-	actionConfigText?: string;
-	elseCommands?: CommandRow[];
+type SharedStructuredActionInput = RuleActionFormFields & {
+	targetDeviceId?: number;
+	target_device_id?: number;
+	command_template?: string;
+};
+
+type StructuredActionFormValues = {
+	targetDeviceId?: number;
+} & RuleActionFormFields;
+
+type StructuredActionDraft = {
+	targetDeviceId?: number;
+	commandTemplate: Record<string, unknown>;
+	primaryActions: CommandRow[];
+	elseActions: CommandRow[];
 };
 
 type LinkageFormValues = RuleFormIdentityFields &
-	LinkageActionFormValue & {
+	RuleActionFormFields & {
 	linkage_type: ScriptType;
 	sourceDeviceId?: number;
 	sourceMetric?: string;
@@ -172,9 +199,43 @@ type LinkageFormValues = RuleFormIdentityFields &
 	scheduleCron?: string;
 	pythonCode?: string;
 	targetDeviceId?: number;
-	elseActionCommand?: string;
-	elseActionType?: string;
-	elseDuration?: number;
+};
+
+type RuleEditorFieldMap = {
+	type: FormFieldName;
+	targetDeviceId: FormFieldName;
+	sourceDeviceId?: FormFieldName;
+	conditionMode: FormFieldName;
+	conditions: FormFieldName;
+	cron: FormFieldName;
+	pythonCode: FormFieldName;
+	primaryActions: FormFieldName;
+	elseCommands: FormFieldName;
+	commandTemplateText?: FormFieldName;
+};
+
+const singleRuleFields: RuleEditorFieldMap = {
+	type: "script_type",
+	targetDeviceId: "target_device_id",
+	conditionMode: ["threshold_config", "condition_mode"],
+	conditions: ["threshold_config", "conditions"],
+	cron: ["schedule_config", "cron"],
+	pythonCode: "python_code",
+	primaryActions: "primaryActions",
+	elseCommands: "elseCommands",
+	commandTemplateText: "command_template",
+};
+
+const linkageRuleFields: RuleEditorFieldMap = {
+	type: "linkage_type",
+	targetDeviceId: "targetDeviceId",
+	sourceDeviceId: "sourceDeviceId",
+	conditionMode: "conditionMode",
+	conditions: "conditions",
+	cron: "scheduleCron",
+	pythonCode: "pythonCode",
+	primaryActions: "primaryActions",
+	elseCommands: "elseCommands",
 };
 
 const typeOptions = [
@@ -941,6 +1002,12 @@ function buildStructuredCommandTemplate(
 	commandText: string,
 	targetDeviceId?: number,
 ) {
+	if (!String(commandText || "").trim()) {
+		return {
+			...(typeof targetDeviceId === "number" ? { target_device_id: targetDeviceId } : {}),
+			commands: [],
+		};
+	}
 	const commandTemplate = parseCommandTemplate(commandText);
 	return {
 		...(typeof targetDeviceId === "number" ? { target_device_id: targetDeviceId } : {}),
@@ -954,39 +1021,263 @@ function stripCommandTemplateMeta(commandTemplate?: Record<string, unknown>) {
 	return template;
 }
 
-function buildLinkageCommandTemplate(values: LinkageFormValues) {
-	if (values.linkage_type === "python") {
+function buildCommandRowPayload(row: CommandRow) {
+	return {
+		command: row.command,
+		...(row.command === "config_update"
+			? { config: parseConfigText(row.configText) }
+			: { action: row.action }),
+		...(row.command !== "config_update" && row.duration !== undefined ? { duration: row.duration } : {}),
+	};
+}
+
+function buildStructuredActionDraftFromCommandTemplate(
+	commandTemplate?: Record<string, unknown>,
+	fallbackTargetDeviceId?: number,
+): StructuredActionDraft {
+	const template = safeRecord(commandTemplate);
+	const primaryActions = parseCommandRowsForKey(JSON.stringify(template, null, 2), "commands");
+	const targetDeviceId =
+		typeof template.target_device_id === "number" ? template.target_device_id : fallbackTargetDeviceId;
+	return {
+		targetDeviceId,
+		commandTemplate: template,
+		primaryActions,
+		elseActions: parseCommandRowsForKey(JSON.stringify(template, null, 2), "else_commands"),
+	};
+}
+
+function buildStructuredActionDraftFromCommandText(
+	commandText: string,
+	targetDeviceId?: number,
+): StructuredActionDraft {
+	return buildStructuredActionDraftFromCommandTemplate(
+		buildStructuredCommandTemplate(commandText, targetDeviceId),
+		targetDeviceId,
+	);
+}
+
+function buildStructuredActionFormValuesFromCommandText(
+	commandText: string,
+	targetDeviceId?: number,
+): StructuredActionFormValues {
+	if (!String(commandText || "").trim()) {
 		return {
-			...(values.targetDeviceId ? { target_device_id: values.targetDeviceId } : {}),
-			commands: [],
+			targetDeviceId,
+			primaryActions: [],
+			elseCommands: [],
 		};
 	}
+	try {
+		return buildStructuredActionFormValuesFromDraft(
+			buildStructuredActionDraftFromCommandText(commandText, targetDeviceId),
+		);
+	} catch {
+		return {
+			targetDeviceId,
+			primaryActions: [],
+			elseCommands: [],
+		};
+	}
+}
 
+function buildStructuredActionEditorText(values: StructuredActionFormValues) {
+	return JSON.stringify(
+		stripCommandTemplateMeta(buildStructuredActionCommandTemplate(values)),
+		null,
+		2,
+	);
+}
+
+function buildRuleActionText(values: SharedStructuredActionInput) {
+	return buildStructuredActionEditorText(buildStructuredActionFormValues(values));
+}
+
+function getStructuredExampleText(profile: DeviceProfile, type: ScriptType) {
+	return JSON.stringify(parseCommandTemplate(getStructuredCommandExample(profile, type)), null, 2);
+}
+
+function buildStructuredActionCommandTemplate(values: StructuredActionFormValues) {
+	const primaryActions =
+		safeArray<CommandRow>(values.primaryActions).filter((item) =>
+			item.command && (item.command === "config_update" ? item.configText : item.action),
+		).length
+			? safeArray<CommandRow>(values.primaryActions)
+					.filter((item) => item.command && (item.command === "config_update" ? item.configText : item.action))
+					.map((item) => buildCommandRowPayload(item))
+			: [];
 	const elseCommands = safeArray<CommandRow>(values.elseCommands)
 		.filter((item) => item.command && (item.command === "config_update" ? item.configText : item.action))
-		.map((item) => ({
-			command: item.command,
-			...(item.command === "config_update"
-				? { config: parseConfigText(item.configText) }
-				: { action: item.action }),
-			...(item.command !== "config_update" && item.duration !== undefined ? { duration: item.duration } : {}),
-		}));
+		.map((item) => buildCommandRowPayload(item));
 
 	return {
-		target_device_id: values.targetDeviceId,
-		commands: [
-			{
-				command: values.actionCommand,
-				...(values.actionCommand === "config_update"
-					? { config: parseConfigText(values.actionConfigText) }
-					: { action: values.actionType }),
-				...(values.actionCommand !== "config_update" && values.duration !== undefined
-					? { duration: values.duration }
-					: {}),
-			},
-		],
+		...(values.targetDeviceId ? { target_device_id: values.targetDeviceId } : {}),
+		commands: primaryActions,
 		...(elseCommands.length ? { else_commands: elseCommands } : {}),
 	};
+}
+
+function buildStructuredActionFormValuesFromDraft(draft: StructuredActionDraft): StructuredActionFormValues {
+	return {
+		targetDeviceId: draft.targetDeviceId,
+		primaryActions: draft.primaryActions,
+		elseCommands: draft.elseActions.length ? draft.elseActions : [],
+	};
+}
+
+function buildRuleActionFormValuesFromDraft(
+	draft: RuleDraft,
+	profile: DeviceProfile,
+): StructuredActionFormValues & { commandText: string } {
+	const actionDraft = buildStructuredActionDraftFromCommandTemplate(draft.commandTemplate, draft.targetDeviceId);
+	const actionFormValues = buildStructuredActionFormValuesFromDraft(actionDraft);
+	const fallbackText = getStructuredExampleText(profile, draft.type);
+	return {
+		...actionFormValues,
+		commandText: Object.keys(stripCommandTemplateMeta(actionDraft.commandTemplate)).length
+			? buildRuleActionText(actionFormValues)
+			: fallbackText,
+	};
+}
+
+function hasStructuredPrimaryActions(values: StructuredActionFormValues) {
+	return safeArray<CommandRow>(values.primaryActions).some((item) =>
+		item.command && (item.command === "config_update" ? item.configText : item.action),
+	);
+}
+
+function normalizePrimaryActionsForProfile(
+	primaryActions: CommandRow[] | undefined,
+	profile: DeviceProfile,
+	commandOptions: Array<{ value: string; label: string }>,
+) {
+	const rows = safeArray<CommandRow>(primaryActions);
+	const allowedCommands = new Set(commandOptions.map((item) => item.value));
+	if (!rows.length) {
+		const nextCommand = getDefaultCommandForProfile(profile);
+		return [
+			{
+				command: nextCommand,
+				action: getDefaultActionForCommand(nextCommand, profile),
+				duration: getDefaultDurationForCommand(nextCommand),
+			},
+		];
+	}
+	const [first, ...rest] = rows;
+	if (!first.command || !allowedCommands.has(first.command)) {
+		const nextCommand = getDefaultCommandForProfile(profile);
+		return [
+			{
+				command: nextCommand,
+				action: getDefaultActionForCommand(nextCommand, profile),
+				duration: getDefaultDurationForCommand(nextCommand),
+			},
+			...rest,
+		];
+	}
+	const actionOptions = getCommandActionOptions(first.command, profile);
+	if (actionOptions.length && !actionOptions.some((item) => item.value === first.action)) {
+		return [
+			{
+				...first,
+				action: getDefaultActionForCommand(first.command, profile),
+			},
+			...rest,
+		];
+	}
+	return rows;
+}
+
+function applyStructuredActionEditorChange(
+	next: string,
+	targetDeviceId: number | undefined,
+	setFieldValue: (name: FormFieldName, value: unknown) => void,
+	commandTemplateFieldName?: FormFieldName,
+) {
+	const nextValues = buildStructuredActionFormValuesFromCommandText(next, targetDeviceId);
+	setFieldValue("primaryActions", nextValues.primaryActions || []);
+	setFieldValue("elseCommands", nextValues.elseCommands || []);
+	if (commandTemplateFieldName) {
+		setFieldValue(commandTemplateFieldName, next);
+	}
+}
+
+function buildStructuredActionFormValues(values: SharedStructuredActionInput): StructuredActionFormValues {
+	if (safeArray<CommandRow>(values.primaryActions).length || safeArray<CommandRow>(values.elseCommands).length) {
+		return {
+			targetDeviceId: values.targetDeviceId ?? values.target_device_id,
+			primaryActions: safeArray<CommandRow>(values.primaryActions),
+			elseCommands: safeArray<CommandRow>(values.elseCommands),
+		};
+	}
+	return buildStructuredActionFormValuesFromCommandText(values.command_template || "", values.targetDeviceId ?? values.target_device_id);
+}
+
+function normalizeScriptEditorValues(values: Partial<ScriptFormValues>): SharedRuleEditorValues {
+	return {
+		name: values.name || "",
+		description: values.description || "",
+		is_active: values.is_active ?? true,
+		priority: values.priority ?? 0,
+		type: values.script_type || "threshold",
+		sourceDeviceId: values.target_device_id,
+		targetDeviceId: values.target_device_id,
+		conditions: normalizeThresholdConditions(values.threshold_config),
+		conditionMode: values.threshold_config?.condition_mode || "all",
+		cron: values.schedule_config?.cron,
+		pythonCode: values.python_code || "",
+		commandTemplateText: values.command_template || "",
+		primaryActions: values.primaryActions,
+		elseCommands: values.elseCommands,
+	};
+}
+
+function normalizeLinkageEditorValues(values: Partial<LinkageFormValues>): SharedRuleEditorValues {
+	return {
+		name: values.name || "",
+		description: values.description || "",
+		is_active: values.is_active ?? true,
+		priority: values.priority ?? 0,
+		type: values.linkage_type || "threshold",
+		sourceDeviceId: values.sourceDeviceId,
+		targetDeviceId: values.targetDeviceId,
+		conditions: normalizeThresholdConditions({
+			conditions: values.conditions,
+			metric: values.sourceMetric,
+			channel_code: values.sourceChannelCode,
+			operator: values.operator,
+			value: values.threshold,
+		}),
+		conditionMode: values.conditionMode || "all",
+		cron: values.scheduleCron,
+		pythonCode: values.pythonCode || "",
+		primaryActions: values.primaryActions,
+		elseCommands: values.elseCommands,
+	};
+}
+
+function buildRuleDraftFromEditorValues(values: SharedRuleEditorValues): RuleDraft {
+	return buildRuleDraft({
+		name: values.name,
+		description: values.description,
+		type: values.type,
+		is_active: values.is_active,
+		priority: values.priority,
+		sourceDeviceId: values.sourceDeviceId,
+		targetDeviceId: values.targetDeviceId,
+		conditionMode: values.conditionMode || "all",
+		conditions: values.conditions || [],
+		cron: values.cron,
+		pythonCode: values.pythonCode,
+		commandTemplate: buildStructuredActionCommandTemplate(
+			buildStructuredActionFormValues({
+				targetDeviceId: values.targetDeviceId,
+				command_template: values.commandTemplateText,
+				primaryActions: values.primaryActions,
+				elseCommands: values.elseCommands,
+			}),
+		),
+	});
 }
 
 function buildRuleDraft(input: SharedRuleDraftInput): RuleDraft {
@@ -1007,43 +1298,22 @@ function buildRuleDraft(input: SharedRuleDraftInput): RuleDraft {
 }
 
 function buildRuleDraftFromScriptValues(values: ScriptFormValues): RuleDraft {
-	return buildRuleDraft({
-		name: values.name,
-		description: values.description,
-		type: values.script_type,
-		is_active: values.is_active,
-		priority: values.priority,
-		sourceDeviceId: values.target_device_id,
-		targetDeviceId: values.target_device_id,
-		conditionMode: values.threshold_config?.condition_mode || "all",
-		conditions: normalizeThresholdConditions(values.threshold_config),
-		cron: values.schedule_config?.cron,
-		pythonCode: values.python_code,
-		commandTemplate: buildStructuredCommandTemplate(values.command_template, values.target_device_id),
-	});
+	return buildRuleDraftFromEditorValues(normalizeScriptEditorValues(values));
 }
 
 function buildRuleDraftFromLinkageValues(values: LinkageFormValues): RuleDraft {
-	return buildRuleDraft({
-		name: values.name,
-		description: values.description,
-		type: values.linkage_type,
-		is_active: values.is_active,
-		priority: values.priority,
-		sourceDeviceId: values.sourceDeviceId,
-		targetDeviceId: values.targetDeviceId,
-		conditionMode: values.conditionMode || "all",
-		conditions: normalizeThresholdConditions({
-			conditions: values.conditions,
-			metric: values.sourceMetric,
-			channel_code: values.sourceChannelCode,
-			operator: values.operator,
-			value: values.threshold,
-		}),
-		cron: values.scheduleCron,
-		pythonCode: values.pythonCode,
-		commandTemplate: buildLinkageCommandTemplate(values),
-	});
+	return buildRuleDraftFromEditorValues(normalizeLinkageEditorValues(values));
+}
+
+function buildRuleDraftFromScopeValues(
+	scope: RuleScope,
+	values: Partial<ScriptFormValues> | Partial<LinkageFormValues>,
+) {
+	return buildRuleDraftFromEditorValues(
+		scope === "single"
+			? normalizeScriptEditorValues(values as Partial<ScriptFormValues>)
+			: normalizeLinkageEditorValues(values as Partial<LinkageFormValues>),
+	);
 }
 
 function getScriptSourceDeviceId(script?: Script | null) {
@@ -1123,16 +1393,36 @@ function buildRuleTriggerFormValues(
 	};
 }
 
+function buildSharedEditorValuesFromDraft(
+	draft: RuleDraft,
+	defaultMetric: string,
+	pythonFallback: string,
+	profile: DeviceProfile,
+) {
+	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric, pythonFallback);
+	const actionFormValues = buildRuleActionFormValuesFromDraft(draft, profile);
+	return {
+		identity: buildRuleIdentityFormValues(draft),
+		triggerFields,
+		conditions: triggerFields.conditions,
+		actionFormValues,
+	};
+}
+
 function buildScriptFormValuesFromDraft(
 	draft: RuleDraft,
 	defaultMetric: string,
 	profile: DeviceProfile = "generic",
 ): ScriptFormValues {
-	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric, getDefaultPythonExample(profile));
-	const conditions = triggerFields.conditions;
+	const { identity, triggerFields, conditions, actionFormValues } = buildSharedEditorValuesFromDraft(
+		draft,
+		defaultMetric,
+		getDefaultPythonExample(profile),
+		profile,
+	);
 
 	return {
-		...buildRuleIdentityFormValues(draft),
+		...identity,
 		script_type: triggerFields.type,
 		threshold_config: {
 			condition_mode: triggerFields.conditionMode,
@@ -1146,14 +1436,10 @@ function buildScriptFormValuesFromDraft(
 			cron: triggerFields.cron,
 		},
 		python_code: triggerFields.pythonCode,
-		command_template: JSON.stringify(
-			Object.keys(stripCommandTemplateMeta(draft.commandTemplate)).length
-				? stripCommandTemplateMeta(draft.commandTemplate)
-				: parseCommandTemplate(getStructuredCommandExample(profile, draft.type)),
-			null,
-			2,
-		),
-		target_device_id: draft.targetDeviceId,
+		primaryActions: actionFormValues.primaryActions,
+		elseCommands: actionFormValues.elseCommands,
+		command_template: actionFormValues.commandText,
+		target_device_id: actionFormValues.targetDeviceId,
 	};
 }
 
@@ -1162,16 +1448,15 @@ function buildLinkageFormValuesFromDraft(
 	defaultMetric: string,
 	targetProfile: DeviceProfile = "smart-compost",
 ): LinkageFormValues {
-	const commandTemplate = safeRecord(draft.commandTemplate);
-	const commands = safeArray<Record<string, unknown>>(commandTemplate.commands);
-	const firstCommand = commands[0];
-	const elseCommandsText = JSON.stringify(commandTemplate, null, 2);
-	const elseRows = parseCommandRowsForKey(elseCommandsText, "else_commands");
-	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric, getDefaultLinkagePythonExample(targetProfile));
-	const conditions = triggerFields.conditions;
+	const { identity, triggerFields, conditions, actionFormValues } = buildSharedEditorValuesFromDraft(
+		draft,
+		defaultMetric,
+		getDefaultLinkagePythonExample(targetProfile),
+		targetProfile,
+	);
 
 	return {
-		...buildRuleIdentityFormValues(draft),
+		...identity,
 		linkage_type: triggerFields.type,
 		sourceDeviceId: draft.sourceDeviceId,
 		sourceMetric: conditions[0]?.metric || defaultMetric,
@@ -1182,24 +1467,9 @@ function buildLinkageFormValuesFromDraft(
 		conditionMode: triggerFields.conditionMode,
 		scheduleCron: triggerFields.cron,
 		pythonCode: triggerFields.pythonCode,
-		targetDeviceId: draft.targetDeviceId,
-		actionCommand: typeof firstCommand?.command === "string" ? firstCommand.command : undefined,
-		actionType: typeof firstCommand?.action === "string" ? firstCommand.action : undefined,
-		duration: typeof firstCommand?.duration === "number" ? firstCommand.duration : 300000,
-		actionConfigText:
-			firstCommand?.command === "config_update" &&
-			firstCommand.config &&
-			typeof firstCommand.config === "object" &&
-			!Array.isArray(firstCommand.config)
-				? JSON.stringify(firstCommand.config, null, 2)
-				: undefined,
-		elseCommands:
-			elseRows.length
-				? elseRows
-				: [],
-		elseActionCommand: undefined,
-		elseActionType: undefined,
-		elseDuration: undefined,
+		primaryActions: actionFormValues.primaryActions,
+		targetDeviceId: actionFormValues.targetDeviceId,
+		elseCommands: actionFormValues.elseCommands,
 	};
 }
 
@@ -1212,6 +1482,49 @@ function buildRulePayloadBase(draft: RuleDraft) {
 		priority: draft.priority,
 		command_template: draft.commandTemplate,
 		device_ids: draft.targetDeviceId ? [draft.targetDeviceId] : [],
+	};
+}
+
+function buildRulePayloadFromDraft(
+	draft: RuleDraft,
+	scope: RuleScope,
+	actionValues?: StructuredActionFormValues,
+) {
+	validateRuleDraft(draft, {
+		scope,
+		requirePythonActions: scope === "single",
+		requireStructuredTarget: scope === "linkage",
+		requireSourceForThreshold: scope === "linkage",
+	});
+	if (scope === "linkage" && draft.type !== "python" && (!draft.targetDeviceId || !hasStructuredPrimaryActions(actionValues || {}))) {
+		throw new Error("请补全联动动作");
+	}
+
+	const threshold_config =
+		draft.type === "threshold" || draft.type === "hybrid"
+			? buildThresholdConfigDraft({
+					...(scope === "linkage" ? { sourceDeviceId: draft.sourceDeviceId } : {}),
+					conditionMode: draft.conditionMode,
+					conditions: draft.conditions,
+			  })
+			: scope === "linkage" && draft.type === "python" && draft.sourceDeviceId
+			? { source_device_id: draft.sourceDeviceId }
+			: {};
+
+	const schedule_config =
+		draft.type === "schedule" || draft.type === "hybrid"
+			? buildScheduleConfigDraft({
+					cron: draft.cron,
+					...(scope === "linkage" ? { sourceDeviceId: draft.sourceDeviceId } : {}),
+			  })
+			: {};
+
+	return {
+		...buildRulePayloadBase(draft),
+		threshold_config,
+		schedule_config,
+		python_code: draft.type === "python" ? draft.pythonCode : "",
+		...(scope === "single" ? { command_template: draft.commandTemplate, device_ids: buildRulePayloadBase(draft).device_ids } : {}),
 	};
 }
 
@@ -1255,74 +1568,13 @@ function validateRuleDraft(
 
 function toScriptPayload(values: ScriptFormValues) {
 	const draft = buildRuleDraftFromScriptValues(values);
-	validateRuleDraft(draft, {
-		scope: "single",
-		requirePythonActions: true,
-	});
-	const threshold_config =
-		draft.type === "threshold" || draft.type === "hybrid"
-			? buildThresholdConfigDraft({
-					conditionMode: draft.conditionMode,
-					conditions: draft.conditions,
-			  })
-			: {};
-	const schedule_config =
-		draft.type === "schedule" || draft.type === "hybrid"
-			? buildScheduleConfigDraft({
-					cron: draft.cron,
-			  })
-			: {};
-	return {
-		...buildRulePayloadBase(draft),
-		threshold_config,
-		schedule_config,
-		python_code: draft.type === "python" ? draft.pythonCode : "",
-		command_template: draft.commandTemplate,
-		device_ids: buildRulePayloadBase(draft).device_ids,
-	};
+	return buildRulePayloadFromDraft(draft, "single");
 }
 
 function toLinkagePayload(values: LinkageFormValues) {
 	const draft = buildRuleDraftFromLinkageValues(values);
-	validateRuleDraft(draft, {
-		scope: "linkage",
-		requireStructuredTarget: true,
-		requireSourceForThreshold: true,
-	});
-	if (
-		draft.type !== "python" &&
-		(!draft.targetDeviceId ||
-			!values.actionCommand ||
-			(values.actionCommand !== "config_update" && !values.actionType))
-	) {
-		throw new Error("请补全联动动作");
-	}
-
-	const threshold_config =
-		draft.type === "threshold" || draft.type === "hybrid"
-			? buildThresholdConfigDraft({
-					sourceDeviceId: draft.sourceDeviceId,
-					conditionMode: draft.conditionMode,
-					conditions: draft.conditions,
-			  })
-			: draft.type === "python" && draft.sourceDeviceId
-			? { source_device_id: draft.sourceDeviceId }
-			: {};
-
-	const schedule_config =
-		draft.type === "schedule" || draft.type === "hybrid"
-			? buildScheduleConfigDraft({
-					cron: draft.cron,
-					sourceDeviceId: draft.sourceDeviceId,
-			  })
-			: {};
-
-	return {
-		...buildRulePayloadBase(draft),
-		threshold_config,
-		schedule_config,
-		python_code: draft.type === "python" ? draft.pythonCode : "",
-	};
+	const actionValues = buildStructuredActionFormValues(values);
+	return buildRulePayloadFromDraft(draft, "linkage", actionValues);
 }
 
 function indentLines(text: string, spaces = 4) {
@@ -1511,18 +1763,7 @@ function buildRulePythonPreview(
 }
 
 function buildScriptPythonPreview(values: Partial<ScriptFormValues>, targetDevice?: Device | null) {
-	const draft = buildRuleDraftFromScriptValues({
-		name: values.name || "",
-		description: values.description || "",
-		script_type: values.script_type || "threshold",
-		is_active: values.is_active ?? true,
-		priority: values.priority ?? 0,
-		threshold_config: values.threshold_config,
-		schedule_config: values.schedule_config,
-		python_code: values.python_code || "",
-		command_template: values.command_template || JSON.stringify({ commands: [] }),
-		target_device_id: values.target_device_id,
-	});
+	const draft = buildRuleDraftFromScopeValues("single", values);
 	return buildRulePythonPreview(draft, {
 		scope: "single",
 		targetDevice,
@@ -1535,28 +1776,7 @@ function buildLinkagePythonPreview(
 	targetDevice?: Device | null,
 ) {
 	try {
-		const draft = buildRuleDraftFromLinkageValues({
-			name: values.name || "",
-			description: values.description || "",
-			linkage_type: values.linkage_type || "threshold",
-			is_active: values.is_active ?? true,
-			priority: values.priority ?? 0,
-			sourceDeviceId: values.sourceDeviceId,
-			sourceMetric: values.sourceMetric,
-			sourceChannelCode: values.sourceChannelCode,
-			operator: values.operator,
-			threshold: values.threshold,
-			conditions: values.conditions,
-			conditionMode: values.conditionMode,
-			scheduleCron: values.scheduleCron,
-			pythonCode: values.pythonCode || "",
-			targetDeviceId: values.targetDeviceId,
-			actionCommand: values.actionCommand,
-			actionType: values.actionType,
-			duration: values.duration,
-			actionConfigText: values.actionConfigText,
-			elseCommands: values.elseCommands,
-		});
+		const draft = buildRuleDraftFromScopeValues("linkage", values);
 		return buildRulePythonPreview(draft, {
 			scope: "linkage",
 			sourceDevice,
@@ -2149,6 +2369,86 @@ function StructuredActionCard({
 	);
 }
 
+function StructuredActionEditorSection({
+	actionText,
+	onChange,
+	commandOptions,
+	profile,
+	showAdvancedJson,
+	onToggleAdvancedJson,
+	targetSelector,
+	targetHint,
+	advancedExtra,
+}: {
+	actionText: string;
+	onChange: (value: string) => void;
+	commandOptions: Array<{ value: string; label: string }>;
+	profile?: DeviceProfile;
+	showAdvancedJson: boolean;
+	onToggleAdvancedJson: () => void;
+	targetSelector?: ReactNode;
+	targetHint?: ReactNode;
+	advancedExtra?: ReactNode;
+}) {
+	return (
+		<StructuredActionCard
+			title="执行目标与动作"
+			targetSelector={targetSelector}
+			targetHint={targetHint}
+			mainActionEditor={
+				<CommandEditor
+					value={actionText}
+					onChange={onChange}
+					commandOptions={commandOptions}
+					profile={profile}
+					title="满足条件时动作"
+					embedded
+				/>
+			}
+			elseActionEditor={
+				<CommandEditor
+					value={actionText}
+					onChange={onChange}
+					commandOptions={commandOptions}
+					profile={profile}
+					fieldKey="else_commands"
+					title="未满足时动作（可选）"
+					emptyTitle="留空则不执行备用动作。"
+					addLabel="新增 else 动作"
+					embedded
+				/>
+			}
+			extraContent={
+				<Card
+					size="small"
+					title="高级 JSON 视图"
+					extra={
+						<Space>
+							{advancedExtra}
+							<Button size="small" onClick={onToggleAdvancedJson}>
+								{showAdvancedJson ? "收起 JSON" : "展开 JSON"}
+							</Button>
+						</Space>
+					}
+				>
+					{showAdvancedJson ? (
+						<Input.TextArea
+							value={actionText}
+							rows={12}
+							style={{ fontFamily: "Consolas, monospace", fontSize: 12 }}
+							onChange={(event) => onChange(event.target.value)}
+						/>
+					) : (
+						<Text type="secondary">
+							常规编辑优先使用上面的动作编辑器；只有在需要批量微调或复制复杂动作时，再展开 JSON 视图。
+						</Text>
+					)}
+				</Card>
+			}
+		/>
+	);
+}
+
 function ScriptModal({
 	open,
 	script,
@@ -2167,17 +2467,24 @@ function ScriptModal({
 	embedded?: boolean;
 }) {
 	const [form] = Form.useForm<ScriptFormValues>();
+	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
-	const currentType = Form.useWatch("script_type", form) ?? "threshold";
-	const conditionMode = Form.useWatch(["threshold_config", "condition_mode"], form) ?? "all";
-	const commandText = Form.useWatch("command_template", form) ?? "";
+	const currentType = Form.useWatch(singleRuleFields.type, form) ?? "threshold";
+	const conditionMode = Form.useWatch(singleRuleFields.conditionMode, form) ?? "all";
+	const commandText = Form.useWatch(singleRuleFields.commandTemplateText!, form) ?? "";
+	const targetDeviceId = Form.useWatch(singleRuleFields.targetDeviceId, form);
 	const formValues = Form.useWatch([], form) as Partial<ScriptFormValues> | undefined;
-	const targetDeviceId = Form.useWatch("target_device_id", form);
+	const primaryActions = safeArray<CommandRow>(Form.useWatch(singleRuleFields.primaryActions, form));
+	const elseCommands = safeArray<CommandRow>(Form.useWatch(singleRuleFields.elseCommands, form));
 	const targetDevice = useMemo(() => devices.find((device) => device.device_id === targetDeviceId), [devices, targetDeviceId]);
 	const targetProfile = inferDeviceProfile(targetDevice);
 	const commandOptions = getDeviceCommandCatalog(targetProfile);
 	const metricOptions = useMemo(() => getMetricOptionsForDevice(targetDevice), [targetDevice]);
 	const metricGuide = useMemo(() => getMetricGuideForDevice(targetDevice), [targetDevice]);
+	const scriptActionText = useMemo(
+		() => buildRuleActionText({ targetDeviceId, primaryActions, elseCommands }),
+		[targetDeviceId, primaryActions, elseCommands],
+	);
 	const scriptPreview = useMemo(
 		() => buildScriptPythonPreview(formValues || {}, targetDevice),
 		[formValues, targetDevice],
@@ -2198,45 +2505,52 @@ function ScriptModal({
 		const previousType = previousTypeRef.current;
 		if (previousType === currentType) return;
 		if (currentType !== "python" && !String(commandText || "").trim()) {
-			form.setFieldValue("command_template", getStructuredCommandExample(targetProfile, currentType));
+			form.setFieldValue(singleRuleFields.commandTemplateText! as never, getStructuredExampleText(targetProfile, currentType));
 		}
-		if ((currentType === "schedule" || currentType === "hybrid") && !trimCronValue(form.getFieldValue(["schedule_config", "cron"]))) {
-			form.setFieldValue(["schedule_config", "cron"], "0 9 * * *");
+		if ((currentType === "schedule" || currentType === "hybrid") && !trimCronValue(form.getFieldValue(singleRuleFields.cron as never))) {
+			form.setFieldValue(singleRuleFields.cron as never, "0 9 * * *");
 		}
-		if (currentType === "python" && !String(form.getFieldValue("python_code") || "").trim()) {
-			form.setFieldValue("python_code", getDefaultPythonExample(targetProfile));
-			form.setFieldValue(["schedule_config", "cron"], undefined);
+		if (currentType === "python" && !String(form.getFieldValue(singleRuleFields.pythonCode as never) || "").trim()) {
+			form.setFieldValue(singleRuleFields.pythonCode as never, getDefaultPythonExample(targetProfile));
+			form.setFieldValue(singleRuleFields.cron as never, undefined);
 		}
 		previousTypeRef.current = currentType;
 	}, [commandText, currentType, form, open, targetProfile]);
 
 	useEffect(() => {
 		if (!open || currentType === "python") return;
-		const currentTemplate = String(form.getFieldValue("command_template") || "").trim();
+		if (commandText !== scriptActionText) {
+			form.setFieldValue(singleRuleFields.commandTemplateText! as never, scriptActionText);
+		}
+	}, [commandText, currentType, form, open, scriptActionText]);
+
+	useEffect(() => {
+		if (!open || currentType === "python" || !targetDeviceId) return;
+		const nextPrimaryActions = normalizePrimaryActionsForProfile(primaryActions, targetProfile, commandOptions);
+		if (JSON.stringify(nextPrimaryActions) !== JSON.stringify(primaryActions)) {
+			form.setFieldValue(singleRuleFields.primaryActions as never, nextPrimaryActions);
+		}
+	}, [commandOptions, currentType, form, open, primaryActions, targetDeviceId, targetProfile]);
+
+	useEffect(() => {
+		if (!open || currentType === "python") return;
+		const currentTemplate = String(form.getFieldValue(singleRuleFields.commandTemplateText! as never) || "").trim();
 		if (!currentTemplate) return;
-		const genericTemplate = JSON.stringify(
-			parseCommandTemplate(getStructuredCommandExample("generic", currentType)),
-			null,
-			2,
-		);
-		const profileTemplate = JSON.stringify(
-			parseCommandTemplate(getStructuredCommandExample(targetProfile, currentType)),
-			null,
-			2,
-		);
+		const genericTemplate = getStructuredExampleText("generic", currentType);
+		const profileTemplate = getStructuredExampleText(targetProfile, currentType);
 		if (currentTemplate === genericTemplate && currentTemplate !== profileTemplate) {
-			form.setFieldValue("command_template", profileTemplate);
+			form.setFieldValue(singleRuleFields.commandTemplateText! as never, profileTemplate);
 		}
 	}, [currentType, form, open, targetProfile, targetDeviceId]);
 
 	useEffect(() => {
 		if (!open || currentType !== "python") return;
-		const currentCode = String(form.getFieldValue("python_code") || "").trim();
+		const currentCode = String(form.getFieldValue(singleRuleFields.pythonCode as never) || "").trim();
 		if (!currentCode) return;
 		const genericCode = getDefaultPythonExample("generic").trim();
 		const profileCode = getDefaultPythonExample(targetProfile).trim();
 		if (currentCode === genericCode && currentCode !== profileCode) {
-			form.setFieldValue("python_code", profileCode);
+			form.setFieldValue(singleRuleFields.pythonCode as never, profileCode);
 		}
 	}, [currentType, form, open, targetProfile, targetDeviceId]);
 
@@ -2254,8 +2568,14 @@ function ScriptModal({
 							}
 						}}
 					>
+						<Form.Item name={singleRuleFields.primaryActions} hidden>
+							<Input />
+						</Form.Item>
+						<Form.Item name={singleRuleFields.elseCommands} hidden>
+							<Input />
+						</Form.Item>
 						<RuleBasicCard
-							typeFieldName="script_type"
+							typeFieldName={singleRuleFields.type}
 							isActiveFieldName="is_active"
 							priorityFieldName="priority"
 							namePlaceholder="例如：高温开启排风"
@@ -2270,7 +2590,7 @@ function ScriptModal({
 						>
 							<Row gutter={12}>
 								<Col xs={24} md={16}>
-									<Form.Item label="目标设备" name="target_device_id">
+									<Form.Item label="目标设备" name={singleRuleFields.targetDeviceId}>
 										<Select
 											allowClear
 											placeholder="选择执行动作的设备"
@@ -2286,8 +2606,8 @@ function ScriptModal({
 								{currentType === "threshold" || currentType === "hybrid" ? (
 									<ConditionsEditor
 										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
-										listName={["threshold_config", "conditions"]}
-										conditionModeName={["threshold_config", "condition_mode"]}
+										listName={singleRuleFields.conditions}
+										conditionModeName={singleRuleFields.conditionMode}
 										conditionMode={conditionMode}
 										metricOptions={metricOptions}
 										getChannelOptions={(metricValue) => getChannelOptionsForMetric(targetDevice, metricValue)}
@@ -2298,7 +2618,7 @@ function ScriptModal({
 								{currentType === "schedule" || currentType === "hybrid" ? (
 									<Form.Item
 										label="Cron 表达式"
-										name={["schedule_config", "cron"]}
+										name={singleRuleFields.cron}
 										style={{ marginBottom: currentType === "schedule" ? 0 : undefined }}
 										rules={[
 											{
@@ -2317,7 +2637,7 @@ function ScriptModal({
 
 						{currentType === "python" ? (
 							<PythonLogicCard
-								codeFieldName="python_code"
+								codeFieldName={singleRuleFields.pythonCode}
 								codeLabel="Python 脚本"
 								codeValueName="python_code"
 								templates={pythonScriptTemplates}
@@ -2325,54 +2645,20 @@ function ScriptModal({
 						) : null}
 
 						{currentType !== "python" ? (
-							<StructuredActionCard
-								title="执行目标与动作"
-								mainActionEditor={
-									<CommandEditor
-										value={commandText}
-										onChange={(next) => form.setFieldValue("command_template", next)}
-										commandOptions={commandOptions}
-										profile={targetProfile}
-										title="满足条件时动作"
-										embedded
-									/>
+							<StructuredActionEditorSection
+								actionText={scriptActionText}
+								onChange={(next) =>
+									applyStructuredActionEditorChange(
+										next,
+										targetDeviceId,
+										(name, value) => form.setFieldValue(name as never, value),
+										singleRuleFields.commandTemplateText!,
+									)
 								}
-								elseActionEditor={
-									<CommandEditor
-										value={commandText}
-										onChange={(next) => form.setFieldValue("command_template", next)}
-										commandOptions={commandOptions}
-										profile={targetProfile}
-										fieldKey="else_commands"
-										title="未满足时动作（可选）"
-										emptyTitle="留空则不执行备用动作。"
-										addLabel="新增 else 动作"
-										embedded
-									/>
-								}
-								extraContent={
-									<Card
-										size="small"
-										title="完整动作模板"
-										extra={<Button size="small" onClick={() => form.setFieldValue("command_template", getStructuredCommandExample(targetProfile, currentType))}>填入教学示例</Button>}
-									>
-										<Form.Item
-											label="命令 JSON"
-											name="command_template"
-											rules={[
-												{ required: true, message: "请输入命令模板" },
-												{
-													validator: async (_, value?: string) => {
-														if (!value?.trim()) throw new Error("请输入命令模板");
-														parseCommandTemplate(value);
-													},
-												},
-											]}
-										>
-											<Input.TextArea rows={12} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
-										</Form.Item>
-									</Card>
-								}
+								commandOptions={commandOptions}
+								profile={targetProfile}
+								showAdvancedJson={showAdvancedJson}
+								onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
 							/>
 						) : null}
 					</Form>
@@ -2456,20 +2742,27 @@ function LinkageModal({
 	embedded?: boolean;
 }) {
 	const [form] = Form.useForm<LinkageFormValues>();
+	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
-	const linkageType = Form.useWatch("linkage_type", form) ?? "threshold";
-	const linkageConditionMode = Form.useWatch("conditionMode", form) ?? "all";
+	const linkageType = Form.useWatch(linkageRuleFields.type, form) ?? "threshold";
+	const linkageConditionMode = Form.useWatch(linkageRuleFields.conditionMode, form) ?? "all";
+	const targetDeviceId = Form.useWatch(linkageRuleFields.targetDeviceId, form);
 	const formValues = Form.useWatch([], form) as Partial<LinkageFormValues> | undefined;
-	const targetDeviceId = Form.useWatch("targetDeviceId", form);
 	const targetDevice = useMemo(() => devices.find((device) => device.device_id === targetDeviceId), [devices, targetDeviceId]);
 	const targetProfile = inferDeviceProfile(targetDevice);
 	const commandOptions = getDeviceCommandCatalog(targetProfile);
-	const sourceDeviceId = Form.useWatch("sourceDeviceId", form);
+	const sourceDeviceId = Form.useWatch(linkageRuleFields.sourceDeviceId!, form);
 	const sourceDevice = useMemo(() => devices.find((device) => device.device_id === sourceDeviceId), [devices, sourceDeviceId]);
 	const sourceMetricOptions = useMemo(() => getMetricOptionsForDevice(sourceDevice), [sourceDevice]);
 	const sourceMetricGuide = useMemo(() => getMetricGuideForDevice(sourceDevice), [sourceDevice]);
-	const currentCommand = Form.useWatch("actionCommand", form);
-	const actionOptions = getCommandActionOptions(currentCommand, targetProfile);
+	const primaryActions = safeArray<CommandRow>(Form.useWatch(linkageRuleFields.primaryActions, form));
+	const elseCommands = safeArray<CommandRow>(Form.useWatch(linkageRuleFields.elseCommands, form));
+	const linkageActionText = useMemo(
+		() => buildRuleActionText({ targetDeviceId, primaryActions, elseCommands }),
+		[targetDeviceId, primaryActions, elseCommands],
+	);
+	const syncLinkageActionEditor = (next: string) =>
+		applyStructuredActionEditorChange(next, targetDeviceId, (name, value) => form.setFieldValue(name as never, value));
 	const deviceOptions = useMemo(() => devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) })), [devices]);
 	const linkagePreview = useMemo(
 		() => buildLinkagePythonPreview(formValues || {}, sourceDevice, targetDevice),
@@ -2491,36 +2784,36 @@ function LinkageModal({
 		if (!open) return;
 		const previousType = previousTypeRef.current;
 		if (previousType === linkageType) return;
-		if ((linkageType === "schedule" || linkageType === "hybrid") && !trimCronValue(form.getFieldValue("scheduleCron"))) {
-			form.setFieldValue("scheduleCron", "0 9 * * *");
+		if ((linkageType === "schedule" || linkageType === "hybrid") && !trimCronValue(form.getFieldValue(linkageRuleFields.cron as never))) {
+			form.setFieldValue(linkageRuleFields.cron as never, "0 9 * * *");
 		}
-		if (linkageType === "python" && !String(form.getFieldValue("pythonCode") || "").trim()) {
-			form.setFieldValue("pythonCode", getDefaultLinkagePythonExample(targetProfile));
-			form.setFieldValue("scheduleCron", undefined);
+		if (linkageType === "python" && !String(form.getFieldValue(linkageRuleFields.pythonCode as never) || "").trim()) {
+			form.setFieldValue(linkageRuleFields.pythonCode as never, getDefaultLinkagePythonExample(targetProfile));
+			form.setFieldValue(linkageRuleFields.cron as never, undefined);
 		}
 		previousTypeRef.current = linkageType;
 	}, [form, linkageType, open, targetProfile]);
 
 	useEffect(() => {
 		if (!open || !targetDeviceId) return;
-		const allowedCommands = new Set(commandOptions.map((item) => item.value));
-		if (!currentCommand || !allowedCommands.has(currentCommand)) {
-			const nextCommand = getDefaultCommandForProfile(targetProfile);
-			form.setFieldValue("actionCommand", nextCommand);
-			form.setFieldValue("actionType", getDefaultActionForCommand(nextCommand, targetProfile));
-			return;
+		const nextPrimaryActions = normalizePrimaryActionsForProfile(primaryActions, targetProfile, commandOptions);
+		if (JSON.stringify(nextPrimaryActions) !== JSON.stringify(primaryActions)) {
+			form.setFieldValue(linkageRuleFields.primaryActions as never, nextPrimaryActions);
 		}
-		if (!actionOptions.some((item) => item.value === form.getFieldValue("actionType"))) {
-			form.setFieldValue("actionType", getDefaultActionForCommand(currentCommand, targetProfile));
-		}
-	}, [actionOptions, commandOptions, currentCommand, form, open, targetDeviceId, targetProfile]);
+	}, [commandOptions, form, open, primaryActions, targetDeviceId, targetProfile]);
 
 	const content = (
 		<Row gutter={[20, 20]}>
 				<Col xs={24} xl={15}>
 					<Form form={form} layout="vertical" onFinish={(values) => { try { onSubmit(toLinkagePayload(values)); } catch (error) { message.error(error instanceof Error ? error.message : "保存失败"); } }}>
+						<Form.Item name={linkageRuleFields.primaryActions} hidden>
+							<Input />
+						</Form.Item>
+						<Form.Item name={linkageRuleFields.elseCommands} hidden>
+							<Input />
+						</Form.Item>
 						<RuleBasicCard
-							typeFieldName="linkage_type"
+							typeFieldName={linkageRuleFields.type}
 							isActiveFieldName="is_active"
 							priorityFieldName="priority"
 							namePlaceholder="例如：堆体高温时开启排气"
@@ -2529,27 +2822,27 @@ function LinkageModal({
 
 						{linkageType === "python" ? (
 							<PythonLogicCard
-								codeFieldName="pythonCode"
+								codeFieldName={linkageRuleFields.pythonCode}
 								codeLabel="Python 脚本"
 								codeValueName="pythonCode"
 								templates={linkagePythonTemplates}
 								beforeContent={
-									<Form.Item label="触发设备" name="sourceDeviceId" style={{ marginBottom: 16 }}>
+									<Form.Item label="触发设备" name={linkageRuleFields.sourceDeviceId} style={{ marginBottom: 16 }}>
 										<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
 									</Form.Item>
 								}
 							/>
 						) : (
 							<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
-								<Form.Item label="触发设备" name="sourceDeviceId" rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择触发设备" }] : undefined}>
+								<Form.Item label="触发设备" name={linkageRuleFields.sourceDeviceId} rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择触发设备" }] : undefined}>
 									<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
 								</Form.Item>
 
 								{linkageType === "threshold" || linkageType === "hybrid" ? (
 								<ConditionsEditor
 									form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
-									listName="conditions"
-									conditionModeName="conditionMode"
+									listName={linkageRuleFields.conditions}
+									conditionModeName={linkageRuleFields.conditionMode}
 									conditionMode={linkageConditionMode}
 									metricOptions={sourceMetricOptions}
 									getChannelOptions={(metricValue) => getChannelOptionsForMetric(sourceDevice, metricValue)}
@@ -2560,7 +2853,7 @@ function LinkageModal({
 								{linkageType === "schedule" || linkageType === "hybrid" ? (
 									<Form.Item
 										label="Cron 表达式"
-										name="scheduleCron"
+										name={linkageRuleFields.cron}
 										rules={[
 											{
 												validator: async (_, value?: string) => {
@@ -2577,10 +2870,15 @@ function LinkageModal({
 						)}
 
 						{linkageType !== "python" ? (
-							<StructuredActionCard
-								title="执行目标与动作"
+							<StructuredActionEditorSection
+								actionText={linkageActionText}
+								onChange={syncLinkageActionEditor}
+								commandOptions={commandOptions}
+								profile={targetProfile}
+								showAdvancedJson={showAdvancedJson}
+								onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
 								targetSelector={
-									<Form.Item label="目标设备" name="targetDeviceId" rules={[{ required: true, message: "请选择目标设备" }]} style={{ marginBottom: 0 }}>
+									<Form.Item label="目标设备" name={linkageRuleFields.targetDeviceId} rules={[{ required: true, message: "请选择目标设备" }]} style={{ marginBottom: 0 }}>
 										<Select options={deviceOptions} placeholder="选择真正执行动作的设备" />
 									</Form.Item>
 								}
@@ -2590,78 +2888,6 @@ function LinkageModal({
 											目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
 										</Paragraph>
 									) : null
-								}
-								mainActionEditor={
-									<Space wrap>
-										<Form.Item label="动作命令" name="actionCommand" rules={[{ required: true, message: "请选择动作命令" }]}>
-											<Select style={{ width: 180 }} options={commandOptions} />
-										</Form.Item>
-										{currentCommand === "config_update" ? (
-											<Form.Item
-												label="配置补丁"
-												name="actionConfigText"
-												rules={[{ required: true, message: "请输入配置补丁 JSON" }]}
-											>
-												<Input.TextArea
-													style={{ width: 320 }}
-													rows={4}
-													placeholder={'例如：{\n  "read_interval": 120000,\n  "pump_run_time": 80000\n}'}
-												/>
-											</Form.Item>
-										) : (
-											<>
-												<Form.Item label="动作" name="actionType" rules={[{ required: true, message: "请选择动作" }]}>
-													<Select style={{ width: 140 }} options={actionOptions} />
-												</Form.Item>
-												<Form.Item label="持续时间(ms)" name="duration">
-													<InputNumber style={{ width: 180 }} min={0} />
-												</Form.Item>
-											</>
-										)}
-									</Space>
-								}
-								elseActionEditor={
-									<>
-										<Text type="secondary">未满足条件时动作（可选）</Text>
-										<Form.List name="elseCommands">
-											{(fields, { add, remove }) => (
-												<Space orientation="vertical" style={{ width: "100%" }} size={12}>
-													{fields.length ? null : <Text type="secondary">留空则不执行备用动作。</Text>}
-													{fields.map((field, index) => {
-														const elseCommandValue = form.getFieldValue(["elseCommands", field.name, "command"]);
-														return (
-															<Space key={field.key} wrap align="start">
-																<Form.Item label={index === 0 ? "动作命令" : " "} name={[field.name, "command"]} rules={[{ required: true, message: "请选择动作命令" }]}>
-																	<Select style={{ width: 180 }} options={commandOptions} />
-																</Form.Item>
-																<Form.Item label={index === 0 ? "动作" : " "} name={[field.name, "action"]} rules={[{ required: true, message: "请选择动作" }]}>
-																	<Select style={{ width: 140 }} options={getCommandActionOptions(typeof elseCommandValue === "string" ? elseCommandValue : undefined, targetProfile)} />
-																</Form.Item>
-																<Form.Item label={index === 0 ? "持续时间(ms)" : " "} name={[field.name, "duration"]}>
-																	<InputNumber style={{ width: 180 }} min={0} />
-																</Form.Item>
-																<Button danger size="small" onClick={() => remove(field.name)}>
-																	删除
-																</Button>
-															</Space>
-														);
-													})}
-													<Button
-														size="small"
-														onClick={() =>
-															add({
-																command: commandOptions[0]?.value || "pump",
-																action: getDefaultActionForCommand(commandOptions[0]?.value, targetProfile),
-																duration: getDefaultDurationForCommand(commandOptions[0]?.value),
-															})
-														}
-													>
-														新增 else 动作
-													</Button>
-												</Space>
-											)}
-										</Form.List>
-									</>
 								}
 							/>
 						) : null}
