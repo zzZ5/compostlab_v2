@@ -59,11 +59,15 @@ def _validate_command_template(command_template: dict) -> dict:
             command = item.get("command")
             action = item.get("action")
             duration = item.get("duration")
+            config = item.get("config")
 
             if not isinstance(command, str) or not command.strip():
                 raise ValueError(f"command_template.{field_name}[{index}].command is required")
 
-            if not isinstance(action, str) or not action.strip():
+            if command == "config_update":
+                if not isinstance(config, dict):
+                    raise ValueError(f"command_template.{field_name}[{index}].config must be an object")
+            elif not isinstance(action, str) or not action.strip():
                 raise ValueError(f"command_template.{field_name}[{index}].action is required")
 
             if duration is not None and (not isinstance(duration, (int, float)) or duration < 0):
