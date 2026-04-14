@@ -216,45 +216,160 @@ const fallbackMetricOptions = [
 	{ value: "switch", label: "开关状态" },
 ] as const;
 
-const commandExamples: Record<ScriptType, string> = {
-	threshold: `{
+function getStructuredCommandExample(profile: DeviceProfile, type: ScriptType) {
+	const examplesByProfile: Record<DeviceProfile, Record<Exclude<ScriptType, "python">, string>> = {
+		"cp500-v3": {
+			threshold: `{
   "commands": [
-    { "command": "fan", "action": "on", "duration": 300000 }
-  ],
-  "else_commands": [
-    { "command": "fan", "action": "off" }
+    { "command": "aeration", "action": "on", "duration": 300000 }
   ]
 }`,
-	schedule: `{
+			schedule: `{
   "commands": [
     { "command": "pump", "action": "on", "duration": 60000 }
   ]
 }`,
-	hybrid: `{
+			hybrid: `{
+  "commands": [
+    { "command": "pump", "action": "on", "duration": 60000 },
+    { "command": "aeration", "action": "on", "duration": 180000 }
+  ]
+}`,
+		},
+		"smart-compost": {
+			threshold: `{
+  "commands": [
+    { "command": "exhaust", "action": "on", "duration": 300000 }
+  ]
+}`,
+			schedule: `{
+  "commands": [
+    { "command": "aeration", "action": "on", "duration": 60000 }
+  ]
+}`,
+			hybrid: `{
+  "commands": [
+    { "command": "aeration", "action": "on", "duration": 60000 },
+    { "command": "exhaust", "action": "on", "duration": 180000 }
+  ]
+}`,
+		},
+		mmcgs: {
+			threshold: `{
+  "commands": [
+    { "command": "point1", "action": "on", "duration": 300000 }
+  ]
+}`,
+			schedule: `{
+  "commands": [
+    { "command": "purge", "action": "on", "duration": 60000 }
+  ]
+}`,
+			hybrid: `{
+  "commands": [
+    { "command": "purge", "action": "on", "duration": 60000 },
+    { "command": "point1", "action": "on", "duration": 180000 }
+  ]
+}`,
+		},
+		generic: {
+			threshold: `{
+  "commands": [
+    { "command": "fan", "action": "on", "duration": 300000 }
+  ]
+}`,
+			schedule: `{
+  "commands": [
+    { "command": "pump", "action": "on", "duration": 60000 }
+  ]
+}`,
+			hybrid: `{
   "commands": [
     { "command": "pump", "action": "on", "duration": 60000 },
     { "command": "fan", "action": "on", "duration": 120000 }
-  ],
-  "else_commands": [
-    { "command": "fan", "action": "off" }
   ]
 }`,
-	python: `{
-  "commands": [
-    { "command": "fan", "action": "on", "duration": 180000 }
-  ]
-}`,
-};
+		},
+	};
 
-const pythonExample = `temp = get_latest_value("temperature")
+	if (type === "python") {
+		return `{
+  "commands": []
+}`;
+	}
+	return examplesByProfile[profile][type];
+}
+
+function getDefaultPythonExample(profile: DeviceProfile) {
+	switch (profile) {
+		case "cp500-v3":
+			return `temp = get_latest_value("temperature")
+commands = []
+
+if temp is not None and temp >= 75:
+    commands.append({"command": "aeration", "action": "on", "duration": 300000})
+else:
+    commands.append({"command": "aeration", "action": "off"})`;
+		case "smart-compost":
+			return `temp = get_latest_value("temperature")
+commands = []
+
+if temp is not None and temp >= 75:
+    commands.append({"command": "exhaust", "action": "on", "duration": 300000})
+else:
+    commands.append({"command": "exhaust", "action": "off"})`;
+		case "mmcgs":
+			return `temp = get_latest_value("temperature")
+commands = []
+
+if temp is not None and temp >= 75:
+    commands.append({"command": "point1", "action": "on", "duration": 300000})
+else:
+    commands.append({"command": "point1", "action": "off"})`;
+		default:
+			return `temp = get_latest_value("temperature")
 commands = []
 
 if temp is not None and temp >= 75:
     commands.append({"command": "fan", "action": "on", "duration": 300000})
 else:
     commands.append({"command": "fan", "action": "off"})`;
+	}
+}
 
-const linkagePythonExample = `source_temp = get_latest_value("temperature", device_code="CP500-01")
+function getDefaultLinkagePythonExample(profile: DeviceProfile) {
+	switch (profile) {
+		case "cp500-v3":
+			return `source_temp = get_latest_value("temperature", device_code="CP500-01")
+actions = []
+
+if source_temp is not None and source_temp >= 75:
+    actions.append({
+        "target_device_code": "CP500-01",
+        "commands": [{"command": "aeration", "action": "on", "duration": 300000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "CP500-01",
+        "commands": [{"command": "aeration", "action": "off"}]
+    })`;
+		case "mmcgs":
+			return `source_temp = get_latest_value("temperature", device_code="CP500-01")
+actions = []
+
+if source_temp is not None and source_temp >= 75:
+    actions.append({
+        "target_device_code": "MMCGS-01",
+        "commands": [{"command": "point1", "action": "on", "duration": 300000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "MMCGS-01",
+        "commands": [{"command": "point1", "action": "off"}]
+    })`;
+		case "smart-compost":
+		default:
+			return `source_temp = get_latest_value("temperature", device_code="CP500-01")
 actions = []
 
 if source_temp is not None and source_temp >= 75:
@@ -267,6 +382,11 @@ else:
         "target_device_code": "SMART-01",
         "commands": [{"command": "exhaust", "action": "off"}]
     })`;
+	}
+}
+
+const pythonExample = getDefaultPythonExample("generic");
+const linkagePythonExample = getDefaultLinkagePythonExample("smart-compost");
 
 const orchestrationPythonExample = `reactor_temp = get_latest_value("temperature", "TempIn", device_code="CP500-01")
 o2_value = get_latest_value("o2", device_code="SMART-01")
@@ -751,6 +871,16 @@ function getDefaultActionForCommand(command?: string, profile?: DeviceProfile) {
 	return command === "config_update" ? "" : getCommandActionOptions(command, profile)[0]?.value || "on";
 }
 
+function getDefaultDurationForCommand(command?: string) {
+	if (!command || command === "config_update" || command === "restart" || command === "emergency") {
+		return undefined;
+	}
+	if (command === "pump" || command === "purge") {
+		return 60000;
+	}
+	return 300000;
+}
+
 function trimCronValue(value?: string) {
 	const cron = String(value || "").trim();
 	return cron || undefined;
@@ -976,6 +1106,7 @@ function buildDefaultConditions(defaultMetric: string): RuleConditionFormValue[]
 function buildRuleTriggerFormValues(
 	draft: RuleDraft,
 	defaultMetric: string,
+	pythonFallback: string,
 ): {
 	type: ScriptType;
 	conditionMode: "all" | "any";
@@ -988,15 +1119,16 @@ function buildRuleTriggerFormValues(
 		conditionMode: draft.conditionMode,
 		conditions: draft.conditions.length ? draft.conditions : buildDefaultConditions(defaultMetric),
 		cron: draft.cron || "0 9 * * *",
-		pythonCode: draft.pythonCode || pythonExample,
+		pythonCode: draft.pythonCode || pythonFallback,
 	};
 }
 
 function buildScriptFormValuesFromDraft(
 	draft: RuleDraft,
 	defaultMetric: string,
+	profile: DeviceProfile = "generic",
 ): ScriptFormValues {
-	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric);
+	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric, getDefaultPythonExample(profile));
 	const conditions = triggerFields.conditions;
 
 	return {
@@ -1017,7 +1149,7 @@ function buildScriptFormValuesFromDraft(
 		command_template: JSON.stringify(
 			Object.keys(stripCommandTemplateMeta(draft.commandTemplate)).length
 				? stripCommandTemplateMeta(draft.commandTemplate)
-				: parseCommandTemplate(commandExamples[draft.type]),
+				: parseCommandTemplate(getStructuredCommandExample(profile, draft.type)),
 			null,
 			2,
 		),
@@ -1028,13 +1160,14 @@ function buildScriptFormValuesFromDraft(
 function buildLinkageFormValuesFromDraft(
 	draft: RuleDraft,
 	defaultMetric: string,
+	targetProfile: DeviceProfile = "smart-compost",
 ): LinkageFormValues {
 	const commandTemplate = safeRecord(draft.commandTemplate);
 	const commands = safeArray<Record<string, unknown>>(commandTemplate.commands);
 	const firstCommand = commands[0];
 	const elseCommandsText = JSON.stringify(commandTemplate, null, 2);
 	const elseRows = parseCommandRowsForKey(elseCommandsText, "else_commands");
-	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric);
+	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric, getDefaultLinkagePythonExample(targetProfile));
 	const conditions = triggerFields.conditions;
 
 	return {
@@ -1048,7 +1181,7 @@ function buildLinkageFormValuesFromDraft(
 		conditions,
 		conditionMode: triggerFields.conditionMode,
 		scheduleCron: triggerFields.cron,
-		pythonCode: draft.pythonCode || linkagePythonExample,
+		pythonCode: triggerFields.pythonCode,
 		targetDeviceId: draft.targetDeviceId,
 		actionCommand: typeof firstCommand?.command === "string" ? firstCommand.command : undefined,
 		actionType: typeof firstCommand?.action === "string" ? firstCommand.action : undefined,
@@ -1668,7 +1801,7 @@ function CommandEditor({
 							{
 								command: commandOptions[0]?.value || "pump",
 								action: getDefaultActionForCommand(commandOptions[0]?.value, profile),
-								duration: 60000,
+								duration: getDefaultDurationForCommand(commandOptions[0]?.value),
 							},
 						])
 					}
@@ -2054,10 +2187,9 @@ function ScriptModal({
 		if (!open) return;
 		form.resetFields();
 		const draft = buildRuleDraftFromScriptRecord(script);
-		const defaultMetric = getMetricOptionsForDevice(
-			draft.targetDeviceId ? devices.find((item) => item.device_id === draft.targetDeviceId) : undefined,
-		)[0]?.value || "temperature";
-		form.setFieldsValue(buildScriptFormValuesFromDraft(draft, defaultMetric));
+		const draftTargetDevice = draft.targetDeviceId ? devices.find((item) => item.device_id === draft.targetDeviceId) : undefined;
+		const defaultMetric = getMetricOptionsForDevice(draftTargetDevice)[0]?.value || "temperature";
+		form.setFieldsValue(buildScriptFormValuesFromDraft(draft, defaultMetric, inferDeviceProfile(draftTargetDevice)));
 		previousTypeRef.current = draft.type;
 	}, [devices, form, open, script]);
 
@@ -2066,17 +2198,47 @@ function ScriptModal({
 		const previousType = previousTypeRef.current;
 		if (previousType === currentType) return;
 		if (currentType !== "python" && !String(commandText || "").trim()) {
-			form.setFieldValue("command_template", commandExamples[currentType]);
+			form.setFieldValue("command_template", getStructuredCommandExample(targetProfile, currentType));
 		}
 		if ((currentType === "schedule" || currentType === "hybrid") && !trimCronValue(form.getFieldValue(["schedule_config", "cron"]))) {
 			form.setFieldValue(["schedule_config", "cron"], "0 9 * * *");
 		}
 		if (currentType === "python" && !String(form.getFieldValue("python_code") || "").trim()) {
-			form.setFieldValue("python_code", pythonExample);
+			form.setFieldValue("python_code", getDefaultPythonExample(targetProfile));
 			form.setFieldValue(["schedule_config", "cron"], undefined);
 		}
 		previousTypeRef.current = currentType;
-	}, [commandText, currentType, form, open]);
+	}, [commandText, currentType, form, open, targetProfile]);
+
+	useEffect(() => {
+		if (!open || currentType === "python") return;
+		const currentTemplate = String(form.getFieldValue("command_template") || "").trim();
+		if (!currentTemplate) return;
+		const genericTemplate = JSON.stringify(
+			parseCommandTemplate(getStructuredCommandExample("generic", currentType)),
+			null,
+			2,
+		);
+		const profileTemplate = JSON.stringify(
+			parseCommandTemplate(getStructuredCommandExample(targetProfile, currentType)),
+			null,
+			2,
+		);
+		if (currentTemplate === genericTemplate && currentTemplate !== profileTemplate) {
+			form.setFieldValue("command_template", profileTemplate);
+		}
+	}, [currentType, form, open, targetProfile, targetDeviceId]);
+
+	useEffect(() => {
+		if (!open || currentType !== "python") return;
+		const currentCode = String(form.getFieldValue("python_code") || "").trim();
+		if (!currentCode) return;
+		const genericCode = getDefaultPythonExample("generic").trim();
+		const profileCode = getDefaultPythonExample(targetProfile).trim();
+		if (currentCode === genericCode && currentCode !== profileCode) {
+			form.setFieldValue("python_code", profileCode);
+		}
+	}, [currentType, form, open, targetProfile, targetDeviceId]);
 
 	const content = (
 		<Row gutter={[20, 20]}>
@@ -2192,7 +2354,7 @@ function ScriptModal({
 									<Card
 										size="small"
 										title="完整动作模板"
-										extra={<Button size="small" onClick={() => form.setFieldValue("command_template", commandExamples[currentType])}>填入教学示例</Button>}
+										extra={<Button size="small" onClick={() => form.setFieldValue("command_template", getStructuredCommandExample(targetProfile, currentType))}>填入教学示例</Button>}
 									>
 										<Form.Item
 											label="命令 JSON"
@@ -2318,10 +2480,10 @@ function LinkageModal({
 		if (!open) return;
 		form.resetFields();
 		const draft = buildRuleDraftFromScriptRecord(script);
-		const defaultMetric = getMetricOptionsForDevice(
-			draft.sourceDeviceId ? devices.find((item) => item.device_id === draft.sourceDeviceId) : undefined,
-		)[0]?.value || "temperature";
-		form.setFieldsValue(buildLinkageFormValuesFromDraft(draft, defaultMetric));
+		const draftSourceDevice = draft.sourceDeviceId ? devices.find((item) => item.device_id === draft.sourceDeviceId) : undefined;
+		const draftTargetDevice = draft.targetDeviceId ? devices.find((item) => item.device_id === draft.targetDeviceId) : undefined;
+		const defaultMetric = getMetricOptionsForDevice(draftSourceDevice)[0]?.value || "temperature";
+		form.setFieldsValue(buildLinkageFormValuesFromDraft(draft, defaultMetric, inferDeviceProfile(draftTargetDevice)));
 		previousTypeRef.current = draft.type;
 	}, [devices, form, open, script]);
 
@@ -2333,11 +2495,11 @@ function LinkageModal({
 			form.setFieldValue("scheduleCron", "0 9 * * *");
 		}
 		if (linkageType === "python" && !String(form.getFieldValue("pythonCode") || "").trim()) {
-			form.setFieldValue("pythonCode", linkagePythonExample);
+			form.setFieldValue("pythonCode", getDefaultLinkagePythonExample(targetProfile));
 			form.setFieldValue("scheduleCron", undefined);
 		}
 		previousTypeRef.current = linkageType;
-	}, [form, linkageType, open]);
+	}, [form, linkageType, open, targetProfile]);
 
 	useEffect(() => {
 		if (!open || !targetDeviceId) return;
@@ -2490,6 +2652,7 @@ function LinkageModal({
 															add({
 																command: commandOptions[0]?.value || "pump",
 																action: getDefaultActionForCommand(commandOptions[0]?.value, targetProfile),
+																duration: getDefaultDurationForCommand(commandOptions[0]?.value),
 															})
 														}
 													>
