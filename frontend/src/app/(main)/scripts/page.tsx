@@ -95,6 +95,7 @@ type RuleCondition = {
 	operator?: string;
 	value?: number;
 };
+type RuleConditionFormValue = RuleCondition;
 type RuleDraft = {
 	name: string;
 	description: string;
@@ -110,59 +111,67 @@ type RuleDraft = {
 	commandTemplate: Record<string, unknown>;
 };
 
-type ScriptFormValues = {
+type RuleFormIdentityFields = {
 	name: string;
 	description?: string;
-	script_type: ScriptType;
 	is_active: boolean;
 	priority: number;
-	threshold_config?: {
-		condition_mode?: "all" | "any";
-		metric?: string;
-		channel_code?: string;
-		operator?: string;
-		value?: number;
-		conditions?: Array<{
-			metric?: string;
-			channel_code?: string;
-			operator?: string;
-			value?: number;
-		}>;
-	};
-	schedule_config?: {
-		cron?: string;
-	};
+};
+
+type ThresholdConfigFormValue = {
+	condition_mode?: "all" | "any";
+	metric?: string;
+	channel_code?: string;
+	operator?: string;
+	value?: number;
+	conditions?: RuleConditionFormValue[];
+};
+
+type ScheduleConfigFormValue = {
+	cron?: string;
+};
+
+type SharedRuleDraftInput = RuleFormIdentityFields & {
+	type: ScriptType;
+	sourceDeviceId?: number;
+	targetDeviceId?: number;
+	conditionMode?: "all" | "any";
+	conditions?: RuleConditionFormValue[];
+	cron?: string;
+	pythonCode?: string;
+	commandTemplate: Record<string, unknown>;
+};
+
+type ScriptFormValues = RuleFormIdentityFields & {
+	script_type: ScriptType;
+	threshold_config?: ThresholdConfigFormValue;
+	schedule_config?: ScheduleConfigFormValue;
 	python_code?: string;
 	command_template: string;
 	target_device_id?: number;
 };
 
-type LinkageFormValues = {
-	name: string;
-	description?: string;
-	linkage_type: ScriptType;
-	is_active: boolean;
-	priority: number;
-	sourceDeviceId?: number;
-	sourceMetric?: string;
-	sourceChannelCode?: string;
-	operator?: string;
-	threshold?: number;
-	conditions?: Array<{
-		metric?: string;
-		channel_code?: string;
-		operator?: string;
-		value?: number;
-	}>;
-	conditionMode?: "all" | "any";
-	scheduleCron?: string;
-	pythonCode?: string;
-	targetDeviceId?: number;
+type LinkageActionFormValue = {
 	actionCommand?: string;
 	actionType?: string;
 	duration?: number;
 	actionConfigText?: string;
 	elseCommands?: CommandRow[];
+};
+
+type LinkageFormValues = RuleFormIdentityFields &
+	LinkageActionFormValue & {
+	linkage_type: ScriptType;
+	sourceDeviceId?: number;
+	sourceMetric?: string;
+	sourceChannelCode?: string;
+	operator?: string;
+	threshold?: number;
+	conditions?: RuleConditionFormValue[];
+	conditionMode?: "all" | "any";
+	scheduleCron?: string;
+	pythonCode?: string;
+	targetDeviceId?: number;
 	elseActionCommand?: string;
 	elseActionType?: string;
 	elseDuration?: number;
@@ -850,29 +859,46 @@ function buildLinkageCommandTemplate(values: LinkageFormValues) {
 	};
 }
 
-function buildRuleDraftFromScriptValues(values: ScriptFormValues): RuleDraft {
+function buildRuleDraft(input: SharedRuleDraftInput): RuleDraft {
 	return {
-		name: values.name.trim(),
-		description: (values.description || "").trim(),
+		name: input.name.trim(),
+		description: (input.description || "").trim(),
+		type: input.type,
+		isActive: input.is_active,
+		priority: input.priority,
+		sourceDeviceId: input.sourceDeviceId,
+		targetDeviceId: input.targetDeviceId,
+		conditionMode: input.conditionMode || "all",
+		conditions: input.conditions || [],
+		cron: trimCronValue(input.cron),
+		pythonCode: input.pythonCode || "",
+		commandTemplate: safeRecord(input.commandTemplate),
+	};
+}
+
+function buildRuleDraftFromScriptValues(values: ScriptFormValues): RuleDraft {
+	return buildRuleDraft({
+		name: values.name,
+		description: values.description,
 		type: values.script_type,
-		isActive: values.is_active,
+		is_active: values.is_active,
 		priority: values.priority,
 		sourceDeviceId: values.target_device_id,
 		targetDeviceId: values.target_device_id,
 		conditionMode: values.threshold_config?.condition_mode || "all",
 		conditions: normalizeThresholdConditions(values.threshold_config),
-		cron: trimCronValue(values.schedule_config?.cron),
-		pythonCode: values.python_code || "",
+		cron: values.schedule_config?.cron,
+		pythonCode: values.python_code,
 		commandTemplate: buildStructuredCommandTemplate(values.command_template, values.target_device_id),
-	};
+	});
 }
 
 function buildRuleDraftFromLinkageValues(values: LinkageFormValues): RuleDraft {
-	return {
-		name: values.name.trim(),
-		description: (values.description || "").trim(),
+	return buildRuleDraft({
+		name: values.name,
+		description: values.description,
 		type: values.linkage_type,
-		isActive: values.is_active,
+		is_active: values.is_active,
 		priority: values.priority,
 		sourceDeviceId: values.sourceDeviceId,
 		targetDeviceId: values.targetDeviceId,
@@ -884,10 +910,10 @@ function buildRuleDraftFromLinkageValues(values: LinkageFormValues): RuleDraft {
 			operator: values.operator,
 			value: values.threshold,
 		}),
-		cron: trimCronValue(values.scheduleCron),
-		pythonCode: values.pythonCode || "",
+		cron: values.scheduleCron,
+		pythonCode: values.pythonCode,
 		commandTemplate: buildLinkageCommandTemplate(values),
-	};
+	});
 }
 
 function getScriptSourceDeviceId(script?: Script | null) {
@@ -910,11 +936,11 @@ function buildRuleDraftFromScriptRecord(script?: Script | null): RuleDraft {
 	const sourceDeviceId = getScriptSourceDeviceId(script);
 	const targetDeviceId = getScriptTargetDeviceId(script);
 
-	return {
+	return buildRuleDraft({
 		name: script?.name || "",
 		description: script?.description || "",
 		type: script?.script_type || "threshold",
-		isActive: script?.is_active ?? true,
+		is_active: script?.is_active ?? true,
 		priority: script?.priority ?? 0,
 		sourceDeviceId,
 		targetDeviceId,
@@ -928,9 +954,41 @@ function buildRuleDraftFromScriptRecord(script?: Script | null): RuleDraft {
 			operator: typeof thresholdConfig.operator === "string" ? thresholdConfig.operator : undefined,
 			value: typeof thresholdConfig.value === "number" ? thresholdConfig.value : undefined,
 		}),
-		cron: trimCronValue(typeof scheduleConfig.cron === "string" ? scheduleConfig.cron : undefined),
-		pythonCode: script?.python_code || "",
+		cron: typeof scheduleConfig.cron === "string" ? scheduleConfig.cron : undefined,
+		pythonCode: script?.python_code,
 		commandTemplate: safeRecord(script?.command_template),
+	});
+}
+
+function buildRuleIdentityFormValues(draft: RuleDraft): RuleFormIdentityFields {
+	return {
+		name: draft.name,
+		description: draft.description,
+		is_active: draft.isActive,
+		priority: draft.priority,
+	};
+}
+
+function buildDefaultConditions(defaultMetric: string): RuleConditionFormValue[] {
+	return [{ metric: defaultMetric, operator: ">=", value: 75 }];
+}
+
+function buildRuleTriggerFormValues(
+	draft: RuleDraft,
+	defaultMetric: string,
+): {
+	type: ScriptType;
+	conditionMode: "all" | "any";
+	conditions: RuleConditionFormValue[];
+	cron: string;
+	pythonCode: string;
+} {
+	return {
+		type: draft.type,
+		conditionMode: draft.conditionMode,
+		conditions: draft.conditions.length ? draft.conditions : buildDefaultConditions(defaultMetric),
+		cron: draft.cron || "0 9 * * *",
+		pythonCode: draft.pythonCode || pythonExample,
 	};
 }
 
@@ -938,18 +996,14 @@ function buildScriptFormValuesFromDraft(
 	draft: RuleDraft,
 	defaultMetric: string,
 ): ScriptFormValues {
-	const conditions = draft.conditions.length
-		? draft.conditions
-		: [{ metric: defaultMetric, operator: ">=", value: 75 }];
+	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric);
+	const conditions = triggerFields.conditions;
 
 	return {
-		name: draft.name,
-		description: draft.description,
-		script_type: draft.type,
-		is_active: draft.isActive,
-		priority: draft.priority,
+		...buildRuleIdentityFormValues(draft),
+		script_type: triggerFields.type,
 		threshold_config: {
-			condition_mode: draft.conditionMode,
+			condition_mode: triggerFields.conditionMode,
 			metric: conditions[0]?.metric || defaultMetric,
 			channel_code: conditions[0]?.channel_code,
 			operator: conditions[0]?.operator || ">=",
@@ -957,9 +1011,9 @@ function buildScriptFormValuesFromDraft(
 			conditions,
 		},
 		schedule_config: {
-			cron: draft.cron || "0 9 * * *",
+			cron: triggerFields.cron,
 		},
-		python_code: draft.pythonCode || pythonExample,
+		python_code: triggerFields.pythonCode,
 		command_template: JSON.stringify(
 			Object.keys(stripCommandTemplateMeta(draft.commandTemplate)).length
 				? stripCommandTemplateMeta(draft.commandTemplate)
@@ -980,24 +1034,20 @@ function buildLinkageFormValuesFromDraft(
 	const firstCommand = commands[0];
 	const elseCommandsText = JSON.stringify(commandTemplate, null, 2);
 	const elseRows = parseCommandRowsForKey(elseCommandsText, "else_commands");
-	const conditions = draft.conditions.length
-		? draft.conditions
-		: [{ metric: defaultMetric, operator: ">=", value: 75 }];
+	const triggerFields = buildRuleTriggerFormValues(draft, defaultMetric);
+	const conditions = triggerFields.conditions;
 
 	return {
-		name: draft.name,
-		description: draft.description,
-		linkage_type: draft.type,
-		is_active: draft.isActive,
-		priority: draft.priority,
+		...buildRuleIdentityFormValues(draft),
+		linkage_type: triggerFields.type,
 		sourceDeviceId: draft.sourceDeviceId,
 		sourceMetric: conditions[0]?.metric || defaultMetric,
 		sourceChannelCode: conditions[0]?.channel_code,
 		operator: conditions[0]?.operator || ">=",
 		threshold: conditions[0]?.value ?? 75,
 		conditions,
-		conditionMode: draft.conditionMode,
-		scheduleCron: draft.cron || "0 9 * * *",
+		conditionMode: triggerFields.conditionMode,
+		scheduleCron: triggerFields.cron,
 		pythonCode: draft.pythonCode || linkagePythonExample,
 		targetDeviceId: draft.targetDeviceId,
 		actionCommand: typeof firstCommand?.command === "string" ? firstCommand.command : undefined,
