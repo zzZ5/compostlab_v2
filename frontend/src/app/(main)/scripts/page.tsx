@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
 	Alert,
 	Button,
@@ -17,7 +17,6 @@ import {
 	Space,
 	Switch,
 	Table,
-	Tabs,
 	Tag,
 	Typography,
 	message,
@@ -88,6 +87,28 @@ type ScriptExecution = {
 
 type ExecutionFilter = "all" | "manual" | "threshold_check" | "schedule_check" | "failed";
 type RuleStatusFilter = "all" | "active" | "inactive";
+type RuleScope = "single" | "linkage";
+type FormFieldName = string | (string | number)[];
+type RuleCondition = {
+	metric?: string;
+	channel_code?: string;
+	operator?: string;
+	value?: number;
+};
+type RuleDraft = {
+	name: string;
+	description: string;
+	type: ScriptType;
+	isActive: boolean;
+	priority: number;
+	sourceDeviceId?: number;
+	targetDeviceId?: number;
+	conditionMode: "all" | "any";
+	conditions: RuleCondition[];
+	cron?: string;
+	pythonCode: string;
+	commandTemplate: Record<string, unknown>;
+};
 
 type ScriptFormValues = {
 	name: string;
@@ -268,6 +289,19 @@ const pythonScriptTemplates = [
 		code: pythonExample,
 	},
 	{
+		key: "single-time-window",
+		label: "按时间窗口执行",
+		code: `from datetime import datetime
+
+now = datetime.now()
+commands = []
+
+if 9 <= now.hour < 11:
+    commands.append({"command": "aeration", "action": "on", "duration": 180000})
+else:
+    commands.append({"command": "aeration", "action": "off"})`,
+	},
+	{
 		key: "single-multi-command",
 		label: "单设备多动作联动",
 		code: `temp = get_latest_value("temperature", "TempIn")
@@ -281,6 +315,20 @@ if o2_value is not None and o2_value <= 8:
     commands.append({"command": "pump", "action": "on", "duration": 120000})`,
 	},
 	{
+		key: "single-time-and-threshold",
+		label: "时间加阈值",
+		code: `from datetime import datetime
+
+now = datetime.now()
+temp = get_latest_value("temperature", "TempIn")
+commands = []
+
+if 13 <= now.hour < 18 and temp is not None and temp >= 70:
+    commands.append({"command": "fan", "action": "on", "duration": 300000})
+else:
+    commands.append({"command": "fan", "action": "off"})`,
+	},
+	{
 		key: "multi-device-orchestration",
 		label: "多设备综合编排",
 		code: orchestrationPythonExample,
@@ -292,6 +340,45 @@ const linkagePythonTemplates = [
 		key: "basic-linkage",
 		label: "基础跨设备联动",
 		code: linkagePythonExample,
+	},
+	{
+		key: "linkage-time-window",
+		label: "按时间联动",
+		code: `from datetime import datetime
+
+now = datetime.now()
+actions = []
+
+if 8 <= now.hour < 20:
+    actions.append({
+        "target_device_code": "SMART-01",
+        "commands": [{"command": "exhaust", "action": "on", "duration": 300000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "SMART-01",
+        "commands": [{"command": "exhaust", "action": "off"}]
+    })`,
+	},
+	{
+		key: "linkage-time-and-threshold",
+		label: "时间加指标联动",
+		code: `from datetime import datetime
+
+now = datetime.now()
+source_temp = get_latest_value("temperature", device_code="CP500-01")
+actions = []
+
+if 9 <= now.hour < 18 and source_temp is not None and source_temp >= 75:
+    actions.append({
+        "target_device_code": "SMART-01",
+        "commands": [{"command": "exhaust", "action": "on", "duration": 300000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "SMART-01",
+        "commands": [{"command": "exhaust", "action": "off"}]
+    })`,
 	},
 	{
 		key: "multi-device-orchestration",
@@ -543,25 +630,6 @@ function parseCommandRowsForKey(text: string, key: "commands" | "else_commands")
 	}
 }
 
-function rowsToText(rows: CommandRow[], extra?: Record<string, unknown>) {
-	return rowsToTextForKey(rows, "commands", extra);
-}
-
-function rowsToTextForKey(
-	rows: CommandRow[],
-	key: "commands" | "else_commands",
-	extra?: Record<string, unknown>,
-) {
-	return JSON.stringify(
-		{
-			...(extra || {}),
-			[key]: rows,
-		},
-		null,
-		2,
-	);
-}
-
 function updateCommandTemplateRows(
 	text: string,
 	key: "commands" | "else_commands",
@@ -637,7 +705,7 @@ function getDeviceCommandCatalog(profile: DeviceProfile) {
 	}
 }
 
-function getCommandActionOptions(command?: string) {
+function getCommandActionOptions(command?: string, profile?: DeviceProfile) {
 	if (command === "config_update") {
 		return [];
 	}
@@ -650,6 +718,16 @@ function getCommandActionOptions(command?: string) {
 			{ value: "off", label: "解除急停" },
 		];
 	}
+	if (
+		profile === "cp500-v3" &&
+		(command === "heater" || command === "pump" || command === "aeration")
+	) {
+		return [
+			{ value: "on", label: "开启" },
+			{ value: "off", label: "关闭" },
+			{ value: "auto", label: "自动" },
+		];
+	}
 	return [
 		{ value: "on", label: "开启" },
 		{ value: "off", label: "关闭" },
@@ -660,155 +738,407 @@ function getDefaultCommandForProfile(profile: DeviceProfile) {
 	return getDeviceCommandCatalog(profile)[0]?.value || "pump";
 }
 
-function getDefaultActionForCommand(command?: string) {
-	return command === "config_update" ? "" : getCommandActionOptions(command)[0]?.value || "on";
+function getDefaultActionForCommand(command?: string, profile?: DeviceProfile) {
+	return command === "config_update" ? "" : getCommandActionOptions(command, profile)[0]?.value || "on";
+}
+
+function trimCronValue(value?: string) {
+	const cron = String(value || "").trim();
+	return cron || undefined;
+}
+
+function isCronLike(value?: string) {
+	const cron = trimCronValue(value);
+	if (!cron) return false;
+	const parts = cron.split(/\s+/).filter(Boolean);
+	return parts.length >= 5 && parts.length <= 6;
+}
+
+function buildThresholdConfigDraft(options: {
+	sourceDeviceId?: number;
+	conditionMode?: "all" | "any";
+	conditions: Array<{
+		metric?: string;
+		channel_code?: string;
+		operator?: string;
+		value?: number;
+	}>;
+}) {
+	const thresholdConfig: Record<string, unknown> = {};
+	if (typeof options.sourceDeviceId === "number") {
+		thresholdConfig.source_device_id = options.sourceDeviceId;
+	}
+	thresholdConfig.condition_mode = options.conditionMode || "all";
+	thresholdConfig.conditions = options.conditions;
+	if (options.conditions.length === 1) {
+		thresholdConfig.metric = options.conditions[0].metric;
+		thresholdConfig.channel_code = options.conditions[0].channel_code;
+		thresholdConfig.operator = options.conditions[0].operator;
+		thresholdConfig.value = options.conditions[0].value;
+	}
+	return thresholdConfig;
+}
+
+function buildScheduleConfigDraft(options: {
+	cron?: string;
+	sourceDeviceId?: number;
+	includeEmpty?: boolean;
+}) {
+	const scheduleConfig: Record<string, unknown> = {};
+	const cron = trimCronValue(options.cron);
+	if (cron) {
+		scheduleConfig.cron = cron;
+	}
+	if (typeof options.sourceDeviceId === "number") {
+		scheduleConfig.source_device_id = options.sourceDeviceId;
+	}
+	if (!Object.keys(scheduleConfig).length && !options.includeEmpty) {
+		return {};
+	}
+	return scheduleConfig;
+}
+
+function buildStructuredCommandTemplate(
+	commandText: string,
+	targetDeviceId?: number,
+) {
+	const commandTemplate = parseCommandTemplate(commandText);
+	return {
+		...(typeof targetDeviceId === "number" ? { target_device_id: targetDeviceId } : {}),
+		...commandTemplate,
+	};
+}
+
+function stripCommandTemplateMeta(commandTemplate?: Record<string, unknown>) {
+	const template = { ...safeRecord(commandTemplate) };
+	delete template.target_device_id;
+	return template;
+}
+
+function buildLinkageCommandTemplate(values: LinkageFormValues) {
+	if (values.linkage_type === "python") {
+		return {
+			...(values.targetDeviceId ? { target_device_id: values.targetDeviceId } : {}),
+			commands: [],
+		};
+	}
+
+	const elseCommands = safeArray<CommandRow>(values.elseCommands)
+		.filter((item) => item.command && (item.command === "config_update" ? item.configText : item.action))
+		.map((item) => ({
+			command: item.command,
+			...(item.command === "config_update"
+				? { config: parseConfigText(item.configText) }
+				: { action: item.action }),
+			...(item.command !== "config_update" && item.duration !== undefined ? { duration: item.duration } : {}),
+		}));
+
+	return {
+		target_device_id: values.targetDeviceId,
+		commands: [
+			{
+				command: values.actionCommand,
+				...(values.actionCommand === "config_update"
+					? { config: parseConfigText(values.actionConfigText) }
+					: { action: values.actionType }),
+				...(values.actionCommand !== "config_update" && values.duration !== undefined
+					? { duration: values.duration }
+					: {}),
+			},
+		],
+		...(elseCommands.length ? { else_commands: elseCommands } : {}),
+	};
+}
+
+function buildRuleDraftFromScriptValues(values: ScriptFormValues): RuleDraft {
+	return {
+		name: values.name.trim(),
+		description: (values.description || "").trim(),
+		type: values.script_type,
+		isActive: values.is_active,
+		priority: values.priority,
+		sourceDeviceId: values.target_device_id,
+		targetDeviceId: values.target_device_id,
+		conditionMode: values.threshold_config?.condition_mode || "all",
+		conditions: normalizeThresholdConditions(values.threshold_config),
+		cron: trimCronValue(values.schedule_config?.cron),
+		pythonCode: values.python_code || "",
+		commandTemplate: buildStructuredCommandTemplate(values.command_template, values.target_device_id),
+	};
+}
+
+function buildRuleDraftFromLinkageValues(values: LinkageFormValues): RuleDraft {
+	return {
+		name: values.name.trim(),
+		description: (values.description || "").trim(),
+		type: values.linkage_type,
+		isActive: values.is_active,
+		priority: values.priority,
+		sourceDeviceId: values.sourceDeviceId,
+		targetDeviceId: values.targetDeviceId,
+		conditionMode: values.conditionMode || "all",
+		conditions: normalizeThresholdConditions({
+			conditions: values.conditions,
+			metric: values.sourceMetric,
+			channel_code: values.sourceChannelCode,
+			operator: values.operator,
+			value: values.threshold,
+		}),
+		cron: trimCronValue(values.scheduleCron),
+		pythonCode: values.pythonCode || "",
+		commandTemplate: buildLinkageCommandTemplate(values),
+	};
+}
+
+function getScriptSourceDeviceId(script?: Script | null) {
+	const thresholdConfig = safeRecord(script?.threshold_config);
+	const scheduleConfig = safeRecord(script?.schedule_config);
+	if (typeof thresholdConfig.source_device_id === "number") return thresholdConfig.source_device_id;
+	if (typeof scheduleConfig.source_device_id === "number") return scheduleConfig.source_device_id;
+	return safeArray<number>(script?.device_ids)[0];
+}
+
+function getScriptTargetDeviceId(script?: Script | null) {
+	const commandTemplate = safeRecord(script?.command_template);
+	if (typeof commandTemplate.target_device_id === "number") return commandTemplate.target_device_id;
+	return safeArray<number>(script?.device_ids)[0];
+}
+
+function buildRuleDraftFromScriptRecord(script?: Script | null): RuleDraft {
+	const thresholdConfig = safeRecord(script?.threshold_config);
+	const scheduleConfig = safeRecord(script?.schedule_config);
+	const sourceDeviceId = getScriptSourceDeviceId(script);
+	const targetDeviceId = getScriptTargetDeviceId(script);
+
+	return {
+		name: script?.name || "",
+		description: script?.description || "",
+		type: script?.script_type || "threshold",
+		isActive: script?.is_active ?? true,
+		priority: script?.priority ?? 0,
+		sourceDeviceId,
+		targetDeviceId,
+		conditionMode: thresholdConfig.condition_mode === "any" ? "any" : "all",
+		conditions: normalizeThresholdConditions({
+			conditions: Array.isArray(thresholdConfig.conditions)
+				? (thresholdConfig.conditions as RuleCondition[])
+				: undefined,
+			metric: typeof thresholdConfig.metric === "string" ? thresholdConfig.metric : undefined,
+			channel_code: typeof thresholdConfig.channel_code === "string" ? thresholdConfig.channel_code : undefined,
+			operator: typeof thresholdConfig.operator === "string" ? thresholdConfig.operator : undefined,
+			value: typeof thresholdConfig.value === "number" ? thresholdConfig.value : undefined,
+		}),
+		cron: trimCronValue(typeof scheduleConfig.cron === "string" ? scheduleConfig.cron : undefined),
+		pythonCode: script?.python_code || "",
+		commandTemplate: safeRecord(script?.command_template),
+	};
+}
+
+function buildScriptFormValuesFromDraft(
+	draft: RuleDraft,
+	defaultMetric: string,
+): ScriptFormValues {
+	const conditions = draft.conditions.length
+		? draft.conditions
+		: [{ metric: defaultMetric, operator: ">=", value: 75 }];
+
+	return {
+		name: draft.name,
+		description: draft.description,
+		script_type: draft.type,
+		is_active: draft.isActive,
+		priority: draft.priority,
+		threshold_config: {
+			condition_mode: draft.conditionMode,
+			metric: conditions[0]?.metric || defaultMetric,
+			channel_code: conditions[0]?.channel_code,
+			operator: conditions[0]?.operator || ">=",
+			value: conditions[0]?.value ?? 75,
+			conditions,
+		},
+		schedule_config: {
+			cron: draft.cron || "0 9 * * *",
+		},
+		python_code: draft.pythonCode || pythonExample,
+		command_template: JSON.stringify(
+			Object.keys(stripCommandTemplateMeta(draft.commandTemplate)).length
+				? stripCommandTemplateMeta(draft.commandTemplate)
+				: parseCommandTemplate(commandExamples[draft.type]),
+			null,
+			2,
+		),
+		target_device_id: draft.targetDeviceId,
+	};
+}
+
+function buildLinkageFormValuesFromDraft(
+	draft: RuleDraft,
+	defaultMetric: string,
+): LinkageFormValues {
+	const commandTemplate = safeRecord(draft.commandTemplate);
+	const commands = safeArray<Record<string, unknown>>(commandTemplate.commands);
+	const firstCommand = commands[0];
+	const elseCommandsText = JSON.stringify(commandTemplate, null, 2);
+	const elseRows = parseCommandRowsForKey(elseCommandsText, "else_commands");
+	const conditions = draft.conditions.length
+		? draft.conditions
+		: [{ metric: defaultMetric, operator: ">=", value: 75 }];
+
+	return {
+		name: draft.name,
+		description: draft.description,
+		linkage_type: draft.type,
+		is_active: draft.isActive,
+		priority: draft.priority,
+		sourceDeviceId: draft.sourceDeviceId,
+		sourceMetric: conditions[0]?.metric || defaultMetric,
+		sourceChannelCode: conditions[0]?.channel_code,
+		operator: conditions[0]?.operator || ">=",
+		threshold: conditions[0]?.value ?? 75,
+		conditions,
+		conditionMode: draft.conditionMode,
+		scheduleCron: draft.cron || "0 9 * * *",
+		pythonCode: draft.pythonCode || linkagePythonExample,
+		targetDeviceId: draft.targetDeviceId,
+		actionCommand: typeof firstCommand?.command === "string" ? firstCommand.command : undefined,
+		actionType: typeof firstCommand?.action === "string" ? firstCommand.action : undefined,
+		duration: typeof firstCommand?.duration === "number" ? firstCommand.duration : 300000,
+		actionConfigText:
+			firstCommand?.command === "config_update" &&
+			firstCommand.config &&
+			typeof firstCommand.config === "object" &&
+			!Array.isArray(firstCommand.config)
+				? JSON.stringify(firstCommand.config, null, 2)
+				: undefined,
+		elseCommands:
+			elseRows.length
+				? elseRows
+				: [],
+		elseActionCommand: undefined,
+		elseActionType: undefined,
+		elseDuration: undefined,
+	};
+}
+
+function buildRulePayloadBase(draft: RuleDraft) {
+	return {
+		name: draft.name,
+		description: draft.description,
+		script_type: draft.type,
+		is_active: draft.isActive,
+		priority: draft.priority,
+		command_template: draft.commandTemplate,
+		device_ids: draft.targetDeviceId ? [draft.targetDeviceId] : [],
+	};
+}
+
+function validateRuleDraft(
+	draft: RuleDraft,
+	options: {
+		scope: RuleScope;
+		requireStructuredTarget?: boolean;
+		requireSourceForThreshold?: boolean;
+		requirePythonActions?: boolean;
+	},
+) {
+	if (!draft.name) {
+		throw new Error(options.scope === "linkage" ? "请输入联动名称" : "请输入规则名称");
+	}
+	if ((draft.type === "threshold" || draft.type === "hybrid") && !draft.conditions.length) {
+		throw new Error(options.scope === "linkage" ? "请补全联动的阈值条件" : "请补全阈值条件");
+	}
+	if ((draft.type === "threshold" || draft.type === "hybrid") && options.requireSourceForThreshold && !draft.sourceDeviceId) {
+		throw new Error("请补全联动的阈值条件");
+	}
+	if ((draft.type === "schedule" || draft.type === "hybrid") && !draft.cron) {
+		throw new Error(options.scope === "linkage" ? "请填写联动的定时表达式" : "请填写 Cron 表达式");
+	}
+	if (draft.type === "python") {
+		if (!draft.pythonCode.trim()) {
+			throw new Error(options.scope === "linkage" ? "请填写联动脚本" : "请填写 Python 脚本");
+		}
+		if (
+			options.requirePythonActions &&
+			!draft.pythonCode.includes("commands") &&
+			!draft.pythonCode.includes("actions")
+		) {
+			throw new Error("Python 脚本中至少需要定义 commands 或 actions");
+		}
+	}
+	if (options.requireStructuredTarget && draft.type !== "python" && !draft.targetDeviceId) {
+		throw new Error("请补全联动动作");
+	}
 }
 
 function toScriptPayload(values: ScriptFormValues) {
-	if (
-		(values.script_type === "threshold" || values.script_type === "hybrid") &&
-		!normalizeThresholdConditions(values.threshold_config).length
-	) {
-		throw new Error("请补全阈值条件");
-	}
-	if (
-		(values.script_type === "schedule" || values.script_type === "hybrid") &&
-		!values.schedule_config?.cron?.trim()
-	) {
-		throw new Error("请填写 Cron 表达式");
-	}
-	if (
-		values.script_type === "python" &&
-		!(values.python_code || "").includes("commands") &&
-		!(values.python_code || "").includes("actions")
-	) {
-		throw new Error("Python 脚本中至少需要定义 commands 或 actions");
-	}
+	const draft = buildRuleDraftFromScriptValues(values);
+	validateRuleDraft(draft, {
+		scope: "single",
+		requirePythonActions: true,
+	});
+	const threshold_config =
+		draft.type === "threshold" || draft.type === "hybrid"
+			? buildThresholdConfigDraft({
+					conditionMode: draft.conditionMode,
+					conditions: draft.conditions,
+			  })
+			: {};
+	const schedule_config =
+		draft.type === "schedule" || draft.type === "hybrid"
+			? buildScheduleConfigDraft({
+					cron: draft.cron,
+			  })
+			: {};
 	return {
-		...values,
-		schedule_config:
-			values.script_type === "python"
-				? values.schedule_config?.cron?.trim()
-					? { cron: values.schedule_config.cron.trim() }
-					: {}
-				: values.schedule_config,
-		command_template: parseCommandTemplate(values.command_template),
-		device_ids: values.target_device_id ? [values.target_device_id] : [],
+		...buildRulePayloadBase(draft),
+		threshold_config,
+		schedule_config,
+		python_code: draft.type === "python" ? draft.pythonCode : "",
+		command_template: draft.commandTemplate,
+		device_ids: buildRulePayloadBase(draft).device_ids,
 	};
 }
 
 function toLinkagePayload(values: LinkageFormValues) {
-	if (!values.name.trim()) {
-		throw new Error("请输入联动名称");
-	}
+	const draft = buildRuleDraftFromLinkageValues(values);
+	validateRuleDraft(draft, {
+		scope: "linkage",
+		requireStructuredTarget: true,
+		requireSourceForThreshold: true,
+	});
 	if (
-		values.linkage_type !== "python" &&
-		(!values.targetDeviceId ||
+		draft.type !== "python" &&
+		(!draft.targetDeviceId ||
 			!values.actionCommand ||
 			(values.actionCommand !== "config_update" && !values.actionType))
 	) {
 		throw new Error("请补全联动动作");
 	}
-	if (
-		(values.linkage_type === "threshold" || values.linkage_type === "hybrid") &&
-		(!values.sourceDeviceId || !normalizeThresholdConditions({
-			conditions: values.conditions,
-			metric: values.sourceMetric,
-			channel_code: values.sourceChannelCode,
-			operator: values.operator,
-			value: values.threshold,
-		}).length)
-	) {
-		throw new Error("请补全联动的阈值条件");
-	}
-	if (
-		(values.linkage_type === "schedule" || values.linkage_type === "hybrid") &&
-		!(values.scheduleCron || "").trim()
-	) {
-		throw new Error("请填写联动的定时表达式");
-	}
-	if (values.linkage_type === "python" && !(values.pythonCode || "").trim()) {
-		throw new Error("请填写联动脚本");
-	}
 
-	const threshold_config: Record<string, unknown> = {};
-	const schedule_config: Record<string, unknown> = {};
+	const threshold_config =
+		draft.type === "threshold" || draft.type === "hybrid"
+			? buildThresholdConfigDraft({
+					sourceDeviceId: draft.sourceDeviceId,
+					conditionMode: draft.conditionMode,
+					conditions: draft.conditions,
+			  })
+			: draft.type === "python" && draft.sourceDeviceId
+			? { source_device_id: draft.sourceDeviceId }
+			: {};
 
-	if (values.linkage_type === "threshold" || values.linkage_type === "hybrid") {
-		threshold_config.source_device_id = values.sourceDeviceId;
-		threshold_config.condition_mode = values.conditionMode || "all";
-		const conditions = normalizeThresholdConditions({
-			conditions: values.conditions,
-			metric: values.sourceMetric,
-			channel_code: values.sourceChannelCode,
-			operator: values.operator,
-			value: values.threshold,
-		});
-		threshold_config.conditions = conditions;
-		if (conditions.length === 1) {
-			threshold_config.metric = conditions[0].metric;
-			threshold_config.channel_code = conditions[0].channel_code;
-			threshold_config.operator = conditions[0].operator;
-			threshold_config.value = conditions[0].value;
-		}
-	}
-
-	if (values.linkage_type === "schedule" || values.linkage_type === "hybrid" || values.linkage_type === "python") {
-		if (values.linkage_type !== "python" || (values.scheduleCron || "").trim()) {
-		schedule_config.cron = values.scheduleCron;
-		}
-		if (values.sourceDeviceId) {
-			schedule_config.source_device_id = values.sourceDeviceId;
-		}
-	}
-
-	if (values.linkage_type === "python" && values.sourceDeviceId) {
-		threshold_config.source_device_id = values.sourceDeviceId;
-	}
-
-	const command_template =
-		values.linkage_type === "python"
-			? {
-					...(values.targetDeviceId ? { target_device_id: values.targetDeviceId } : {}),
-					commands: [],
-			  }
-			: {
-					target_device_id: values.targetDeviceId,
-					commands: [
-						{
-							command: values.actionCommand,
-							...(values.actionCommand === "config_update"
-								? { config: parseConfigText(values.actionConfigText) }
-								: { action: values.actionType }),
-							...(values.actionCommand !== "config_update" && values.duration !== undefined
-								? { duration: values.duration }
-								: {}),
-						},
-					],
-					...(safeArray<CommandRow>(values.elseCommands).filter((item) => item.command && item.action).length
-						? {
-								else_commands: safeArray<CommandRow>(values.elseCommands)
-									.filter((item) => item.command && item.action)
-									.map((item) => ({
-										command: item.command,
-										action: item.action,
-										...(item.duration !== undefined ? { duration: item.duration } : {}),
-									})),
-						  }
-						: {}),
-			  };
+	const schedule_config =
+		draft.type === "schedule" || draft.type === "hybrid"
+			? buildScheduleConfigDraft({
+					cron: draft.cron,
+					sourceDeviceId: draft.sourceDeviceId,
+			  })
+			: {};
 
 	return {
-		name: values.name.trim(),
-		description: (values.description || "").trim(),
-		script_type: values.linkage_type,
-		is_active: values.is_active,
-		priority: values.priority,
+		...buildRulePayloadBase(draft),
 		threshold_config,
 		schedule_config,
-		python_code: values.linkage_type === "python" ? values.pythonCode || "" : "",
-		command_template,
-		device_ids: values.targetDeviceId ? [values.targetDeviceId] : [],
+		python_code: draft.type === "python" ? draft.pythonCode : "",
 	};
 }
 
@@ -820,18 +1150,20 @@ function indentLines(text: string, spaces = 4) {
 		.join("\n");
 }
 
-function commandRowsToPython(commandTemplateText?: string) {
-	return commandRowsToPythonByKey(commandTemplateText, "commands", "commands");
+function wrapPythonWithCronGuard(body: string, cron?: string, fallbackComment?: string) {
+	const normalized = trimCronValue(cron);
+	if (!normalized) return body;
+	const trimmed = body.trim() || (fallbackComment || "pass");
+	return `def cron_matches(expr: str) -> bool:\n    return scheduler_matches(expr)\n\nif cron_matches(${JSON.stringify(normalized)}):\n${indentLines(trimmed)}\nelse:\n    pass`;
 }
 
-function commandRowsToPythonByKey(
-	commandTemplateText: string | undefined,
+function commandTemplateToPythonByKey(
+	commandTemplate: Record<string, unknown> | undefined,
 	key: "commands" | "else_commands",
 	variableName: string,
 ) {
 	try {
-		const parsed = commandTemplateText ? parseCommandTemplate(commandTemplateText) : { commands: [] };
-		const commands = safeArray<Record<string, unknown>>(parsed[key]);
+		const commands = safeArray<Record<string, unknown>>(commandTemplate?.[key]);
 		if (!commands.length) return `${variableName} = []`;
 		return `${variableName} = ${JSON.stringify(commands, null, 2)}`;
 	} catch (error) {
@@ -887,14 +1219,13 @@ function buildConditionPreview(
 	};
 }
 
-function buildActionPlanPreview(
-	targetDevice?: Device | null,
-	commandTemplateText?: string,
+function buildActionPlanPreviewFromTemplate(
+	targetDevice: Device | null | undefined,
+	commandTemplate: Record<string, unknown> | undefined,
 	variableName = "actions",
 ) {
 	try {
-		const parsed = commandTemplateText ? parseCommandTemplate(commandTemplateText) : { commands: [] };
-		const commands = safeArray<Record<string, unknown>>(parsed.commands);
+		const commands = safeArray<Record<string, unknown>>(commandTemplate?.commands);
 		const target: Record<string, unknown> = {
 			commands,
 		};
@@ -910,36 +1241,109 @@ function buildActionPlanPreview(
 	}
 }
 
-function buildScriptPythonPreview(values: Partial<ScriptFormValues>, targetDevice?: Device | null) {
-	const type = values.script_type || "threshold";
-	const conditions = normalizeThresholdConditions(values.threshold_config);
-	const conditionMode = values.threshold_config?.condition_mode || "all";
-	const cron = values.schedule_config?.cron || "0 9 * * *";
-	const target = targetDevice?.code || targetDevice?.name || "TARGET_DEVICE";
-	const commandBlock = commandRowsToPython(values.command_template);
-	const elseCommandBlock = commandRowsToPythonByKey(values.command_template, "else_commands", "commands");
-	const hasElseBlock = !elseCommandBlock.trim().endsWith("commands = []");
+function buildRulePythonPreview(
+	draft: RuleDraft,
+	options: {
+		scope: RuleScope;
+		sourceDevice?: Device | null;
+		targetDevice?: Device | null;
+	},
+) {
+	const scopeLabel = options.scope === "single" ? "单设备规则预览" : "设备联动规则预览";
+	const sourceLabel =
+		options.scope === "single"
+			? options.targetDevice?.code || options.targetDevice?.name || "TARGET_DEVICE"
+			: options.sourceDevice?.code || options.sourceDevice?.name || "SOURCE_DEVICE";
+	const targetLabel = options.targetDevice?.code || options.targetDevice?.name || "TARGET_DEVICE";
+	const isPython = draft.type === "python";
+	const cron = draft.cron || "0 9 * * *";
 
-	if (type === "python") {
-		const cronNote = values.schedule_config?.cron?.trim()
-			? `# 定时: ${values.schedule_config.cron.trim()}\n`
-			: "";
-		return `# 单设备规则预览\n# 目标设备: ${target}\n${cronNote}${values.python_code || orchestrationPythonExample}`;
+	if (isPython) {
+		const scriptBody = draft.pythonCode || orchestrationPythonExample;
+		return options.scope === "single"
+			? `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${scriptBody}`
+			: `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${scriptBody}`;
 	}
 
-	if (type === "schedule") {
-		return `# 单设备规则预览\n# 目标设备: ${target}\n# 定时: ${cron}\n# 该规则会在定时检查命中时执行下列动作\n${commandBlock}`;
+	if (draft.type === "schedule") {
+		const scheduleBody =
+			options.scope === "single"
+				? commandTemplateToPythonByKey(draft.commandTemplate, "commands", "commands")
+				: buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
+		if (options.scope === "single") {
+			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${wrapPythonWithCronGuard(
+				scheduleBody,
+				cron,
+				"commands = []",
+			)}`;
+		}
+		return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${wrapPythonWithCronGuard(
+			scheduleBody,
+			cron,
+			"actions = []",
+		)}`;
 	}
 
-	const { assignments, checks } = buildConditionPreview(conditions);
-	const joiner = conditionMode === "any" ? "\n    or " : "\n    and ";
+	const { assignments, checks } = buildConditionPreview(draft.conditions, {
+		deviceId: options.scope === "linkage" ? options.sourceDevice?.device_id : undefined,
+		deviceCode: options.scope === "linkage" ? options.sourceDevice?.code : undefined,
+	});
+	const joiner = draft.conditionMode === "any" ? "\n    or " : "\n    and ";
 	const ifExpr = checks.join(joiner);
 
-	if (type === "hybrid") {
-		return `# 单设备规则预览\n# 目标设备: ${target}\n# 条件关系: ${conditionMode === "any" ? "任一满足" : "全部满足"}\n# 定时: ${cron}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "# 未满足阈值条件时，等待下一次定时检查\ncommands = []")}`;
+	if (options.scope === "single") {
+		const commandBlock = commandTemplateToPythonByKey(draft.commandTemplate, "commands", "commands");
+		const elseCommandBlock = commandTemplateToPythonByKey(draft.commandTemplate, "else_commands", "commands");
+		const hasElseBlock = !elseCommandBlock.trim().endsWith("commands = []");
+		if (draft.type === "hybrid") {
+			const hybridBody = `${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(
+				hasElseBlock ? elseCommandBlock : "commands = []",
+			)}`;
+			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${wrapPythonWithCronGuard(
+				hybridBody,
+				cron,
+				"commands = []",
+			)}`;
+		}
+		return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
 	}
 
-	return `# 单设备规则预览\n# 目标设备: ${target}\n# 条件关系: ${conditionMode === "any" ? "任一满足" : "全部满足"}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
+	const actionBlock = buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
+	const elseActionBlock = (() => {
+		const elseCommands = safeArray<Record<string, unknown>>(draft.commandTemplate?.else_commands);
+		return buildActionPlanPreviewFromTemplate(options.targetDevice, { commands: elseCommands });
+	})();
+	const hasElseActionBlock = !elseActionBlock.trim().endsWith("actions = []");
+	if (draft.type === "hybrid") {
+		const hybridBody = `${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(
+			hasElseActionBlock ? elseActionBlock : "actions = []",
+		)}`;
+		return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${wrapPythonWithCronGuard(
+			hybridBody,
+			cron,
+			"actions = []",
+		)}`;
+	}
+	return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(hasElseActionBlock ? elseActionBlock : "actions = []")}`;
+}
+
+function buildScriptPythonPreview(values: Partial<ScriptFormValues>, targetDevice?: Device | null) {
+	const draft = buildRuleDraftFromScriptValues({
+		name: values.name || "",
+		description: values.description || "",
+		script_type: values.script_type || "threshold",
+		is_active: values.is_active ?? true,
+		priority: values.priority ?? 0,
+		threshold_config: values.threshold_config,
+		schedule_config: values.schedule_config,
+		python_code: values.python_code || "",
+		command_template: values.command_template || JSON.stringify({ commands: [] }),
+		target_device_id: values.target_device_id,
+	});
+	return buildRulePythonPreview(draft, {
+		scope: "single",
+		targetDevice,
+	});
 }
 
 function buildLinkagePythonPreview(
@@ -948,63 +1352,33 @@ function buildLinkagePythonPreview(
 	targetDevice?: Device | null,
 ) {
 	try {
-		const type = values.linkage_type || "threshold";
-		const source = sourceDevice?.code || sourceDevice?.name || "SOURCE_DEVICE";
-		const target = targetDevice?.code || targetDevice?.name || "TARGET_DEVICE";
-		const conditionMode = values.conditionMode || "all";
-		const conditions = normalizeThresholdConditions({
-			conditions: values.conditions,
-			metric: values.sourceMetric,
-			channel_code: values.sourceChannelCode,
+		const draft = buildRuleDraftFromLinkageValues({
+			name: values.name || "",
+			description: values.description || "",
+			linkage_type: values.linkage_type || "threshold",
+			is_active: values.is_active ?? true,
+			priority: values.priority ?? 0,
+			sourceDeviceId: values.sourceDeviceId,
+			sourceMetric: values.sourceMetric,
+			sourceChannelCode: values.sourceChannelCode,
 			operator: values.operator,
-			value: values.threshold,
+			threshold: values.threshold,
+			conditions: values.conditions,
+			conditionMode: values.conditionMode,
+			scheduleCron: values.scheduleCron,
+			pythonCode: values.pythonCode || "",
+			targetDeviceId: values.targetDeviceId,
+			actionCommand: values.actionCommand,
+			actionType: values.actionType,
+			duration: values.duration,
+			actionConfigText: values.actionConfigText,
+			elseCommands: values.elseCommands,
 		});
-		const cron = values.scheduleCron || "0 9 * * *";
-		const commandTemplateText = rowsToText(
-			values.actionCommand
-				? [
-						{
-							command: values.actionCommand,
-							action: values.actionType || "on",
-							...(values.duration !== undefined ? { duration: values.duration } : {}),
-						},
-				  ]
-				: [],
-		);
-		const actionBlock = buildActionPlanPreview(targetDevice, commandTemplateText);
-		const elseCommandTemplateText = rowsToText(
-			safeArray<CommandRow>(values.elseCommands)
-				.filter((item) => item.command && item.action)
-				.map((item) => ({
-					command: item.command,
-					action: item.action,
-					...(item.duration !== undefined ? { duration: item.duration } : {}),
-				})),
-		);
-		const elseActionBlock = buildActionPlanPreview(targetDevice, elseCommandTemplateText);
-		const hasElseActionBlock = !elseActionBlock.trim().endsWith("actions = []");
-
-		if (type === "python") {
-			const cronNote = values.scheduleCron?.trim() ? `# 定时: ${values.scheduleCron.trim()}\n` : "";
-			return `# 设备联动规则预览\n# 触发设备: ${source}\n# 目标设备: ${target}\n${cronNote}${values.pythonCode || orchestrationPythonExample}`;
-		}
-
-		if (type === "schedule") {
-			return `# 设备联动规则预览\n# 触发设备: ${source}\n# 目标设备: ${target}\n# 定时: ${cron}\n# 定时命中时，对目标设备执行以下动作\n${actionBlock}`;
-		}
-
-		const { assignments, checks } = buildConditionPreview(conditions, {
-			deviceId: sourceDevice?.device_id,
-			deviceCode: sourceDevice?.code,
+		return buildRulePythonPreview(draft, {
+			scope: "linkage",
+			sourceDevice,
+			targetDevice,
 		});
-		const joiner = conditionMode === "any" ? "\n    or " : "\n    and ";
-		const ifExpr = checks.join(joiner);
-
-		if (type === "hybrid") {
-			return `# 设备联动规则预览\n# 触发设备: ${source}\n# 目标设备: ${target}\n# 条件关系: ${conditionMode === "any" ? "任一满足" : "全部满足"}\n# 定时: ${cron}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(hasElseActionBlock ? elseActionBlock : "# 未满足阈值条件时，等待下一次定时检查\nactions = []")}`;
-		}
-
-		return `# 设备联动规则预览\n# 触发设备: ${source}\n# 目标设备: ${target}\n# 条件关系: ${conditionMode === "any" ? "任一满足" : "全部满足"}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(hasElseActionBlock ? elseActionBlock : "actions = []")}`;
 	} catch (error) {
 		return `# 当前预览无法生成\n# ${error instanceof Error ? error.message : "联动配置不完整"}`;
 	}
@@ -1037,6 +1411,10 @@ function isLinkageScript(script: Script) {
 		typeof scheduleConfig.source_device_id === "number" ||
 		typeof commandTemplate.target_device_id === "number"
 	);
+}
+
+function ruleScopeLabel(script: Script) {
+	return isLinkageScript(script) ? "跨设备" : "本设备";
 }
 
 function summarizeCommands(commandTemplate?: Record<string, unknown>) {
@@ -1209,27 +1587,29 @@ function CommandEditor({
 	value,
 	onChange,
 	commandOptions,
+	profile,
 	fieldKey = "commands",
 	title = "执行动作",
 	emptyTitle = "先新增一条命令，或者直接编辑下面的 JSON。",
 	addLabel = "新增命令",
+	embedded = false,
 }: {
 	value: string;
 	onChange: (value: string) => void;
 	commandOptions: Array<{ value: string; label: string }>;
+	profile?: DeviceProfile;
 	fieldKey?: "commands" | "else_commands";
 	title?: string;
 	emptyTitle?: string;
 	addLabel?: string;
+	embedded?: boolean;
 }) {
 	const rows = useMemo(() => parseCommandRowsForKey(value, fieldKey), [fieldKey, value]);
 	const updateRows = (nextRows: CommandRow[]) => onChange(updateCommandTemplateRows(value, fieldKey, nextRows));
-
-	return (
-		<Card
-			size="small"
-			title={title}
-			extra={
+	const body = (
+		<Space orientation="vertical" style={{ width: "100%" }}>
+			<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+				<Text strong>{title}</Text>
 				<Button
 					size="small"
 					onClick={() =>
@@ -1237,7 +1617,7 @@ function CommandEditor({
 							...rows,
 							{
 								command: commandOptions[0]?.value || "pump",
-								action: getDefaultActionForCommand(commandOptions[0]?.value),
+								action: getDefaultActionForCommand(commandOptions[0]?.value, profile),
 								duration: 60000,
 							},
 						])
@@ -1245,92 +1625,347 @@ function CommandEditor({
 				>
 					{addLabel}
 				</Button>
-			}
-		>
-			<Space orientation="vertical" style={{ width: "100%" }}>
-				{!rows.length ? <Alert type="info" showIcon title={emptyTitle} /> : null}
-				{rows.map((row, index) => {
-					const actionOptions = getCommandActionOptions(row.command);
-					const isConfigUpdate = row.command === "config_update";
-					return (
-						<Space key={`${row.command}-${index}`} wrap align="start">
-							<Select
-								style={{ width: 160 }}
-								options={commandOptions}
-								value={row.command}
-								onChange={(next) =>
+			</div>
+			{!rows.length ? <Alert type="info" showIcon title={emptyTitle} /> : null}
+			{rows.map((row, index) => {
+				const actionOptions = getCommandActionOptions(row.command, profile);
+				const isConfigUpdate = row.command === "config_update";
+				return (
+					<Space key={`${row.command}-${index}`} wrap align="start">
+						<Select
+							style={{ width: 160 }}
+							options={commandOptions}
+							value={row.command}
+							onChange={(next) =>
+								updateRows(
+									rows.map((item, i) =>
+										i === index
+											? {
+													...item,
+													command: next,
+													action: getDefaultActionForCommand(next, profile),
+											  }
+											: item,
+									),
+								)
+							}
+						/>
+						{isConfigUpdate ? (
+							<Input.TextArea
+								style={{ width: 320 }}
+								rows={4}
+								value={row.configText}
+								placeholder={'例如：{\n  "read_interval": 120000,\n  "pump_run_time": 80000\n}'}
+								onChange={(event) =>
 									updateRows(
 										rows.map((item, i) =>
 											i === index
 												? {
 														...item,
-														command: next,
-														action: getDefaultActionForCommand(next),
+														configText: event.target.value,
 												  }
 												: item,
 										),
 									)
 								}
 							/>
-							{isConfigUpdate ? (
-								<Input.TextArea
-									style={{ width: 320 }}
-									rows={4}
-									value={row.configText}
-									placeholder={'例如：{\n  "read_interval": 120000,\n  "pump_run_time": 80000\n}'}
-									onChange={(event) =>
+						) : (
+							<>
+								<Select
+									style={{ width: 120 }}
+									options={actionOptions}
+									value={row.action}
+									onChange={(next) =>
+										updateRows(rows.map((item, i) => (i === index ? { ...item, action: next } : item)))
+									}
+								/>
+								<InputNumber
+									style={{ width: 160 }}
+									min={0}
+									value={row.duration}
+									placeholder="持续时间(ms)"
+									onChange={(next) =>
 										updateRows(
 											rows.map((item, i) =>
 												i === index
 													? {
 															...item,
-															configText: event.target.value,
+															duration: typeof next === "number" ? next : undefined,
 													  }
 													: item,
 											),
 										)
 									}
 								/>
-							) : (
-								<>
-									<Select
-										style={{ width: 120 }}
-										options={actionOptions}
-										value={row.action}
-										onChange={(next) =>
-											updateRows(rows.map((item, i) => (i === index ? { ...item, action: next } : item)))
-										}
-									/>
-									<InputNumber
-										style={{ width: 160 }}
-										min={0}
-										value={row.duration}
-										placeholder="持续时间(ms)"
-										onChange={(next) =>
-											updateRows(
-												rows.map((item, i) =>
-													i === index
-														? {
-																...item,
-																duration: typeof next === "number" ? next : undefined,
-														  }
-														: item,
-												),
-											)
-										}
-									/>
-								</>
-							)}
-							<Button danger size="small" onClick={() => updateRows(rows.filter((_, i) => i !== index))}>
-								删除
-							</Button>
-						</Space>
-					);
-				})}
+							</>
+						)}
+						<Button danger size="small" onClick={() => updateRows(rows.filter((_, i) => i !== index))}>
+							删除
+						</Button>
+					</Space>
+				);
+			})}
+		</Space>
+	);
+
+	if (embedded) return body;
+
+	return <Card size="small">{body}</Card>;
+}
+
+function RuleBasicCard({
+	typeFieldName,
+	isActiveFieldName,
+	priorityFieldName,
+	namePlaceholder,
+	descriptionPlaceholder,
+	children,
+	footerHint,
+}: {
+	typeFieldName: FormFieldName;
+	isActiveFieldName: FormFieldName;
+	priorityFieldName: FormFieldName;
+	namePlaceholder: string;
+	descriptionPlaceholder: string;
+	children?: ReactNode;
+	footerHint?: ReactNode;
+}) {
+	return (
+		<Card size="small" title="规则信息" style={{ marginBottom: 16 }}>
+			<Row gutter={12}>
+				<Col xs={24} md={14}>
+					<Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]}>
+						<Input placeholder={namePlaceholder} />
+					</Form.Item>
+				</Col>
+				<Col xs={24} md={10}>
+					<Form.Item label="规则类型" name={typeFieldName} rules={[{ required: true, message: "请选择规则类型" }]}>
+						<Select options={typeOptions as never} />
+					</Form.Item>
+				</Col>
+			</Row>
+
+			<Form.Item label="规则说明" name="description">
+				<Input.TextArea rows={2} placeholder={descriptionPlaceholder} />
+			</Form.Item>
+
+			{children}
+
+			<Row gutter={12}>
+				<Col xs={12} md={4}>
+					<Form.Item label="启用状态" name={isActiveFieldName} valuePropName="checked">
+						<Switch checkedChildren="启用" unCheckedChildren="停用" />
+					</Form.Item>
+				</Col>
+				<Col xs={12} md={4}>
+					<Form.Item label="优先级" name={priorityFieldName}>
+						<InputNumber min={0} style={{ width: "100%" }} />
+					</Form.Item>
+				</Col>
+			</Row>
+
+			{footerHint}
+		</Card>
+	);
+}
+
+function RulePreviewCard({
+	scopeSummary,
+	type,
+	pythonHint,
+	structuredHint,
+	bullets,
+	preview,
+	metricGuideTitle,
+	metricGuide,
+	emptyMetricText,
+	unselectedMetricText,
+}: {
+	scopeSummary: string;
+	type: ScriptType;
+	pythonHint?: string;
+	structuredHint?: string;
+	bullets: string[];
+	preview: string;
+	metricGuideTitle: string;
+	metricGuide: Array<[string, string[]]>;
+	emptyMetricText: string;
+	unselectedMetricText: string;
+}) {
+	return (
+		<Card size="small" title="规则说明与预览">
+			<Tag color={typeColor[type]}>{typeLabel(type)}</Tag>
+			<Paragraph type="secondary" style={{ marginTop: 12 }}>
+				{scopeSummary}
+			</Paragraph>
+			<Paragraph>
+				{type === "threshold"
+					? "适合按单个指标触发动作。"
+					: type === "schedule"
+					? "适合做固定周期任务，预览代码会直接展示时间守卫和执行动作。"
+					: type === "hybrid"
+					? "适合把时间条件和指标条件放在同一条规则里一起判断。"
+					: "适合写更复杂的编排逻辑，包括多参数、多设备和自定义时间判断。"}
+			</Paragraph>
+			<Paragraph type="secondary">
+				Python 预览和脚本里使用的是 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标，不是 <Text code>TempIn</Text>、<Text code>AirTemp</Text> 这类原始通道 code。
+			</Paragraph>
+			{type === "python" && pythonHint ? <Paragraph type="secondary">{pythonHint}</Paragraph> : null}
+			{type !== "python" && structuredHint ? <Paragraph type="secondary">{structuredHint}</Paragraph> : null}
+			<ul style={{ paddingLeft: 18, marginBottom: 12 }}>
+				{bullets.map((item) => (
+					<li key={item}>{item}</li>
+				))}
+			</ul>
+			<Divider style={{ margin: "12px 0" }} />
+			<Title level={5} style={{ marginTop: 0 }}>
+				最终 Python 脚本预览
+			</Title>
+			<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{preview}</pre>
+			<Title level={5}>{metricGuideTitle}</Title>
+			{metricGuide.length ? (
+				<Space orientation="vertical" size={6} style={{ width: "100%" }}>
+					{metricGuide.map(([metric, codes]) => (
+						<Text key={metric}>
+							{metric}：{codes.join(" / ")}
+						</Text>
+					))}
+				</Space>
+			) : (
+				<Text type="secondary">{emptyMetricText || unselectedMetricText}</Text>
+			)}
+		</Card>
+	);
+}
+
+function ConditionsEditor({
+	form,
+	listName,
+	conditionModeName,
+	conditionMode,
+	metricOptions,
+	getChannelOptions,
+	defaultMetric,
+}: {
+	form: { getFieldValue: (name: unknown) => unknown };
+	listName: FormFieldName;
+	conditionModeName: FormFieldName;
+	conditionMode: "all" | "any";
+	metricOptions: Array<{ value: string; label: string }>;
+	getChannelOptions: (metricValue?: string) => Array<{ value: string; label: string }>;
+	defaultMetric: string;
+}) {
+	return (
+		<>
+			<Form.Item label="条件关系" name={conditionModeName} initialValue="all" style={{ marginBottom: 8 }}>
+				<Select style={{ width: 160 }} options={conditionModeOptions as never} />
+			</Form.Item>
+			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+				{conditionMode === "any" ? "任一条件满足即可触发。" : "默认全部条件同时满足后触发。"}
+			</Text>
+			<Form.List name={listName}>
+				{(fields, { add, remove }) => (
+					<Space orientation="vertical" style={{ width: "100%" }} size={12}>
+						{fields.map((field, index) => {
+							const metricValue = form.getFieldValue([...((Array.isArray(listName) ? listName : [listName]) as (string | number)[]), field.name, "metric"]);
+							const channelOptions = getChannelOptions(typeof metricValue === "string" ? metricValue : undefined);
+							return (
+								<Space key={field.key} wrap align="start">
+									<Form.Item label={index === 0 ? "监控指标" : " "} name={[field.name, "metric"]} rules={[{ required: true, message: "请选择指标" }]}>
+										<Select style={{ width: 220 }} options={metricOptions} />
+									</Form.Item>
+									<Form.Item label={index === 0 ? "监控通道" : " "} name={[field.name, "channel_code"]}>
+										<Select allowClear style={{ width: 260 }} options={channelOptions} placeholder="选择具体通道" />
+									</Form.Item>
+									<Form.Item label={index === 0 ? "比较符" : " "} name={[field.name, "operator"]} rules={[{ required: true, message: "请选择比较符" }]}>
+										<Select style={{ width: 100 }} options={operatorOptions} />
+									</Form.Item>
+									<Form.Item label={index === 0 ? "阈值" : " "} name={[field.name, "value"]} rules={[{ required: true, message: "请输入阈值" }]}>
+										<InputNumber style={{ width: 140 }} />
+									</Form.Item>
+									<Button danger size="small" onClick={() => remove(field.name)} disabled={fields.length <= 1}>
+										删除
+									</Button>
+								</Space>
+							);
+						})}
+						<Button size="small" onClick={() => add({ metric: defaultMetric, operator: ">=", value: 0 })}>
+							新增条件
+						</Button>
+					</Space>
+				)}
+			</Form.List>
+		</>
+	);
+}
+
+function PythonLogicCard({
+	codeFieldName,
+	codeLabel,
+	codeValueName,
+	templates,
+	beforeContent,
+}: {
+	codeFieldName: FormFieldName;
+	codeLabel: string;
+	codeValueName: "python_code" | "pythonCode";
+	templates: readonly { key: string; label: string; code: string }[];
+	beforeContent?: ReactNode;
+}) {
+	const form = Form.useFormInstance();
+
+	return (
+		<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
+			{beforeContent}
+			<Space wrap style={{ marginBottom: 12 }}>
+				<Text type="secondary">快速模板</Text>
+			{templates.map((template) => (
+					<Button key={template.key} size="small" onClick={() => form.setFieldValue(codeValueName, template.code)}>
+						{template.label}
+					</Button>
+				))}
+			</Space>
+			<Form.Item label={codeLabel} name={codeFieldName} rules={[{ required: true, message: `请输入${codeLabel}` }]}>
+				<Input.TextArea rows={10} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
+			</Form.Item>
+			<Alert
+				type="info"
+				showIcon
+				title="脚本模式不单独提供定时选项"
+				description="如果需要定时执行，请直接把时间判断写在 Python 脚本里。上面的快速模板已经补了按时间窗口执行、时间加指标判断的示例。"
+			/>
+		</Card>
+	);
+}
+
+function StructuredActionCard({
+	title = "执行目标与动作",
+	targetSelector,
+	targetHint,
+	mainActionEditor,
+	elseActionEditor,
+	extraContent,
+}: {
+	title?: string;
+	targetSelector?: ReactNode;
+	targetHint?: ReactNode;
+	mainActionEditor: ReactNode;
+	elseActionEditor?: ReactNode;
+	extraContent?: ReactNode;
+}) {
+	return (
+		<Card size="small" title={title}>
+			<Space orientation="vertical" size={16} style={{ width: "100%" }}>
+				{targetSelector}
+				{targetHint}
+				{mainActionEditor}
+				{elseActionEditor}
+				{extraContent}
 			</Space>
 		</Card>
 	);
 }
+
 function ScriptModal({
 	open,
 	script,
@@ -1338,6 +1973,7 @@ function ScriptModal({
 	loading,
 	onClose,
 	onSubmit,
+	embedded = false,
 }: {
 	open: boolean;
 	script: Script | null;
@@ -1345,8 +1981,10 @@ function ScriptModal({
 	loading: boolean;
 	onClose: () => void;
 	onSubmit: (values: ReturnType<typeof toScriptPayload>) => void;
+	embedded?: boolean;
 }) {
 	const [form] = Form.useForm<ScriptFormValues>();
+	const previousTypeRef = useRef<ScriptType | null>(null);
 	const currentType = Form.useWatch("script_type", form) ?? "threshold";
 	const conditionMode = Form.useWatch(["threshold_config", "condition_mode"], form) ?? "all";
 	const commandText = Form.useWatch("command_template", form) ?? "";
@@ -1365,69 +2003,30 @@ function ScriptModal({
 	useEffect(() => {
 		if (!open) return;
 		form.resetFields();
-		const type = script?.script_type ?? "threshold";
-		form.setFieldsValue({
-			name: script?.name ?? "",
-			description: script?.description ?? "",
-			script_type: type,
-			is_active: script?.is_active ?? true,
-			priority: script?.priority ?? 0,
-			threshold_config: (script?.threshold_config as ScriptFormValues["threshold_config"]) ?? {
-				condition_mode:
-					((script?.threshold_config as Record<string, unknown> | undefined)?.condition_mode as "all" | "any") || "all",
-				metric: getMetricOptionsForDevice(
-					script?.device_ids?.[0] ? devices.find((item) => item.device_id === script.device_ids?.[0]) : undefined,
-				)[0]?.value || "temperature",
-				channel_code:
-					typeof (script?.threshold_config as Record<string, unknown> | undefined)?.channel_code === "string"
-						? ((script?.threshold_config as Record<string, unknown>).channel_code as string)
-						: undefined,
-				operator: ">=",
-				value: 75,
-				conditions:
-					normalizeThresholdConditions(script?.threshold_config as ScriptFormValues["threshold_config"]).length > 0
-						? normalizeThresholdConditions(script?.threshold_config as ScriptFormValues["threshold_config"])
-						: [
-								{
-									metric:
-										getMetricOptionsForDevice(
-											script?.device_ids?.[0] ? devices.find((item) => item.device_id === script.device_ids?.[0]) : undefined,
-										)[0]?.value || "temperature",
-									operator: ">=",
-									value: 75,
-								},
-						  ],
-			},
-			schedule_config: (script?.schedule_config as ScriptFormValues["schedule_config"]) ?? {
-				cron: "0 9 * * *",
-			},
-			python_code: script?.python_code ?? pythonExample,
-			command_template: JSON.stringify(script?.command_template || parseCommandTemplate(commandExamples[type]), null, 2),
-			target_device_id: script?.device_ids?.[0],
-		});
-	}, [devices, form, open, script, targetProfile]);
+		const draft = buildRuleDraftFromScriptRecord(script);
+		const defaultMetric = getMetricOptionsForDevice(
+			draft.targetDeviceId ? devices.find((item) => item.device_id === draft.targetDeviceId) : undefined,
+		)[0]?.value || "temperature";
+		form.setFieldsValue(buildScriptFormValuesFromDraft(draft, defaultMetric));
+		previousTypeRef.current = draft.type;
+	}, [devices, form, open, script]);
 
 	useEffect(() => {
-		if (!open || !targetDeviceId) return;
-		try {
-			const parsed = parseCommandTemplate(commandText || commandExamples[currentType]);
-			const commands = Array.isArray(parsed.commands) ? (parsed.commands as Array<Record<string, unknown>>) : [];
-			if (!commands.length) return;
-
-			const allowedCommands = new Set(commandOptions.map((item) => item.value));
-			const nextCommands = commands.map((item) => {
-				const nextCommand = typeof item.command === "string" && allowedCommands.has(item.command) ? item.command : getDefaultCommandForProfile(targetProfile);
-				const nextActionOptions = getCommandActionOptions(nextCommand);
-				const currentAction = typeof item.action === "string" ? item.action : "";
-				const nextAction = nextActionOptions.some((opt) => opt.value === currentAction) ? currentAction : getDefaultActionForCommand(nextCommand);
-				return { ...item, command: nextCommand, action: nextAction };
-			});
-
-			form.setFieldValue("command_template", JSON.stringify({ ...parsed, commands: nextCommands }, null, 2));
-		} catch {
-			// Keep raw text untouched if user is still editing invalid JSON.
+		if (!open) return;
+		const previousType = previousTypeRef.current;
+		if (previousType === currentType) return;
+		if (currentType !== "python" && !String(commandText || "").trim()) {
+			form.setFieldValue("command_template", commandExamples[currentType]);
 		}
-	}, [commandOptions, commandText, currentType, form, open, targetDeviceId, targetProfile]);
+		if ((currentType === "schedule" || currentType === "hybrid") && !trimCronValue(form.getFieldValue(["schedule_config", "cron"]))) {
+			form.setFieldValue(["schedule_config", "cron"], "0 9 * * *");
+		}
+		if (currentType === "python" && !String(form.getFieldValue("python_code") || "").trim()) {
+			form.setFieldValue("python_code", pythonExample);
+			form.setFieldValue(["schedule_config", "cron"], undefined);
+		}
+		previousTypeRef.current = currentType;
+	}, [commandText, currentType, form, open]);
 
 	const content = (
 		<Row gutter={[20, 20]}>
@@ -1443,24 +2042,20 @@ function ScriptModal({
 							}
 						}}
 					>
-						<Card size="small" title="基本信息" style={{ marginBottom: 16 }}>
-							<Row gutter={12}>
-								<Col xs={24} md={14}>
-									<Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]}> 
-										<Input placeholder="例如：高温开启排风" />
-									</Form.Item>
-								</Col>
-								<Col xs={24} md={10}>
-									<Form.Item label="规则类型" name="script_type" rules={[{ required: true, message: "请选择规则类型" }]}> 
-										<Select options={typeOptions as never} />
-									</Form.Item>
-								</Col>
-							</Row>
-
-							<Form.Item label="规则说明" name="description">
-								<Input.TextArea rows={2} placeholder="写清楚这条规则的触发条件和预期动作。" />
-							</Form.Item>
-
+						<RuleBasicCard
+							typeFieldName="script_type"
+							isActiveFieldName="is_active"
+							priorityFieldName="priority"
+							namePlaceholder="例如：高温开启排风"
+							descriptionPlaceholder="写清楚这条规则的触发条件和预期动作。"
+							footerHint={
+								targetDevice ? (
+									<Paragraph type="secondary" style={{ marginBottom: 0 }}>
+										目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
+									</Paragraph>
+								) : null
+							}
+						>
 							<Row gutter={12}>
 								<Col xs={24} md={16}>
 									<Form.Item label="目标设备" name="target_device_id">
@@ -1471,73 +2066,21 @@ function ScriptModal({
 										/>
 									</Form.Item>
 								</Col>
-								<Col xs={12} md={4}>
-									<Form.Item label="启用状态" name="is_active" valuePropName="checked">
-										<Switch checkedChildren="启用" unCheckedChildren="停用" />
-									</Form.Item>
-								</Col>
-								<Col xs={12} md={4}>
-									<Form.Item label="优先级" name="priority">
-										<InputNumber min={0} style={{ width: "100%" }} />
-									</Form.Item>
-								</Col>
 							</Row>
-
-							{targetDevice ? (
-								<Paragraph type="secondary" style={{ marginBottom: 0 }}>
-									目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
-								</Paragraph>
-							) : null}
-						</Card>
+						</RuleBasicCard>
 
 						{currentType === "threshold" || currentType === "schedule" || currentType === "hybrid" ? (
-							<Card size="small" title="触发条件" style={{ marginBottom: 16 }}>
+							<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
 								{currentType === "threshold" || currentType === "hybrid" ? (
-									<>
-										<Form.Item
-											label="条件关系"
-											name={["threshold_config", "condition_mode"]}
-											initialValue="all"
-											style={{ marginBottom: 8 }}
-										>
-											<Select style={{ width: 160 }} options={conditionModeOptions as never} />
-										</Form.Item>
-										<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-											{conditionMode === "any" ? "任一条件满足即可触发。" : "默认全部条件同时满足后触发。"}
-										</Text>
-										<Form.List name={["threshold_config", "conditions"]}>
-										{(fields, { add, remove }) => (
-											<Space orientation="vertical" style={{ width: "100%" }} size={12}>
-												{fields.map((field, index) => {
-													const metricValue = form.getFieldValue(["threshold_config", "conditions", field.name, "metric"]);
-													const channelOptions = getChannelOptionsForMetric(targetDevice, metricValue);
-													return (
-														<Space key={field.key} wrap align="start">
-															<Form.Item label={index === 0 ? "监控指标" : " "} name={[field.name, "metric"]} rules={[{ required: true, message: "请选择指标" }]}>
-																<Select style={{ width: 220 }} options={metricOptions} />
-															</Form.Item>
-															<Form.Item label={index === 0 ? "监控通道" : " "} name={[field.name, "channel_code"]}>
-																<Select allowClear style={{ width: 260 }} options={channelOptions} placeholder="选择具体通道" />
-															</Form.Item>
-															<Form.Item label={index === 0 ? "比较符" : " "} name={[field.name, "operator"]} rules={[{ required: true, message: "请选择比较符" }]}>
-																<Select style={{ width: 100 }} options={operatorOptions} />
-															</Form.Item>
-															<Form.Item label={index === 0 ? "阈值" : " "} name={[field.name, "value"]} rules={[{ required: true, message: "请输入阈值" }]}>
-																<InputNumber style={{ width: 140 }} />
-															</Form.Item>
-															<Button danger size="small" onClick={() => remove(field.name)} disabled={fields.length <= 1}>
-																删除
-															</Button>
-														</Space>
-													);
-												})}
-												<Button size="small" onClick={() => add({ metric: metricOptions[0]?.value || "temperature", operator: ">=", value: 0 })}>
-													新增条件
-												</Button>
-											</Space>
-										)}
-										</Form.List>
-									</>
+									<ConditionsEditor
+										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
+										listName={["threshold_config", "conditions"]}
+										conditionModeName={["threshold_config", "condition_mode"]}
+										conditionMode={conditionMode}
+										metricOptions={metricOptions}
+										getChannelOptions={(metricValue) => getChannelOptionsForMetric(targetDevice, metricValue)}
+										defaultMetric={metricOptions[0]?.value || "temperature"}
+									/>
 								) : null}
 
 								{currentType === "schedule" || currentType === "hybrid" ? (
@@ -1545,6 +2088,14 @@ function ScriptModal({
 										label="Cron 表达式"
 										name={["schedule_config", "cron"]}
 										style={{ marginBottom: currentType === "schedule" ? 0 : undefined }}
+										rules={[
+											{
+												validator: async (_, value?: string) => {
+													if (!trimCronValue(value)) throw new Error("请输入 Cron 表达式");
+													if (!isCronLike(value)) throw new Error("请输入 5 到 6 段的 Cron 表达式");
+												},
+											},
+										]}
 									>
 										<Input placeholder="例如：0 9 * * *" />
 									</Form.Item>
@@ -1553,125 +2104,111 @@ function ScriptModal({
 						) : null}
 
 						{currentType === "python" ? (
-							<Card size="small" title="脚本逻辑（可选定时）" style={{ marginBottom: 16 }}>
-								<Space wrap style={{ marginBottom: 12 }}>
-									<Text type="secondary">快速模板</Text>
-									{pythonScriptTemplates.map((template) => (
-										<Button
-											key={template.key}
-											size="small"
-											onClick={() => form.setFieldValue("python_code", template.code)}
-										>
-											{template.label}
-										</Button>
-									))}
-								</Space>
-								<Form.Item label="Python 脚本" name="python_code" rules={[{ required: true, message: "请输入 Python 脚本" }]}> 
-									<Input.TextArea rows={10} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
-								</Form.Item>
-								<Form.Item label="Cron 表达式（可选）" name={["schedule_config", "cron"]} style={{ marginBottom: 0 }}>
-									<Input placeholder="例如：0 */2 * * *；留空表示仅手动执行" />
-								</Form.Item>
-							</Card>
+							<PythonLogicCard
+								codeFieldName="python_code"
+								codeLabel="Python 脚本"
+								codeValueName="python_code"
+								templates={pythonScriptTemplates}
+							/>
 						) : null}
 
 						{currentType !== "python" ? (
-							<>
-								<CommandEditor value={commandText} onChange={(next) => form.setFieldValue("command_template", next)} commandOptions={commandOptions} />
-								<div style={{ marginTop: 12 }}>
+							<StructuredActionCard
+								title="执行目标与动作"
+								mainActionEditor={
 									<CommandEditor
 										value={commandText}
 										onChange={(next) => form.setFieldValue("command_template", next)}
 										commandOptions={commandOptions}
+										profile={targetProfile}
+										title="满足条件时动作"
+										embedded
+									/>
+								}
+								elseActionEditor={
+									<CommandEditor
+										value={commandText}
+										onChange={(next) => form.setFieldValue("command_template", next)}
+										commandOptions={commandOptions}
+										profile={targetProfile}
 										fieldKey="else_commands"
 										title="未满足时动作（可选）"
 										emptyTitle="留空则不执行备用动作。"
 										addLabel="新增 else 动作"
+										embedded
 									/>
-								</div>
-
-								<Card
-									size="small"
-									title="完整动作模板"
-									style={{ marginTop: 16 }}
-									extra={<Button size="small" onClick={() => form.setFieldValue("command_template", commandExamples[currentType])}>填入教学示例</Button>}
-								>
-									<Form.Item
-										label="命令 JSON"
-										name="command_template"
-										rules={[
-											{ required: true, message: "请输入命令模板" },
-											{
-												validator: async (_, value?: string) => {
-													if (!value?.trim()) throw new Error("请输入命令模板");
-													parseCommandTemplate(value);
-												},
-											},
-										]}
+								}
+								extraContent={
+									<Card
+										size="small"
+										title="完整动作模板"
+										extra={<Button size="small" onClick={() => form.setFieldValue("command_template", commandExamples[currentType])}>填入教学示例</Button>}
 									>
-										<Input.TextArea rows={12} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
-									</Form.Item>
-								</Card>
-							</>
+										<Form.Item
+											label="命令 JSON"
+											name="command_template"
+											rules={[
+												{ required: true, message: "请输入命令模板" },
+												{
+													validator: async (_, value?: string) => {
+														if (!value?.trim()) throw new Error("请输入命令模板");
+														parseCommandTemplate(value);
+													},
+												},
+											]}
+										>
+											<Input.TextArea rows={12} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
+										</Form.Item>
+									</Card>
+								}
+							/>
 						) : null}
 					</Form>
 				</Col>
 
 				<Col xs={24} xl={9}>
-					<Card size="small" title="规则说明与预览">
-						<Tag color={typeColor[currentType]}>{typeLabel(currentType)}</Tag>
-						<Paragraph style={{ marginTop: 12 }}>
-							{currentType === "threshold"
-								? "适合按单个指标触发动作。"
-								: currentType === "schedule"
-								? "适合做固定周期任务。"
-								: currentType === "hybrid"
-								? "适合定时兜底加阈值保护。"
-								: "适合写更复杂的判断逻辑。"}
-						</Paragraph>
-						<Paragraph type="secondary">
-							脚本里使用的指标名是 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这种语义指标，不是 <Text code>TempIn</Text>、<Text code>AirTemp</Text> 这类原始通道 code。
-						</Paragraph>
-						{currentType === "python" ? (
-							<Paragraph type="secondary">
-								Python 模式支持更复杂的组合判断。你可以读取多个设备、多个通道的值；如果需要控制多台设备，可以返回 <Text code>actions</Text> 列表，而不只是单个 <Text code>commands</Text>。如果再填写可选的 <Text code>Cron</Text>，这段脚本也会按定时自动执行。
-							</Paragraph>
-						) : null}
-						{currentType !== "python" ? (
-							<Paragraph type="secondary">
-								结构化规则支持可选的 <Text code>else_commands</Text>。当条件不满足时，可以执行一组备用动作；如果留空，则默认不执行任何动作。
-							</Paragraph>
-						) : null}
-						<ul style={{ paddingLeft: 18, marginBottom: 12 }}>
-							<li>先选目标设备，再补触发条件和动作。</li>
-							<li>建议先从单条动作开始，再逐步增加复杂度。</li>
-							<li>保存后先手动执行一次，再查看执行记录。</li>
-							<li>“监控指标”对应的是设备的语义指标，不是原始通道 code。</li>
-							<li>如果一个指标下有多个通道，建议再明确选择“监控通道”。</li>
-						</ul>
-						<Divider style={{ margin: "12px 0" }} />
-						<Title level={5} style={{ marginTop: 0 }}>最终 Python 脚本预览</Title>
-						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{scriptPreview}</pre>
-						<Title level={5}>当前设备可用指标</Title>
-						{targetDevice ? (
-							metricGuide.length ? (
-								<Space orientation="vertical" size={6} style={{ width: "100%" }}>
-									{metricGuide.map(([metric, codes]) => (
-										<Text key={metric}>{metric}：{codes.join(" / ")}</Text>
-									))}
-								</Space>
-							) : (
-								<Text type="secondary">当前设备还没有通道信息，暂时使用通用指标。</Text>
-							)
-						) : (
-							<Text type="secondary">先选择目标设备，再查看当前设备可用指标。</Text>
-						)}
-					</Card>
+					<RulePreviewCard
+						scopeSummary="当前范围：本设备规则。条件读取和动作执行默认都围绕同一台目标设备。"
+						type={currentType}
+						pythonHint="Python 模式支持更复杂的组合判断。你可以读取多个设备、多个通道的值；如果需要定时，请直接把时间判断写进脚本本体。"
+						structuredHint="结构化规则支持可选的 else_commands。当条件不满足时，可以执行一组备用动作；定时模式和混合模式也会直接体现在预览代码里。"
+						bullets={[
+							"先选目标设备，再补触发条件和动作。",
+							"建议先从单条动作开始，再逐步增加复杂度。",
+							"保存后先手动执行一次，再查看执行记录。",
+							"CP500 设备的 heater / pump / aeration 会提供 on / off / auto 三种动作。",
+							"“监控指标”对应的是设备的语义指标，不是原始通道 code。",
+							"如果一个指标下有多个通道，建议再明确选择“监控通道”。",
+						]}
+						preview={scriptPreview}
+						metricGuideTitle="当前设备可用指标"
+						metricGuide={metricGuide}
+						emptyMetricText={targetDevice ? "当前设备还没有通道信息，暂时使用通用指标。" : "先选择目标设备，再查看当前设备可用指标。"}
+						unselectedMetricText="先选择目标设备，再查看当前设备可用指标。"
+					/>
 				</Col>
 			</Row>
 	);
 
-	return open ? (
+	if (!open) return null;
+
+	if (embedded) {
+		return (
+			<>
+				{content}
+				<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+					<Space>
+						<Button onClick={onClose}>取消</Button>
+						<Button type="primary" loading={loading} onClick={() => form.submit()}>
+							{script ? "保存规则" : "创建规则"}
+						</Button>
+					</Space>
+				</div>
+			</>
+		);
+	}
+
+	return (
 		<Card
 			style={{ marginBottom: 16 }}
 			title={script ? "编辑单设备规则" : "新建单设备规则"}
@@ -1686,7 +2223,7 @@ function ScriptModal({
 		>
 			{content}
 		</Card>
-	) : null;
+	);
 }
 
 function LinkageModal({
@@ -1696,6 +2233,7 @@ function LinkageModal({
 	loading,
 	onClose,
 	onSubmit,
+	embedded = false,
 }: {
 	open: boolean;
 	script: Script | null;
@@ -1703,8 +2241,10 @@ function LinkageModal({
 	loading: boolean;
 	onClose: () => void;
 	onSubmit: (values: ReturnType<typeof toLinkagePayload>) => void;
+	embedded?: boolean;
 }) {
 	const [form] = Form.useForm<LinkageFormValues>();
+	const previousTypeRef = useRef<ScriptType | null>(null);
 	const linkageType = Form.useWatch("linkage_type", form) ?? "threshold";
 	const linkageConditionMode = Form.useWatch("conditionMode", form) ?? "all";
 	const formValues = Form.useWatch([], form) as Partial<LinkageFormValues> | undefined;
@@ -1717,7 +2257,7 @@ function LinkageModal({
 	const sourceMetricOptions = useMemo(() => getMetricOptionsForDevice(sourceDevice), [sourceDevice]);
 	const sourceMetricGuide = useMemo(() => getMetricGuideForDevice(sourceDevice), [sourceDevice]);
 	const currentCommand = Form.useWatch("actionCommand", form);
-	const actionOptions = getCommandActionOptions(currentCommand);
+	const actionOptions = getCommandActionOptions(currentCommand, targetProfile);
 	const deviceOptions = useMemo(() => devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) })), [devices]);
 	const linkagePreview = useMemo(
 		() => buildLinkagePythonPreview(formValues || {}, sourceDevice, targetDevice),
@@ -1727,93 +2267,27 @@ function LinkageModal({
 	useEffect(() => {
 		if (!open) return;
 		form.resetFields();
-		const thresholdConfig = (script?.threshold_config || {}) as Record<string, unknown>;
-		const scheduleConfig = (script?.schedule_config || {}) as Record<string, unknown>;
-		const commandTemplate = (script?.command_template || {}) as Record<string, unknown>;
-		const firstCommand = Array.isArray(commandTemplate.commands) ? (commandTemplate.commands[0] as Record<string, unknown> | undefined) : undefined;
+		const draft = buildRuleDraftFromScriptRecord(script);
+		const defaultMetric = getMetricOptionsForDevice(
+			draft.sourceDeviceId ? devices.find((item) => item.device_id === draft.sourceDeviceId) : undefined,
+		)[0]?.value || "temperature";
+		form.setFieldsValue(buildLinkageFormValuesFromDraft(draft, defaultMetric));
+		previousTypeRef.current = draft.type;
+	}, [devices, form, open, script]);
 
-		form.setFieldsValue({
-			name: script?.name ?? "",
-			description: script?.description ?? "",
-			linkage_type: script?.script_type ?? "threshold",
-			is_active: script?.is_active ?? true,
-			priority: script?.priority ?? 0,
-			sourceDeviceId: typeof thresholdConfig.source_device_id === "number" ? thresholdConfig.source_device_id : typeof scheduleConfig.source_device_id === "number" ? scheduleConfig.source_device_id : undefined,
-			conditionMode:
-				(typeof thresholdConfig.condition_mode === "string" &&
-				(thresholdConfig.condition_mode === "all" || thresholdConfig.condition_mode === "any")
-					? thresholdConfig.condition_mode
-					: "all"),
-			sourceMetric:
-				typeof thresholdConfig.metric === "string"
-					? thresholdConfig.metric
-					: getMetricOptionsForDevice(
-							typeof thresholdConfig.source_device_id === "number"
-								? devices.find((item) => item.device_id === thresholdConfig.source_device_id)
-								: typeof scheduleConfig.source_device_id === "number"
-								? devices.find((item) => item.device_id === scheduleConfig.source_device_id)
-								: undefined,
-					  )[0]?.value || "temperature",
-			sourceChannelCode:
-				typeof thresholdConfig.channel_code === "string" ? thresholdConfig.channel_code : undefined,
-			operator: typeof thresholdConfig.operator === "string" ? thresholdConfig.operator : ">=",
-			threshold: typeof thresholdConfig.value === "number" ? thresholdConfig.value : 75,
-			conditions:
-				normalizeThresholdConditions({
-					conditions: Array.isArray(thresholdConfig.conditions) ? (thresholdConfig.conditions as Array<Record<string, unknown>>) : undefined,
-					metric: typeof thresholdConfig.metric === "string" ? thresholdConfig.metric : undefined,
-					channel_code: typeof thresholdConfig.channel_code === "string" ? thresholdConfig.channel_code : undefined,
-					operator: typeof thresholdConfig.operator === "string" ? thresholdConfig.operator : undefined,
-					value: typeof thresholdConfig.value === "number" ? thresholdConfig.value : undefined,
-				}).length > 0
-					? normalizeThresholdConditions({
-							conditions: Array.isArray(thresholdConfig.conditions) ? (thresholdConfig.conditions as Array<Record<string, unknown>>) : undefined,
-							metric: typeof thresholdConfig.metric === "string" ? thresholdConfig.metric : undefined,
-							channel_code: typeof thresholdConfig.channel_code === "string" ? thresholdConfig.channel_code : undefined,
-							operator: typeof thresholdConfig.operator === "string" ? thresholdConfig.operator : undefined,
-							value: typeof thresholdConfig.value === "number" ? thresholdConfig.value : undefined,
-					  })
-					: [{ metric: "temperature", operator: ">=", value: 75 }],
-			scheduleCron: typeof scheduleConfig.cron === "string" ? scheduleConfig.cron : "0 9 * * *",
-			pythonCode: script?.python_code || linkagePythonExample,
-			targetDeviceId: typeof commandTemplate.target_device_id === "number" ? commandTemplate.target_device_id : script?.device_ids?.[0],
-			actionCommand: typeof firstCommand?.command === "string" ? firstCommand.command : undefined,
-			actionType: typeof firstCommand?.action === "string" ? firstCommand.action : undefined,
-			duration: typeof firstCommand?.duration === "number" ? firstCommand.duration : 300000,
-			actionConfigText:
-				firstCommand?.command === "config_update" &&
-				firstCommand.config &&
-				typeof firstCommand.config === "object" &&
-				!Array.isArray(firstCommand.config)
-					? JSON.stringify(firstCommand.config, null, 2)
-					: undefined,
-			elseActionCommand:
-				Array.isArray(commandTemplate.else_commands) && typeof (commandTemplate.else_commands[0] as Record<string, unknown> | undefined)?.command === "string"
-					? ((commandTemplate.else_commands[0] as Record<string, unknown>).command as string)
-					: undefined,
-			elseActionType:
-				Array.isArray(commandTemplate.else_commands) && typeof (commandTemplate.else_commands[0] as Record<string, unknown> | undefined)?.action === "string"
-					? ((commandTemplate.else_commands[0] as Record<string, unknown>).action as string)
-					: undefined,
-			elseDuration:
-				Array.isArray(commandTemplate.else_commands) && typeof (commandTemplate.else_commands[0] as Record<string, unknown> | undefined)?.duration === "number"
-					? ((commandTemplate.else_commands[0] as Record<string, unknown>).duration as number)
-					: undefined,
-			elseCommands:
-				Array.isArray(commandTemplate.else_commands)
-					? safeArray<Record<string, unknown>>(commandTemplate.else_commands).map((item) => ({
-							command: typeof item.command === "string" ? item.command : getDefaultCommandForProfile(targetProfile),
-							action:
-								typeof item.action === "string"
-									? item.action
-									: getDefaultActionForCommand(
-											typeof item.command === "string" ? item.command : getDefaultCommandForProfile(targetProfile),
-									  ),
-							duration: typeof item.duration === "number" ? item.duration : undefined,
-					  }))
-					: [],
-		});
-	}, [devices, form, open, script, targetProfile]);
+	useEffect(() => {
+		if (!open) return;
+		const previousType = previousTypeRef.current;
+		if (previousType === linkageType) return;
+		if ((linkageType === "schedule" || linkageType === "hybrid") && !trimCronValue(form.getFieldValue("scheduleCron"))) {
+			form.setFieldValue("scheduleCron", "0 9 * * *");
+		}
+		if (linkageType === "python" && !String(form.getFieldValue("pythonCode") || "").trim()) {
+			form.setFieldValue("pythonCode", linkagePythonExample);
+			form.setFieldValue("scheduleCron", undefined);
+		}
+		previousTypeRef.current = linkageType;
+	}, [form, linkageType, open]);
 
 	useEffect(() => {
 		if (!open || !targetDeviceId) return;
@@ -1821,11 +2295,11 @@ function LinkageModal({
 		if (!currentCommand || !allowedCommands.has(currentCommand)) {
 			const nextCommand = getDefaultCommandForProfile(targetProfile);
 			form.setFieldValue("actionCommand", nextCommand);
-			form.setFieldValue("actionType", getDefaultActionForCommand(nextCommand));
+			form.setFieldValue("actionType", getDefaultActionForCommand(nextCommand, targetProfile));
 			return;
 		}
 		if (!actionOptions.some((item) => item.value === form.getFieldValue("actionType"))) {
-			form.setFieldValue("actionType", getDefaultActionForCommand(currentCommand));
+			form.setFieldValue("actionType", getDefaultActionForCommand(currentCommand, targetProfile));
 		}
 	}, [actionOptions, commandOptions, currentCommand, form, open, targetDeviceId, targetProfile]);
 
@@ -1833,243 +2307,197 @@ function LinkageModal({
 		<Row gutter={[20, 20]}>
 				<Col xs={24} xl={15}>
 					<Form form={form} layout="vertical" onFinish={(values) => { try { onSubmit(toLinkagePayload(values)); } catch (error) { message.error(error instanceof Error ? error.message : "保存失败"); } }}>
-						<Card size="small" title="基本信息" style={{ marginBottom: 16 }}>
-							<Row gutter={12}>
-								<Col xs={24} md={14}>
-									<Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]}> 
-										<Input placeholder="例如：堆体高温时开启排气" />
-									</Form.Item>
-								</Col>
-								<Col xs={24} md={10}>
-									<Form.Item label="规则类型" name="linkage_type" rules={[{ required: true, message: "请选择规则类型" }]}> 
-										<Select options={typeOptions as never} />
-									</Form.Item>
-								</Col>
-							</Row>
+						<RuleBasicCard
+							typeFieldName="linkage_type"
+							isActiveFieldName="is_active"
+							priorityFieldName="priority"
+							namePlaceholder="例如：堆体高温时开启排气"
+							descriptionPlaceholder="写清楚触发设备、目标设备和预期动作。"
+						/>
 
-							<Form.Item label="规则说明" name="description">
-								<Input.TextArea rows={2} placeholder="写清楚触发设备、目标设备和预期动作。" />
-							</Form.Item>
-
-							<Row gutter={12}>
-								<Col xs={12} md={4}>
-									<Form.Item label="启用状态" name="is_active" valuePropName="checked">
-										<Switch checkedChildren="启用" unCheckedChildren="停用" />
+						{linkageType === "python" ? (
+							<PythonLogicCard
+								codeFieldName="pythonCode"
+								codeLabel="Python 脚本"
+								codeValueName="pythonCode"
+								templates={linkagePythonTemplates}
+								beforeContent={
+									<Form.Item label="触发设备" name="sourceDeviceId" style={{ marginBottom: 16 }}>
+										<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
 									</Form.Item>
-								</Col>
-								<Col xs={12} md={4}>
-									<Form.Item label="优先级" name="priority">
-										<InputNumber min={0} style={{ width: "100%" }} />
-									</Form.Item>
-								</Col>
-							</Row>
-						</Card>
+								}
+							/>
+						) : (
+							<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
+								<Form.Item label="触发设备" name="sourceDeviceId" rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择触发设备" }] : undefined}>
+									<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
+								</Form.Item>
 
-						<Card size="small" title="触发条件" style={{ marginBottom: 16 }}>
-							<Form.Item label="触发设备" name="sourceDeviceId" rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择触发设备" }] : undefined}>
-								<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
-							</Form.Item>
-
-							{linkageType === "threshold" || linkageType === "hybrid" ? (
-								<>
-									<Form.Item label="条件关系" name="conditionMode" initialValue="all" style={{ marginBottom: 8 }}>
-										<Select style={{ width: 160 }} options={conditionModeOptions as never} />
-									</Form.Item>
-									<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-										{linkageConditionMode === "any" ? "任一条件满足即可触发。" : "默认全部条件同时满足后触发。"}
-									</Text>
-									<Form.List name="conditions">
-									{(fields, { add, remove }) => (
-										<Space orientation="vertical" style={{ width: "100%" }} size={12}>
-											{fields.map((field, index) => {
-												const metricValue = form.getFieldValue(["conditions", field.name, "metric"]);
-												const channelOptions = getChannelOptionsForMetric(sourceDevice, metricValue);
-												return (
-													<Space key={field.key} wrap align="start">
-														<Form.Item label={index === 0 ? "监控指标" : " "} name={[field.name, "metric"]} rules={[{ required: true, message: "请选择指标" }]}>
-															<Select style={{ width: 220 }} options={sourceMetricOptions} />
-														</Form.Item>
-														<Form.Item label={index === 0 ? "监控通道" : " "} name={[field.name, "channel_code"]}>
-															<Select allowClear style={{ width: 260 }} options={channelOptions} placeholder="选择具体通道" />
-														</Form.Item>
-														<Form.Item label={index === 0 ? "比较符" : " "} name={[field.name, "operator"]} rules={[{ required: true, message: "请选择比较符" }]}>
-															<Select style={{ width: 100 }} options={operatorOptions} />
-														</Form.Item>
-														<Form.Item label={index === 0 ? "阈值" : " "} name={[field.name, "value"]} rules={[{ required: true, message: "请输入阈值" }]}>
-															<InputNumber style={{ width: 140 }} />
-														</Form.Item>
-														<Button danger size="small" onClick={() => remove(field.name)} disabled={fields.length <= 1}>
-															删除
-														</Button>
-													</Space>
-												);
-											})}
-											<Button size="small" onClick={() => add({ metric: sourceMetricOptions[0]?.value || "temperature", operator: ">=", value: 0 })}>
-												新增条件
-											</Button>
-										</Space>
-									)}
-									</Form.List>
-								</>
+								{linkageType === "threshold" || linkageType === "hybrid" ? (
+								<ConditionsEditor
+									form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
+									listName="conditions"
+									conditionModeName="conditionMode"
+									conditionMode={linkageConditionMode}
+									metricOptions={sourceMetricOptions}
+									getChannelOptions={(metricValue) => getChannelOptionsForMetric(sourceDevice, metricValue)}
+									defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
+								/>
 							) : null}
 
-							{linkageType === "schedule" || linkageType === "hybrid" ? (
-								<Form.Item label="Cron 表达式" name="scheduleCron" rules={[{ required: true, message: "请输入 Cron 表达式" }]}> 
-									<Input placeholder="例如：0 9 * * *" />
-								</Form.Item>
-							) : null}
-
-							{linkageType === "python" ? (
-								<>
-									<Space wrap style={{ marginBottom: 12 }}>
-										<Text type="secondary">快速模板</Text>
-										{linkagePythonTemplates.map((template) => (
-											<Button
-												key={template.key}
-												size="small"
-												onClick={() => form.setFieldValue("pythonCode", template.code)}
-											>
-												{template.label}
-											</Button>
-										))}
-									</Space>
-									<Form.Item label="联动脚本" name="pythonCode" rules={[{ required: true, message: "请输入联动脚本" }]}> 
-										<Input.TextArea rows={10} placeholder={linkagePythonExample} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
+								{linkageType === "schedule" || linkageType === "hybrid" ? (
+									<Form.Item
+										label="Cron 表达式"
+										name="scheduleCron"
+										rules={[
+											{
+												validator: async (_, value?: string) => {
+													if (!trimCronValue(value)) throw new Error("请输入 Cron 表达式");
+													if (!isCronLike(value)) throw new Error("请输入 5 到 6 段的 Cron 表达式");
+												},
+											},
+										]}
+									> 
+										<Input placeholder="例如：0 9 * * *" />
 									</Form.Item>
-									<Form.Item label="Cron 表达式（可选）" name="scheduleCron" style={{ marginBottom: 0 }}>
-									<Input placeholder="例如：0 */2 * * *；留空表示仅手动执行" />
-								</Form.Item>
-							</>
-						) : null}
-						</Card>
+								) : null}
+							</Card>
+						)}
 
 						{linkageType !== "python" ? (
-							<Card size="small" title="执行动作">
-								<Form.Item label="目标设备" name="targetDeviceId" rules={[{ required: true, message: "请选择目标设备" }]}> 
-									<Select options={deviceOptions} placeholder="选择真正执行动作的设备" />
-								</Form.Item>
-
-								{targetDevice ? (
-									<Paragraph type="secondary" style={{ marginTop: -8, marginBottom: 16 }}>
-										目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
-									</Paragraph>
-								) : null}
-
-								<Space wrap>
-									<Form.Item label="动作命令" name="actionCommand" rules={[{ required: true, message: "请选择动作命令" }]}> 
-										<Select style={{ width: 180 }} options={commandOptions} />
+							<StructuredActionCard
+								title="执行目标与动作"
+								targetSelector={
+									<Form.Item label="目标设备" name="targetDeviceId" rules={[{ required: true, message: "请选择目标设备" }]} style={{ marginBottom: 0 }}>
+										<Select options={deviceOptions} placeholder="选择真正执行动作的设备" />
 									</Form.Item>
-									{currentCommand === "config_update" ? (
-										<Form.Item
-											label="配置补丁"
-											name="actionConfigText"
-											rules={[{ required: true, message: "请输入配置补丁 JSON" }]}
-										>
-											<Input.TextArea
-												style={{ width: 320 }}
-												rows={4}
-												placeholder={'例如：{\n  "read_interval": 120000,\n  "pump_run_time": 80000\n}'}
-											/>
+								}
+								targetHint={
+									targetDevice ? (
+										<Paragraph type="secondary" style={{ marginBottom: 0 }}>
+											目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
+										</Paragraph>
+									) : null
+								}
+								mainActionEditor={
+									<Space wrap>
+										<Form.Item label="动作命令" name="actionCommand" rules={[{ required: true, message: "请选择动作命令" }]}>
+											<Select style={{ width: 180 }} options={commandOptions} />
 										</Form.Item>
-									) : (
-										<>
-											<Form.Item label="动作" name="actionType" rules={[{ required: true, message: "请选择动作" }]}> 
-												<Select style={{ width: 140 }} options={actionOptions} />
-											</Form.Item>
-											<Form.Item label="持续时间(ms)" name="duration">
-												<InputNumber style={{ width: 180 }} min={0} />
-											</Form.Item>
-										</>
-									)}
-								</Space>
-
-								<Divider style={{ margin: "8px 0 16px" }} />
-								<Text type="secondary">未满足条件时动作（可选）</Text>
-								<Form.List name="elseCommands">
-									{(fields, { add, remove }) => (
-										<Space orientation="vertical" style={{ width: "100%", marginTop: 12 }} size={12}>
-											{fields.length ? null : <Text type="secondary">留空则不执行备用动作。</Text>}
-											{fields.map((field, index) => {
-												const elseCommandValue = form.getFieldValue(["elseCommands", field.name, "command"]);
-												return (
-													<Space key={field.key} wrap align="start">
-														<Form.Item label={index === 0 ? "动作命令" : " "} name={[field.name, "command"]} rules={[{ required: true, message: "请选择动作命令" }]}>
-															<Select style={{ width: 180 }} options={commandOptions} />
-														</Form.Item>
-														<Form.Item label={index === 0 ? "动作" : " "} name={[field.name, "action"]} rules={[{ required: true, message: "请选择动作" }]}>
-															<Select style={{ width: 140 }} options={getCommandActionOptions(elseCommandValue)} />
-														</Form.Item>
-														<Form.Item label={index === 0 ? "持续时间(ms)" : " "} name={[field.name, "duration"]}>
-															<InputNumber style={{ width: 180 }} min={0} />
-														</Form.Item>
-														<Button danger size="small" onClick={() => remove(field.name)}>
-															删除
-														</Button>
-													</Space>
-												);
-											})}
-											<Button
-												size="small"
-												onClick={() =>
-													add({
-														command: commandOptions[0]?.value || "pump",
-														action: getDefaultActionForCommand(commandOptions[0]?.value),
-													})
-												}
+										{currentCommand === "config_update" ? (
+											<Form.Item
+												label="配置补丁"
+												name="actionConfigText"
+												rules={[{ required: true, message: "请输入配置补丁 JSON" }]}
 											>
-												新增 else 动作
-											</Button>
-										</Space>
-									)}
-								</Form.List>
-							</Card>
+												<Input.TextArea
+													style={{ width: 320 }}
+													rows={4}
+													placeholder={'例如：{\n  "read_interval": 120000,\n  "pump_run_time": 80000\n}'}
+												/>
+											</Form.Item>
+										) : (
+											<>
+												<Form.Item label="动作" name="actionType" rules={[{ required: true, message: "请选择动作" }]}>
+													<Select style={{ width: 140 }} options={actionOptions} />
+												</Form.Item>
+												<Form.Item label="持续时间(ms)" name="duration">
+													<InputNumber style={{ width: 180 }} min={0} />
+												</Form.Item>
+											</>
+										)}
+									</Space>
+								}
+								elseActionEditor={
+									<>
+										<Text type="secondary">未满足条件时动作（可选）</Text>
+										<Form.List name="elseCommands">
+											{(fields, { add, remove }) => (
+												<Space orientation="vertical" style={{ width: "100%" }} size={12}>
+													{fields.length ? null : <Text type="secondary">留空则不执行备用动作。</Text>}
+													{fields.map((field, index) => {
+														const elseCommandValue = form.getFieldValue(["elseCommands", field.name, "command"]);
+														return (
+															<Space key={field.key} wrap align="start">
+																<Form.Item label={index === 0 ? "动作命令" : " "} name={[field.name, "command"]} rules={[{ required: true, message: "请选择动作命令" }]}>
+																	<Select style={{ width: 180 }} options={commandOptions} />
+																</Form.Item>
+																<Form.Item label={index === 0 ? "动作" : " "} name={[field.name, "action"]} rules={[{ required: true, message: "请选择动作" }]}>
+																	<Select style={{ width: 140 }} options={getCommandActionOptions(typeof elseCommandValue === "string" ? elseCommandValue : undefined, targetProfile)} />
+																</Form.Item>
+																<Form.Item label={index === 0 ? "持续时间(ms)" : " "} name={[field.name, "duration"]}>
+																	<InputNumber style={{ width: 180 }} min={0} />
+																</Form.Item>
+																<Button danger size="small" onClick={() => remove(field.name)}>
+																	删除
+																</Button>
+															</Space>
+														);
+													})}
+													<Button
+														size="small"
+														onClick={() =>
+															add({
+																command: commandOptions[0]?.value || "pump",
+																action: getDefaultActionForCommand(commandOptions[0]?.value, targetProfile),
+															})
+														}
+													>
+														新增 else 动作
+													</Button>
+												</Space>
+											)}
+										</Form.List>
+									</>
+								}
+							/>
 						) : null}
 					</Form>
 				</Col>
 
 				<Col xs={24} xl={9}>
-					<Card size="small" title="规则说明与预览">
-						<Tag color={typeColor[linkageType]}>{typeLabel(linkageType)}</Tag>
-						<ul style={{ paddingLeft: 18, marginTop: 12, marginBottom: 12 }}>
-							<li>先选触发设备，再选目标设备。</li>
-							<li>动作命令会跟着目标设备类型自动收窄。</li>
-							<li>保存后先手动执行一次，再查看执行记录。</li>
-							<li>联动里的“监控指标”对应触发设备的语义指标，不是通道 code。</li>
-							<li>如果同一指标下有多个通道，建议明确选择“监控通道”。</li>
-						</ul>
-						{linkageType === "python" ? (
-							<Paragraph type="secondary" style={{ marginBottom: 12 }}>
-								Python 联动支持同时读取多台设备的值，也支持返回 <Text code>actions</Text> 列表，把动作分发到多台目标设备。填写可选的 <Text code>Cron</Text> 后，这条联动也能按定时自动执行。
-							</Paragraph>
-						) : null}
-						{linkageType !== "python" ? (
-							<Paragraph type="secondary" style={{ marginBottom: 12 }}>
-								联动规则也支持“未满足条件时动作”。如果需要在条件不满足时关闭设备、停止排气或切回保守状态，可以在下方单独配置。
-							</Paragraph>
-						) : null}
-						<Divider style={{ margin: "12px 0" }} />
-						<Title level={5} style={{ marginTop: 0 }}>最终 Python 脚本预览</Title>
-						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{linkagePreview}</pre>
-						<Title level={5}>触发设备可用指标</Title>
-						{sourceDevice ? (
-							sourceMetricGuide.length ? (
-								<Space orientation="vertical" size={6} style={{ width: "100%" }}>
-									{sourceMetricGuide.map(([metric, codes]) => (
-										<Text key={metric}>{metric}：{codes.join(" / ")}</Text>
-									))}
-								</Space>
-							) : (
-								<Text type="secondary">当前触发设备还没有通道信息，暂时使用通用指标。</Text>
-							)
-						) : (
-							<Text type="secondary">先选择触发设备，再查看可用指标。</Text>
-						)}
-					</Card>
+					<RulePreviewCard
+						scopeSummary="当前范围：跨设备规则。条件由触发设备提供，动作发送给目标设备。"
+						type={linkageType}
+						pythonHint="Python 联动支持同时读取多台设备的值，也支持返回 actions 列表，把动作分发到多台目标设备。如果需要定时，请直接把时间判断写进脚本本体。"
+						structuredHint="联动规则也支持未满足条件时动作。如果需要在条件不满足时关闭设备、停止排气或切回保守状态，可以在下方单独配置；定时模式会直接体现在预览代码里。"
+						bullets={[
+							"先选触发设备，再选目标设备。",
+							"动作命令会跟着目标设备类型自动收窄。",
+							"保存后先手动执行一次，再查看执行记录。",
+							"CP500 目标设备的 heater / pump / aeration 会提供 on / off / auto 三种动作。",
+							"联动里的“监控指标”对应触发设备的语义指标，不是通道 code。",
+							"如果同一指标下有多个通道，建议明确选择“监控通道”。",
+						]}
+						preview={linkagePreview}
+						metricGuideTitle="触发设备可用指标"
+						metricGuide={sourceMetricGuide}
+						emptyMetricText={sourceDevice ? "当前触发设备还没有通道信息，暂时使用通用指标。" : "先选择触发设备，再查看可用指标。"}
+						unselectedMetricText="先选择触发设备，再查看可用指标。"
+					/>
 				</Col>
 			</Row>
 	);
 
-	return open ? (
+	if (!open) return null;
+
+	if (embedded) {
+		return (
+			<>
+				{content}
+				<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+					<Space>
+						<Button onClick={onClose}>取消</Button>
+						<Button type="primary" loading={loading} onClick={() => form.submit()}>
+							{script ? "保存规则" : "创建规则"}
+						</Button>
+					</Space>
+				</div>
+			</>
+		);
+	}
+
+	return (
 		<Card
 			style={{ marginBottom: 16 }}
 			title={script ? "编辑设备联动规则" : "新建设备联动规则"}
@@ -2084,7 +2512,7 @@ function LinkageModal({
 		>
 			{content}
 		</Card>
-	) : null;
+	);
 }
 function ExecutionHistoryModal({
 	open,
@@ -2125,103 +2553,51 @@ function ExecutionHistoryModal({
 	);
 }
 
-function LinkagePanel({
-	scripts,
-	devices,
-	loading,
-	executingId,
-	deletingId,
-	onCreate,
-	onEdit,
-	onDuplicate,
-	onExecute,
-	onDelete,
-	onHistory,
-}: {
-	scripts: Script[];
-	devices: Device[];
-	loading: boolean;
-	executingId?: number;
-	deletingId?: number;
-	onCreate: () => void;
-	onEdit: (script: Script) => void;
-	onDuplicate: (script: Script) => void;
-	onExecute: (script: Script) => void;
-	onDelete: (script: Script) => void;
-	onHistory: (script: Script) => void;
-}) {
-	const columns: ColumnsType<Script> = [
-		{ title: "规则名称", dataIndex: "name", width: 180 },
-		{ title: "类型", width: 120, render: (_, row) => <Tag color={typeColor[row.script_type]}>{typeLabel(row.script_type)}</Tag> },
-		{
-			title: "目标设备",
-			width: 220,
-			render: (_, row) => {
-				const commandTemplate = (row.command_template || {}) as Record<string, unknown>;
-				const targetDeviceId =
-					typeof commandTemplate.target_device_id === "number" ? commandTemplate.target_device_id : row.device_ids?.[0];
-				const targetDevice = devices.find((item) => item.device_id === targetDeviceId);
-				return targetDevice ? <>{deviceLabel(targetDevice)}<Tag style={{ marginLeft: 8 }}>{getProfileLabel(inferDeviceProfile(targetDevice))}</Tag></> : "-";
-			},
-		},
-		{
-			title: "条件摘要",
-			render: (_, row) => summarizeLinkageCondition(row, devices),
-		},
-		{ title: "状态", width: 100, render: (_, row) => <Tag color={row.is_active ? "green" : "default"}>{row.is_active ? "启用" : "停用"}</Tag> },
-		{ title: "优先级", dataIndex: "priority", width: 90 },
-		{ title: "动作摘要", render: (_, row) => summarizeCommands(row.command_template) },
-		{
-			title: "操作",
-			width: 360,
-			render: (_, row) => (
-				<Space size="small" wrap>
-					<Button size="small" type="primary" disabled={!row.is_active} loading={executingId === row.id} onClick={() => onExecute(row)}>执行</Button>
-					<Button size="small" onClick={() => onHistory(row)}>记录</Button>
-					<Button size="small" onClick={() => onEdit(row)}>编辑</Button>
-					<Button size="small" onClick={() => onDuplicate(row)}>复制</Button>
-					<Button danger size="small" loading={deletingId === row.id} onClick={() => onDelete(row)}>删除</Button>
-				</Space>
-			),
-		},
-	];
-
-	return (
-		<>
-			<Card
-				title="设备联动规则"
-				extra={
-					<Button type="primary" size="small" onClick={onCreate}>
-						新建规则
-					</Button>
-				}
-			>
-				<Paragraph type="secondary" style={{ marginBottom: 16 }}>
-					适合配置“由一台设备触发，另一台设备执行动作”的规则。
-				</Paragraph>
-				{scripts.length ? (
-					<Table rowKey="id" dataSource={scripts} columns={columns} loading={loading} pagination={{ pageSize: 10 }} scroll={{ x: 1180 }} />
-				) : (
-					<Empty description="还没有设备联动" />
-				)}
-			</Card>
-		</>
-	);
-}
-
 export default function ScriptsPage() {
 	const queryClient = useQueryClient();
 	const [scriptModalOpen, setScriptModalOpen] = useState(false);
 	const [linkageModalOpen, setLinkageModalOpen] = useState(false);
+	const [editorScope, setEditorScope] = useState<RuleScope>("single");
 	const [importModalOpen, setImportModalOpen] = useState(false);
 	const [importText, setImportText] = useState("");
-	const [activeTab, setActiveTab] = useState("single");
 	const [editingScript, setEditingScript] = useState<Script | null>(null);
 	const [editingLinkage, setEditingLinkage] = useState<Script | null>(null);
 	const [historyScript, setHistoryScript] = useState<Script | null>(null);
 	const [executionFilter, setExecutionFilter] = useState<ExecutionFilter>("all");
 	const [ruleStatusFilter, setRuleStatusFilter] = useState<RuleStatusFilter>("all");
 	const [ruleDeviceFilter, setRuleDeviceFilter] = useState<number | undefined>(undefined);
+	const editorOpen = scriptModalOpen || linkageModalOpen;
+
+	const closeRuleEditor = () => {
+		setScriptModalOpen(false);
+		setLinkageModalOpen(false);
+		setEditingScript(null);
+		setEditingLinkage(null);
+	};
+
+	const openSingleRuleEditor = (script: Script | null = null) => {
+		setEditorScope("single");
+		setEditingScript(script);
+		setEditingLinkage(null);
+		setScriptModalOpen(true);
+		setLinkageModalOpen(false);
+	};
+
+	const openLinkageRuleEditor = (script: Script | null = null) => {
+		setEditorScope("linkage");
+		setEditingLinkage(script);
+		setEditingScript(null);
+		setLinkageModalOpen(true);
+		setScriptModalOpen(false);
+	};
+
+	const switchRuleEditorScope = (scope: RuleScope) => {
+		if (scope === "single") {
+			openSingleRuleEditor(null);
+			return;
+		}
+		openLinkageRuleEditor(null);
+	};
 
 	const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: async () => (await api.get("/scripts")).data as { data: Script[] } });
 	const devicesQ = useQuery({
@@ -2239,47 +2615,41 @@ export default function ScriptsPage() {
 	const createScript = useMutation({
 		mutationFn: async (data: ReturnType<typeof toScriptPayload>) => api.post("/scripts", data),
 		onSuccess: () => {
-			message.success("脚本创建成功");
-			setScriptModalOpen(false);
-			setEditingScript(null);
+			message.success("规则创建成功");
+			closeRuleEditor();
 			queryClient.invalidateQueries({ queryKey: ["scripts"] });
 		},
-		onError: (error: unknown) => message.error(getErrorMessage(error, "脚本创建失败")),
+		onError: (error: unknown) => message.error(getErrorMessage(error, "规则创建失败")),
 	});
 
 	const updateScript = useMutation({
 		mutationFn: async (data: ReturnType<typeof toScriptPayload>) => api.patch(`/scripts/${editingScript?.id}`, data),
 		onSuccess: () => {
-			message.success("脚本更新成功");
-			setScriptModalOpen(false);
-			setEditingScript(null);
+			message.success("规则更新成功");
+			closeRuleEditor();
 			queryClient.invalidateQueries({ queryKey: ["scripts"] });
 		},
-		onError: (error: unknown) => message.error(getErrorMessage(error, "脚本更新失败")),
+		onError: (error: unknown) => message.error(getErrorMessage(error, "规则更新失败")),
 	});
 
 	const createLinkage = useMutation({
 		mutationFn: async (data: ReturnType<typeof toLinkagePayload>) => api.post("/scripts", data),
 		onSuccess: () => {
-			message.success("联动创建成功");
-			setLinkageModalOpen(false);
-			setEditingLinkage(null);
-			setActiveTab("linkage");
+			message.success("规则创建成功");
+			closeRuleEditor();
 			queryClient.invalidateQueries({ queryKey: ["scripts"] });
 		},
-		onError: (error: unknown) => message.error(getErrorMessage(error, "联动创建失败")),
+		onError: (error: unknown) => message.error(getErrorMessage(error, "规则创建失败")),
 	});
 
 	const updateLinkage = useMutation({
 		mutationFn: async (data: ReturnType<typeof toLinkagePayload>) => api.patch(`/scripts/${editingLinkage?.id}`, data),
 		onSuccess: () => {
-			message.success("联动更新成功");
-			setLinkageModalOpen(false);
-			setEditingLinkage(null);
-			setActiveTab("linkage");
+			message.success("规则更新成功");
+			closeRuleEditor();
 			queryClient.invalidateQueries({ queryKey: ["scripts"] });
 		},
-		onError: (error: unknown) => message.error(getErrorMessage(error, "联动更新失败")),
+		onError: (error: unknown) => message.error(getErrorMessage(error, "规则更新失败")),
 	});
 
 	const duplicateScript = useMutation({
@@ -2408,58 +2778,69 @@ export default function ScriptsPage() {
 		() => devicesList.map((device) => ({ value: device.device_id, label: deviceLabel(device) })),
 		[devicesList],
 	);
-	const filteredSingleScripts = useMemo(
+	const filteredRules = useMemo(
 		() =>
-			singleScripts.filter((script) => {
+			allScripts.filter((script) => {
 				if (ruleStatusFilter === "active" && !script.is_active) return false;
 				if (ruleStatusFilter === "inactive" && script.is_active) return false;
 				if (ruleDeviceFilter && !(script.device_ids || []).includes(ruleDeviceFilter)) {
 					const commandTemplate = (script.command_template || {}) as Record<string, unknown>;
-					if (commandTemplate.target_device_id !== ruleDeviceFilter) {
+					const thresholdConfig = (script.threshold_config || {}) as Record<string, unknown>;
+					const scheduleConfig = (script.schedule_config || {}) as Record<string, unknown>;
+					if (
+						commandTemplate.target_device_id !== ruleDeviceFilter &&
+						thresholdConfig.source_device_id !== ruleDeviceFilter &&
+						scheduleConfig.source_device_id !== ruleDeviceFilter
+					) {
 						return false;
 					}
 				}
 				return true;
 			}),
-		[singleScripts, ruleStatusFilter, ruleDeviceFilter],
-	);
-	const filteredLinkageScripts = useMemo(
-		() =>
-			linkageScripts.filter((script) => {
-				if (ruleStatusFilter === "active" && !script.is_active) return false;
-				if (ruleStatusFilter === "inactive" && script.is_active) return false;
-				if (ruleDeviceFilter && !(script.device_ids || []).includes(ruleDeviceFilter)) {
-					const commandTemplate = (script.command_template || {}) as Record<string, unknown>;
-					if (commandTemplate.target_device_id !== ruleDeviceFilter) {
-						return false;
-					}
-				}
-				return true;
-			}),
-		[linkageScripts, ruleStatusFilter, ruleDeviceFilter],
+		[allScripts, ruleDeviceFilter, ruleStatusFilter],
 	);
 
 	const statCards = [
-		{ title: "单设备规则", value: singleScripts.length, color: "#1677ff" },
-		{ title: "联动规则", value: linkageScripts.length, color: "#fa8c16" },
+		{ title: "全部规则", value: allScripts.length, color: "#1677ff" },
+		{ title: "本设备", value: singleScripts.length, color: "#52c41a" },
+		{ title: "跨设备", value: linkageScripts.length, color: "#fa8c16" },
 		{ title: "启用中", value: allScripts.filter((item) => item.is_active).length, color: "#52c41a" },
-		{ title: "关联设备", value: new Set(allScripts.flatMap((item) => item.device_ids || [])).size, color: "#722ed1" },
 	];
 
-	const scriptColumns: ColumnsType<Script> = [
+	const ruleColumns: ColumnsType<Script> = [
 		{ title: "规则名称", dataIndex: "name", width: 180 },
+		{ title: "范围", width: 90, render: (_, row) => <Tag color={isLinkageScript(row) ? "orange" : "blue"}>{ruleScopeLabel(row)}</Tag> },
 		{ title: "类型", width: 120, render: (_, row) => <Tag color={typeColor[row.script_type]}>{row.script_type_display || row.script_type}</Tag> },
 		{
-			title: "目标设备",
+			title: "触发设备",
+			width: 220,
+			render: (_, row) => {
+				const thresholdConfig = (row.threshold_config || {}) as Record<string, unknown>;
+				const scheduleConfig = (row.schedule_config || {}) as Record<string, unknown>;
+				const sourceDeviceId =
+					typeof thresholdConfig.source_device_id === "number"
+						? thresholdConfig.source_device_id
+						: typeof scheduleConfig.source_device_id === "number"
+						? scheduleConfig.source_device_id
+						: row.device_ids?.[0];
+				const source = devicesList.find((item) => item.device_id === sourceDeviceId);
+				return source ? <>{deviceLabel(source)}<Tag style={{ marginLeft: 8 }}>{getProfileLabel(inferDeviceProfile(source))}</Tag></> : "-";
+			},
+		},
+		{
+			title: "执行设备",
 			width: 210,
 			render: (_, row) => {
-				const target = devicesList.find((item) => item.device_id === row.device_ids?.[0]);
+				const commandTemplate = (row.command_template || {}) as Record<string, unknown>;
+				const targetDeviceId =
+					typeof commandTemplate.target_device_id === "number" ? commandTemplate.target_device_id : row.device_ids?.[0];
+				const target = devicesList.find((item) => item.device_id === targetDeviceId);
 				return target ? <>{deviceLabel(target)}<Tag style={{ marginLeft: 8 }}>{getProfileLabel(inferDeviceProfile(target))}</Tag></> : "-";
 			},
 		},
 		{ title: "状态", width: 100, render: (_, row) => <Tag color={row.is_active ? "green" : "default"}>{row.is_active ? "启用" : "停用"}</Tag> },
 		{ title: "优先级", dataIndex: "priority", width: 90 },
-		{ title: "条件摘要", render: (_, row) => summarizeSingleCondition(row) },
+		{ title: "条件摘要", render: (_, row) => (isLinkageScript(row) ? summarizeLinkageCondition(row, devicesList) : summarizeSingleCondition(row)) },
 		{ title: "动作摘要", render: (_, row) => summarizeCommands(row.command_template) },
 		{
 			title: "操作",
@@ -2468,7 +2849,18 @@ export default function ScriptsPage() {
 				<Space size="small" wrap>
 					<Button size="small" type="primary" disabled={!row.is_active} loading={executeScript.isPending && executeScript.variables === row.id} onClick={() => executeScript.mutate(row.id || 0)}>执行</Button>
 					<Button size="small" onClick={() => setHistoryScript(row)}>记录</Button>
-					<Button size="small" onClick={() => { setEditingScript(row); setScriptModalOpen(true); }}>编辑</Button>
+					<Button
+						size="small"
+						onClick={() => {
+							if (isLinkageScript(row)) {
+								openLinkageRuleEditor(row);
+							} else {
+								openSingleRuleEditor(row);
+							}
+						}}
+					>
+						编辑
+					</Button>
 					<Button size="small" loading={duplicateScript.isPending} onClick={() => duplicateScript.mutate(cloneScriptPayload(row))}>复制</Button>
 					<Button size="small" danger loading={deleteScript.isPending && deleteScript.variables === row.id} onClick={() => deleteScript.mutate(row.id || 0)}>删除</Button>
 				</Space>
@@ -2504,25 +2896,10 @@ export default function ScriptsPage() {
 						检查定时
 					</Button>
 					<Button
-						onClick={() => {
-							setActiveTab("single");
-							setEditingScript(null);
-							setScriptModalOpen(true);
-							setLinkageModalOpen(false);
-						}}
-					>
-						新建单设备规则
-					</Button>
-					<Button
 						type="primary"
-						onClick={() => {
-							setActiveTab("linkage");
-							setEditingLinkage(null);
-							setLinkageModalOpen(true);
-							setScriptModalOpen(false);
-						}}
+						onClick={() => openSingleRuleEditor(null)}
 					>
-						新建设备联动规则
+						新建规则
 					</Button>
 				</Space>
 			}
@@ -2543,14 +2920,14 @@ export default function ScriptsPage() {
 					<Col xs={24} xl={13}>
 						<Title level={5} style={{ marginTop: 0 }}>使用方式</Title>
 						<ul style={{ paddingLeft: 18, marginBottom: 0 }}>
-							<li>单设备规则和设备联动使用同一套创建、编辑和执行方式。</li>
+							<li>本设备规则和跨设备规则使用同一套创建、编辑和执行方式。</li>
+							<li>结构化规则适合常规阈值、定时和备用动作；脚本模式适合复杂判断和自定义时间逻辑。</li>
 							<li>动作命令会按目标设备类型自动过滤，减少误选。</li>
-							<li>规则的创建、复制、导入、导出和执行都在这里完成。</li>
-							<li>保存后可以直接执行，也可以查看最近执行记录。</li>
+							<li>规则的创建、复制、导入、导出、执行和结果排查都在这里完成。</li>
 						</ul>
 					</Col>
 					<Col xs={24} xl={11}>
-						<Alert type="info" showIcon title="建议从简单规则开始" description="先确认设备动作和执行记录正常，再逐步叠加更复杂的条件和联动关系。" />
+						<Alert type="info" showIcon title="建议从简单规则开始" description="先用单条条件加单条动作确认设备响应正常，再逐步叠加多条件、备用动作和跨设备规则。" />
 					</Col>
 				</Row>
 			</Card>
@@ -2584,7 +2961,7 @@ export default function ScriptsPage() {
 					<Col xs={24} md={6} xl={4}>
 						<Text type="secondary">当前结果</Text>
 						<Paragraph style={{ margin: "6px 0 0" }}>
-							{activeTab === "single" ? filteredSingleScripts.length : filteredLinkageScripts.length} 条规则
+							{filteredRules.length} 条规则
 						</Paragraph>
 					</Col>
 				</Row>
@@ -2656,7 +3033,7 @@ export default function ScriptsPage() {
 							<Col span={12}>
 								<Card size="small">
 									<Text type="secondary">定时规则</Text>
-									<Paragraph style={{ margin: "8px 0 0" }}>支持 `cron` 检查和后台周期执行</Paragraph>
+									<Paragraph style={{ margin: "8px 0 0" }}>结构化定时规则支持自动检查和后台周期执行</Paragraph>
 								</Card>
 							</Col>
 							<Col span={24}>
@@ -2664,7 +3041,7 @@ export default function ScriptsPage() {
 									type="info"
 									showIcon
 									title="运行提示"
-									description="如果这里长期没有新记录，优先检查 auto_control_worker 是否已启动。"
+									description="如果这里长期没有新记录，优先检查 auto_control_worker 是否已启动；脚本模式里的时间逻辑则由脚本本体自行控制。"
 								/>
 							</Col>
 						</Row>
@@ -2672,73 +3049,74 @@ export default function ScriptsPage() {
 				</Col>
 			</Row>
 
-			{activeTab === "single" ? (
-				<ScriptModal
-					open={scriptModalOpen}
-					script={editingScript}
-				devices={devicesList}
-					loading={createScript.isPending || updateScript.isPending}
-					onClose={() => {
-						setScriptModalOpen(false);
-						setEditingScript(null);
-					}}
-					onSubmit={(values) => {
-						if (editingScript) updateScript.mutate(values);
-						else createScript.mutate(values);
-					}}
-				/>
+			{editorOpen ? (
+				<Card
+					style={{ marginBottom: 16 }}
+					size="small"
+					title={
+						editorScope === "single"
+							? editingScript
+								? "编辑本设备规则"
+								: "新建本设备规则"
+							: editingLinkage
+							? "编辑跨设备规则"
+							: "新建跨设备规则"
+					}
+					extra={
+						<Space wrap>
+							<Text type="secondary">作用范围</Text>
+							<Select
+								style={{ width: 180 }}
+								value={editorScope}
+								onChange={(value) => switchRuleEditorScope(value as RuleScope)}
+								options={[
+									{ value: "single", label: "本设备规则" },
+									{ value: "linkage", label: "跨设备规则" },
+								]}
+							/>
+							<Button onClick={closeRuleEditor}>关闭编辑器</Button>
+						</Space>
+					}
+				>
+					<Paragraph type="secondary" style={{ marginBottom: 16 }}>
+						先确定规则作用范围，再填写触发条件和执行动作。本设备规则适合同一台设备内完成判断和执行；跨设备规则适合由一台设备提供条件、另一台设备执行动作。
+					</Paragraph>
+					{editorScope === "single" ? (
+						<ScriptModal
+							open={scriptModalOpen}
+							script={editingScript}
+							devices={devicesList}
+							loading={createScript.isPending || updateScript.isPending}
+							embedded
+							onClose={closeRuleEditor}
+							onSubmit={(values) => {
+								if (editingScript) updateScript.mutate(values);
+								else createScript.mutate(values);
+							}}
+						/>
+					) : (
+						<LinkageModal
+							open={linkageModalOpen}
+							script={editingLinkage}
+							devices={devicesList}
+							loading={createLinkage.isPending || updateLinkage.isPending}
+							embedded
+							onClose={closeRuleEditor}
+							onSubmit={(values) => {
+								if (editingLinkage) updateLinkage.mutate(values);
+								else createLinkage.mutate(values);
+							}}
+						/>
+					)}
+				</Card>
 			) : null}
 
-			{activeTab === "linkage" ? (
-				<LinkageModal
-					open={linkageModalOpen}
-					script={editingLinkage}
-				devices={devicesList}
-					loading={createLinkage.isPending || updateLinkage.isPending}
-					onClose={() => {
-						setLinkageModalOpen(false);
-						setEditingLinkage(null);
-					}}
-					onSubmit={(values) => {
-						if (editingLinkage) updateLinkage.mutate(values);
-						else createLinkage.mutate(values);
-					}}
-				/>
-			) : null}
-
-			<Tabs
-				activeKey={activeTab}
-				onChange={setActiveTab}
-				items={[
-					{
-						key: "single",
-						label: `单设备规则 (${filteredSingleScripts.length})`,
-						children: (
-							<Card
-								title="单设备规则"
-								extra={
-									<Button
-										type="primary"
-										size="small"
-										onClick={() => {
-											setEditingScript(null);
-											setScriptModalOpen(true);
-										}}
-									>
-										新建规则
-									</Button>
-								}
-							>
-								<Paragraph type="secondary" style={{ marginBottom: 16 }}>
-									适合给单台设备配置阈值、定时和脚本规则。
-								</Paragraph>
-								<Table rowKey="id" loading={scriptsQ.isLoading} dataSource={filteredSingleScripts} columns={scriptColumns} pagination={{ pageSize: 20 }} scroll={{ x: 1180 }} />
-							</Card>
-						),
-					},
-				{ key: "linkage", label: `设备联动规则 (${filteredLinkageScripts.length})`, children: <LinkagePanel scripts={filteredLinkageScripts} devices={devicesList} loading={scriptsQ.isLoading} executingId={typeof executeScript.variables === "number" ? executeScript.variables : undefined} deletingId={typeof deleteScript.variables === "number" ? deleteScript.variables : undefined} onCreate={() => { setEditingLinkage(null); setLinkageModalOpen(true); }} onEdit={(script) => { setEditingLinkage(script); setLinkageModalOpen(true); }} onDuplicate={(script) => duplicateScript.mutate(cloneScriptPayload(script))} onExecute={(script) => executeScript.mutate(script.id || 0)} onDelete={(script) => deleteScript.mutate(script.id || 0)} onHistory={(script) => setHistoryScript(script)} /> },
-				]}
-			/>
+			<Card
+				title="统一规则列表"
+				extra={<Text type="secondary">本设备和跨设备规则都在这里统一查看和管理。</Text>}
+			>
+				<Table rowKey="id" loading={scriptsQ.isLoading} dataSource={filteredRules} columns={ruleColumns} pagination={{ pageSize: 20 }} scroll={{ x: 1480 }} />
+			</Card>
 
 			<ExecutionHistoryModal open={!!historyScript} script={historyScript} onClose={() => setHistoryScript(null)} />
 
@@ -2757,13 +3135,13 @@ export default function ScriptsPage() {
 						type="info"
 						showIcon
 						title="导入说明"
-						description="支持导入单条规则 JSON，也支持一次粘贴一个规则数组批量导入。导入后会作为新的规则保存。"
+						description="支持导入单条规则 JSON，也支持一次粘贴一个规则数组批量导入。导入后的内容会作为新规则保存，不会覆盖现有规则。"
 					/>
 					<Input.TextArea
 						rows={16}
 						value={importText}
 						onChange={(event) => setImportText(event.target.value)}
-						placeholder='粘贴从“导出规则”得到的 JSON，或一条单独的脚本 JSON'
+						placeholder='粘贴从“导出规则”得到的 JSON，或一条单独的规则 JSON'
 						style={{ fontFamily: "Consolas, monospace", fontSize: 12 }}
 					/>
 				</Space>
