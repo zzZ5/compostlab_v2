@@ -1146,46 +1146,35 @@ function hasStructuredPrimaryActions(values: StructuredActionFormValues) {
 	);
 }
 
-function normalizePrimaryActionsForProfile(
-	primaryActions: CommandRow[] | undefined,
+function normalizeActionRowsForProfile(
+	actions: CommandRow[] | undefined,
 	profile: DeviceProfile,
 	commandOptions: Array<{ value: string; label: string }>,
 ) {
-	const rows = safeArray<CommandRow>(primaryActions);
+	const rows = safeArray<CommandRow>(actions);
 	const allowedCommands = new Set(commandOptions.map((item) => item.value));
 	if (!rows.length) {
-		const nextCommand = getDefaultCommandForProfile(profile);
-		return [
-			{
-				command: nextCommand,
-				action: getDefaultActionForCommand(nextCommand, profile),
-				duration: getDefaultDurationForCommand(nextCommand),
-			},
-		];
+		return [];
 	}
-	const [first, ...rest] = rows;
-	if (!first.command || !allowedCommands.has(first.command)) {
-		const nextCommand = getDefaultCommandForProfile(profile);
-		return [
-			{
-				command: nextCommand,
-				action: getDefaultActionForCommand(nextCommand, profile),
-				duration: getDefaultDurationForCommand(nextCommand),
-			},
-			...rest,
-		];
-	}
-	const actionOptions = getCommandActionOptions(first.command, profile);
-	if (actionOptions.length && !actionOptions.some((item) => item.value === first.action)) {
-		return [
-			{
-				...first,
-				action: getDefaultActionForCommand(first.command, profile),
-			},
-			...rest,
-		];
-	}
-	return rows;
+	return rows.map((row) => {
+		const nextCommand = row.command && allowedCommands.has(row.command) ? row.command : getDefaultCommandForProfile(profile);
+		const actionOptions = getCommandActionOptions(nextCommand, profile);
+		const nextAction =
+			nextCommand === "config_update"
+				? undefined
+				: actionOptions.length && actionOptions.some((item) => item.value === row.action)
+				? row.action
+				: getDefaultActionForCommand(nextCommand, profile);
+		return {
+			...row,
+			command: nextCommand,
+			action: nextAction,
+			duration:
+				nextCommand === "config_update" || nextCommand === "restart" || nextCommand === "emergency"
+					? undefined
+					: row.duration ?? getDefaultDurationForCommand(nextCommand),
+		};
+	});
 }
 
 function applyStructuredActionEditorChange(
@@ -1521,10 +1510,14 @@ function buildRulePayloadFromDraft(
 
 	return {
 		...buildRulePayloadBase(draft),
+		command_template: {
+			...draft.commandTemplate,
+			...(scope === "linkage" ? { rule_scope: "linkage" } : {}),
+		},
 		threshold_config,
 		schedule_config,
 		python_code: draft.type === "python" ? draft.pythonCode : "",
-		...(scope === "single" ? { command_template: draft.commandTemplate, device_ids: buildRulePayloadBase(draft).device_ids } : {}),
+		...(scope === "single" ? { device_ids: buildRulePayloadBase(draft).device_ids } : {}),
 	};
 }
 
@@ -1562,7 +1555,7 @@ function validateRuleDraft(
 		}
 	}
 	if (options.requireStructuredTarget && draft.type !== "python" && !draft.targetDeviceId) {
-		throw new Error("请补全联动动作");
+		throw new Error(options.scope === "linkage" ? "请补全联动动作" : "请先选择目标设备");
 	}
 }
 
@@ -1810,6 +1803,7 @@ function isLinkageScript(script: Script) {
 	const scheduleConfig = (script.schedule_config || {}) as Record<string, unknown>;
 	const commandTemplate = (script.command_template || {}) as Record<string, unknown>;
 	return (
+		commandTemplate.rule_scope === "linkage" ||
 		typeof thresholdConfig.source_device_id === "number" ||
 		typeof scheduleConfig.source_device_id === "number" ||
 		typeof commandTemplate.target_device_id === "number"
@@ -2526,11 +2520,15 @@ function ScriptModal({
 
 	useEffect(() => {
 		if (!open || currentType === "python" || !targetDeviceId) return;
-		const nextPrimaryActions = normalizePrimaryActionsForProfile(primaryActions, targetProfile, commandOptions);
+		const nextPrimaryActions = normalizeActionRowsForProfile(primaryActions, targetProfile, commandOptions);
+		const nextElseActions = normalizeActionRowsForProfile(elseCommands, targetProfile, commandOptions);
 		if (JSON.stringify(nextPrimaryActions) !== JSON.stringify(primaryActions)) {
 			form.setFieldValue(singleRuleFields.primaryActions as never, nextPrimaryActions);
 		}
-	}, [commandOptions, currentType, form, open, primaryActions, targetDeviceId, targetProfile]);
+		if (JSON.stringify(nextElseActions) !== JSON.stringify(elseCommands)) {
+			form.setFieldValue(singleRuleFields.elseCommands as never, nextElseActions);
+		}
+	}, [commandOptions, currentType, elseCommands, form, open, primaryActions, targetDeviceId, targetProfile]);
 
 	useEffect(() => {
 		if (!open || currentType === "python") return;
@@ -2590,7 +2588,11 @@ function ScriptModal({
 						>
 							<Row gutter={12}>
 								<Col xs={24} md={16}>
-									<Form.Item label="目标设备" name={singleRuleFields.targetDeviceId}>
+									<Form.Item
+										label="目标设备"
+										name={singleRuleFields.targetDeviceId}
+										rules={currentType !== "python" ? [{ required: true, message: "请选择目标设备" }] : undefined}
+									>
 										<Select
 											allowClear
 											placeholder="选择执行动作的设备"
@@ -2796,11 +2798,15 @@ function LinkageModal({
 
 	useEffect(() => {
 		if (!open || !targetDeviceId) return;
-		const nextPrimaryActions = normalizePrimaryActionsForProfile(primaryActions, targetProfile, commandOptions);
+		const nextPrimaryActions = normalizeActionRowsForProfile(primaryActions, targetProfile, commandOptions);
+		const nextElseActions = normalizeActionRowsForProfile(elseCommands, targetProfile, commandOptions);
 		if (JSON.stringify(nextPrimaryActions) !== JSON.stringify(primaryActions)) {
 			form.setFieldValue(linkageRuleFields.primaryActions as never, nextPrimaryActions);
 		}
-	}, [commandOptions, form, open, primaryActions, targetDeviceId, targetProfile]);
+		if (JSON.stringify(nextElseActions) !== JSON.stringify(elseCommands)) {
+			form.setFieldValue(linkageRuleFields.elseCommands as never, nextElseActions);
+		}
+	}, [commandOptions, elseCommands, form, open, primaryActions, targetDeviceId, targetProfile]);
 
 	const content = (
 		<Row gutter={[20, 20]}>
