@@ -1,7 +1,5 @@
-"""
-控制脚本执行引擎
-支持阈值触发、定时执行、Python脚本等多种控制模式
-"""
+# -*- coding: utf-8 -*-
+# docstring removed
 import json
 import logging
 from typing import List, Dict, Any, Optional
@@ -106,7 +104,7 @@ def _cron_matches_now(expr: str, dt: datetime) -> bool:
 
 
 class ScriptExecutor:
-    """脚本执行引擎"""
+    # docstring removed
 
     def __init__(self):
         self.result_cache = {}
@@ -131,6 +129,21 @@ class ScriptExecutor:
             return Device.objects.filter(id=target_device_id, is_active=True).first() or fallback_device
         return fallback_device
 
+    def _resolve_device_ref(
+        self,
+        default_device: Device,
+        device_id: Optional[int] = None,
+        device_code: Optional[str] = None,
+    ) -> Device:
+        if isinstance(device_id, int):
+            return Device.objects.filter(id=device_id, is_active=True).first() or default_device
+
+        code = str(device_code or "").strip()
+        if code:
+            return Device.objects.filter(code__iexact=code, is_active=True).first() or default_device
+
+        return default_device
+
     def execute_script(
         self,
         script: ScriptTemplate,
@@ -139,9 +152,7 @@ class ScriptExecutor:
         scheduled_at: Optional[datetime] = None,
         created_by=None
     ) -> ScriptExecution:
-        """
-        执行脚本并返回执行记录
-        """
+        # docstring removed
         source_device = self._resolve_source_device(script, device)
         target_device = self._resolve_target_device(script, device)
 
@@ -157,19 +168,33 @@ class ScriptExecutor:
         )
 
         try:
-            # 根据脚本类型选择执行方式
+            action_plan = None
+            commands: List[Dict[str, Any]] = []
+            allow_else = trigger_reason != "threshold_check"
+
             if script.script_type == ScriptTemplate.ScriptType.THRESHOLD:
-                commands = self._execute_threshold_script(script, source_device)
+                commands = self._execute_threshold_script(script, source_device, allow_else=allow_else)
             elif script.script_type == ScriptTemplate.ScriptType.SCHEDULE:
                 commands = self._execute_schedule_script(script)
             elif script.script_type == ScriptTemplate.ScriptType.PYTHON:
-                commands = self._execute_python_script(script, source_device)
+                python_result = self._execute_python_script(script, source_device)
+                if isinstance(python_result, dict) and isinstance(python_result.get("actions"), list):
+                    action_plan = python_result.get("actions") or []
+                else:
+                    commands = python_result if isinstance(python_result, list) else []
             else:
-                # 混合模式：先执行阈值检查，满足条件则执行
-                commands = self._execute_hybrid_script(script, source_device)
+                commands = self._execute_hybrid_script(script, source_device, allow_else=allow_else)
 
-            if commands:
-                # 下发命令到设备
+            if action_plan:
+                success, result, executed_commands = self._send_action_plan(target_device, action_plan)
+                execution.commands = executed_commands
+                execution.result = {
+                    **result,
+                    "source_device": source_device.code,
+                    "target_device": target_device.code,
+                }
+                execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
+            elif commands:
                 success, result = self._send_commands(target_device, commands)
                 execution.commands = commands
                 execution.result = {
@@ -200,62 +225,67 @@ class ScriptExecutor:
             return execution
 
     def _execute_threshold_script(
-        self, script: ScriptTemplate, device: Device
+        self, script: ScriptTemplate, device: Device, allow_else: bool = True
     ) -> List[Dict[str, Any]]:
-        """
-        执行阈值触发脚本
-        根据当前数据判断是否满足阈值条件
-        """
-        config = script.threshold_config
-        metric = config.get("metric")
-        channel_code = config.get("channel_code")
-        operator = config.get("operator")  # >, >=, <, <=, ==, !=
-        threshold_value = config.get("value")
+        config = script.threshold_config or {}
+        condition_mode = "any" if config.get("condition_mode") == "any" else "all"
+        conditions = config.get("conditions") if isinstance(config.get("conditions"), list) else None
+        if not conditions:
+            conditions = [
+                {
+                    "metric": config.get("metric"),
+                    "channel_code": config.get("channel_code"),
+                    "operator": config.get("operator"),
+                    "value": config.get("value"),
+                }
+            ]
 
-        if not all([metric, operator, threshold_value is not None]):
-            logger.warning(f"Invalid threshold config for script {script.name}")
+        matches: List[bool] = []
+        for condition in conditions:
+            metric = condition.get("metric")
+            channel_code = condition.get("channel_code")
+            operator = condition.get("operator")
+            threshold_value = condition.get("value")
+
+            if not all([metric, operator, threshold_value is not None]):
+                logger.warning(f"Invalid threshold condition for script {script.name}")
+                return []
+
+            latest_value = self._get_latest_metric_value(device, metric, channel_code)
+            if latest_value is None:
+                logger.warning(f"No data found for metric {metric} on device {device.code}")
+                matches.append(False)
+                continue
+
+            matches.append(self._check_threshold(latest_value, operator, threshold_value))
+
+        if not matches:
             return []
 
-        # 获取设备的最新数据
-        latest_value = self._get_latest_metric_value(device, metric, channel_code)
-
-        if latest_value is None:
-            logger.warning(f"No data found for metric {metric} on device {device.code}")
-            return []
-
-        # 检查是否满足阈值条件
-        should_execute = self._check_threshold(latest_value, operator, threshold_value)
-
+        should_execute = any(matches) if condition_mode == "any" else all(matches)
         if should_execute:
             logger.info(
-                f"Threshold triggered for {device.code}: {metric}={latest_value} {operator} {threshold_value}"
+                "Threshold triggered for %s: %s conditions matched",
+                device.code,
+                "any" if condition_mode == "any" else "all",
             )
             return script.command_template.get("commands", [])
-        else:
-            return []
+        if allow_else:
+            return script.command_template.get("else_commands", []) or []
+        return []
 
     def _execute_schedule_script(
         self, script: ScriptTemplate
     ) -> List[Dict[str, Any]]:
-        """
-        执行定时脚本
-        直接返回预定义的命令
-        """
-        config = script.schedule_config
         return script.command_template.get("commands", [])
 
     def _execute_python_script(
         self, script: ScriptTemplate, device: Device
-    ) -> List[Dict[str, Any]]:
-        """
-        执行Python脚本
-        在安全沙箱环境中执行Python代码
-        """
+    ) -> Any:
         if not script.python_code:
             return []
 
         try:
-            # 准备执行环境
             exec_globals = {
                 "__builtins__": {
                     "print": print,
@@ -270,78 +300,63 @@ class ScriptExecutor:
                     "False": False,
                     "None": None,
                 },
-                "get_latest_value": lambda metric, channel_code=None: self._get_latest_metric_value(device, metric, channel_code),
-                "get_latest_channel_value": lambda channel_code: self._get_latest_channel_value(device, channel_code),
+                "get_latest_value": lambda metric, channel_code=None, device_id=None, device_code=None: self._get_latest_metric_value(
+                    self._resolve_device_ref(device, device_id, device_code),
+                    metric,
+                    channel_code,
+                ),
+                "get_latest_channel_value": lambda channel_code, device_id=None, device_code=None: self._get_latest_channel_value(
+                    self._resolve_device_ref(device, device_id, device_code),
+                    channel_code,
+                ),
                 "device": device,
                 "datetime": datetime,
                 "timedelta": timedelta,
             }
 
-            # 执行脚本
             exec_result = {}
             exec(script.python_code, exec_globals, exec_result)
 
-            # 检查脚本是否定义了 commands 变量
+            if "actions" in exec_result:
+                return {"actions": exec_result["actions"]}
             if "commands" in exec_result:
                 return exec_result["commands"]
-            else:
-                logger.warning(f"Python script {script.name} did not return 'commands'")
-                return []
+            logger.warning(f"Python script {script.name} did not return 'commands' or 'actions'")
+            return []
 
         except Exception as e:
             logger.error(f"Python script execution failed: {e}", exc_info=True)
             raise Exception(f"Python script error: {str(e)}")
 
     def _execute_hybrid_script(
-        self, script: ScriptTemplate, device: Device
+        self, script: ScriptTemplate, device: Device, allow_else: bool = True
     ) -> List[Dict[str, Any]]:
-        """
-        执行混合模式脚本
-        先检查阈值条件，满足则执行命令
-        """
-        # 先执行阈值检查
-        commands = self._execute_threshold_script(script, device)
-
+        commands = self._execute_threshold_script(script, device, allow_else=allow_else)
         if commands:
             logger.info(f"Hybrid script {script.name} triggered by threshold")
             return commands
-        else:
-            # 检查定时条件（简化版：只检查是否到达执行时间）
-            schedule_config = script.schedule_config
-            if schedule_config:
-                # 这里可以集成 APScheduler 等定时任务
-                # 简化实现：直接返回命令，由外部调度器决定何时执行
-                logger.info(f"Hybrid script {script.name} using schedule config")
-                return script.command_template.get("commands", [])
 
-            return []
+        if script.schedule_config:
+            logger.info(f"Hybrid script {script.name} using schedule config")
+            return script.command_template.get("commands", [])
+
+        return []
 
     def _get_latest_metric_value(
         self, device: Device, metric: str, channel_code: Optional[str] = None
     ) -> Optional[float]:
-        """
-        ???????????????????
-        """
         try:
             if channel_code:
                 return self._get_latest_channel_value(device, channel_code)
 
-            channel = device.channels.filter(
-                metric__iexact=metric
-            ).first()
-
+            channel = device.channels.filter(metric__iexact=metric).first()
             if not channel:
                 return None
 
-            latest = TelemetryKV.objects.filter(
-                device=device,
-                code=channel.code
-            ).order_by("-ts").first()
-
+            latest = TelemetryKV.objects.filter(device=device, code=channel.code).order_by("-ts").first()
             if latest:
                 return float(latest.value)
             return None
-
         except Exception as e:
             logger.error(f"Failed to get latest value: {e}")
             return None
@@ -358,15 +373,10 @@ class ScriptExecutor:
             if not channel:
                 return None
 
-            latest = TelemetryKV.objects.filter(
-                device=device,
-                code=channel.code
-            ).order_by("-ts").first()
-
+            latest = TelemetryKV.objects.filter(device=device, code=channel.code).order_by("-ts").first()
             if latest:
                 return float(latest.value)
             return None
-
         except Exception as e:
             logger.error(f"Failed to get latest channel value: {e}")
             return None
@@ -374,7 +384,6 @@ class ScriptExecutor:
     def _check_threshold(
         self, value: float, operator: str, threshold: float
     ) -> bool:
-        """检查值是否满足阈值条件"""
         try:
             if operator == ">":
                 return value > threshold
@@ -393,13 +402,10 @@ class ScriptExecutor:
         except Exception:
             return False
 
+
     def _send_commands(
         self, device: Device, commands: List[Dict[str, Any]]
     ) -> tuple[bool, Dict[str, Any]]:
-        """
-        发送命令到设备
-        返回 (success, result)
-        """
         if not commands or not device.response_topic:
             return False, {"detail": "No commands or topic"}
 
@@ -414,117 +420,129 @@ class ScriptExecutor:
             return True, {
                 "mqtt": "published",
                 "topic": device.response_topic,
-                "command_count": len(commands)
+                "command_count": len(commands),
             }
         except MqttPublishError as e:
             return False, {"detail": str(e)}
         except Exception as e:
             return False, {"detail": f"Unexpected: {str(e)}"}
 
+    def _send_action_plan(
+        self,
+        default_target_device: Device,
+        actions: List[Dict[str, Any]],
+    ) -> tuple[bool, Dict[str, Any], List[Dict[str, Any]]]:
+        targets_result = []
+        executed_commands: List[Dict[str, Any]] = []
+        overall_success = True
+
+        for item in actions:
+            if not isinstance(item, dict):
+                overall_success = False
+                targets_result.append({"detail": "Invalid action item"})
+                continue
+
+            target_device = self._resolve_device_ref(
+                default_target_device,
+                item.get("target_device_id"),
+                item.get("target_device_code"),
+            )
+            commands = item.get("commands")
+            if not isinstance(commands, list) or not commands:
+                overall_success = False
+                targets_result.append(
+                    {
+                        "target_device": target_device.code,
+                        "detail": "No commands for target device",
+                    }
+                )
+                continue
+
+            success, result = self._send_commands(target_device, commands)
+            overall_success = overall_success and success
+            executed_commands.extend(commands)
+            targets_result.append(
+                {
+                    "target_device": target_device.code,
+                    "success": success,
+                    "commands": commands,
+                    "result": result,
+                }
+            )
+
+        return overall_success, {"targets": targets_result}, executed_commands
+
 
 class ThresholdMonitor:
-    """阈值监控器，定时检查所有启用的阈值脚本"""
-
     def __init__(self):
         self.executor = ScriptExecutor()
 
     def check_and_execute_all(self) -> Dict[str, Any]:
-        """
-        检查所有启用的阈值脚本并执行
-        返回执行统计
-        """
-        # 获取所有启用且未运行的阈值脚本
+        results = {"checked": 0, "executed": 0, "skipped": 0, "failed": 0}
         scripts = ScriptTemplate.objects.filter(
             is_active=True,
-            script_type__in=[
-                ScriptTemplate.ScriptType.THRESHOLD,
-                ScriptTemplate.ScriptType.HYBRID,
-            ]
-        ).prefetch_related('devices')
-
-        results = {
-            "checked": 0,
-            "executed": 0,
-            "skipped": 0,
-            "failed": 0
-        }
+            script_type__in=[ScriptTemplate.ScriptType.THRESHOLD, ScriptTemplate.ScriptType.HYBRID],
+        ).order_by("-priority", "-created_at")
 
         for script in scripts:
             results["checked"] += 1
 
-            # 检查是否正在运行（防止重复执行）
             running = ScriptExecution.objects.filter(
                 script=script,
                 status=ScriptExecution.Status.RUNNING,
-                created_at__gte=timezone.now() - timedelta(minutes=5)
+                created_at__gte=timezone.now() - timedelta(minutes=5),
             ).exists()
-
             if running:
+                results["skipped"] += 1
                 continue
 
-            # 对每个关联的设备执行脚本
             devices = script.devices.filter(is_active=True)
             if not devices.exists() and script.run:
-                # 如果没有指定设备但有run，使用run的所有设备
-                devices = Device.objects.filter(
-                    runwindow__run=script.run,
-                    is_active=True
-                ).distinct()
+                devices = Device.objects.filter(runwindow__run=script.run, is_active=True).distinct()
+
+            if not devices.exists():
+                results["skipped"] += 1
+                continue
 
             for device in devices:
                 try:
-                    execution = self.executor.execute_script(
-                        script,
-                        device,
-                        trigger_reason="threshold_check",
-                        scheduled_at=None
-                    )
-
+                    execution = self.executor.execute_script(script, device, trigger_reason="threshold_check")
                     if execution.status == ScriptExecution.Status.SUCCESS:
                         results["executed"] += 1
                     elif execution.status == ScriptExecution.Status.SKIPPED:
                         results["skipped"] += 1
                     else:
                         results["failed"] += 1
-
-                except Exception as e:
-                    logger.error(f"Failed to execute script {script.name} on device {device.code}: {e}")
+                except Exception as exc:
+                    logger.error(f"Failed to execute threshold script {script.name} on device {device.code}: {exc}")
                     results["failed"] += 1
 
         return results
 
 
 class ScheduleMonitor:
-    """定时控制检查器，按 cron 表达式触发 schedule / hybrid 脚本。"""
-
     def __init__(self):
         self.executor = ScriptExecutor()
 
     def check_and_execute_all(self, now: Optional[datetime] = None) -> Dict[str, Any]:
-        check_time = now or timezone.localtime()
-        scheduled_at = check_time.replace(second=0, microsecond=0)
+        current = now or timezone.localtime(timezone.now())
+        scheduled_at = current.replace(second=0, microsecond=0)
+        results = {"checked": 0, "matched": 0, "executed": 0, "skipped": 0, "failed": 0}
 
         scripts = ScriptTemplate.objects.filter(
             is_active=True,
             script_type__in=[
                 ScriptTemplate.ScriptType.SCHEDULE,
                 ScriptTemplate.ScriptType.HYBRID,
+                ScriptTemplate.ScriptType.PYTHON,
             ],
-        ).prefetch_related("devices")
-
-        results = {
-            "checked": 0,
-            "matched": 0,
-            "executed": 0,
-            "skipped": 0,
-            "failed": 0,
-        }
+        ).order_by("-priority", "-created_at")
 
         for script in scripts:
             results["checked"] += 1
             schedule_config = script.schedule_config or {}
-            cron = str(schedule_config.get("cron", "")).strip()
-            if not cron or not _cron_matches_now(cron, check_time):
+            cron_expr = str(schedule_config.get("cron") or "").strip()
+            if not cron_expr or not _cron_matches_now(cron_expr, current):
                 continue
 
             results["matched"] += 1

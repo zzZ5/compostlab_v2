@@ -48,26 +48,30 @@ def _json_object_field(data: dict, key: str, default: dict | None = None) -> dic
 
 
 def _validate_command_template(command_template: dict) -> dict:
-    commands = command_template.get("commands")
-    if not isinstance(commands, list):
-        raise ValueError("command_template.commands must be a list")
+    def _validate_command_list(items: object, field_name: str) -> None:
+        if not isinstance(items, list):
+            raise ValueError(f"command_template.{field_name} must be a list")
 
-    for index, item in enumerate(commands, start=1):
-        if not isinstance(item, dict):
-            raise ValueError(f"command_template.commands[{index}] must be an object")
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"command_template.{field_name}[{index}] must be an object")
 
-        command = item.get("command")
-        action = item.get("action")
-        duration = item.get("duration")
+            command = item.get("command")
+            action = item.get("action")
+            duration = item.get("duration")
 
-        if not isinstance(command, str) or not command.strip():
-            raise ValueError(f"command_template.commands[{index}].command is required")
+            if not isinstance(command, str) or not command.strip():
+                raise ValueError(f"command_template.{field_name}[{index}].command is required")
 
-        if not isinstance(action, str) or not action.strip():
-            raise ValueError(f"command_template.commands[{index}].action is required")
+            if not isinstance(action, str) or not action.strip():
+                raise ValueError(f"command_template.{field_name}[{index}].action is required")
 
-        if duration is not None and (not isinstance(duration, (int, float)) or duration < 0):
-            raise ValueError(f"command_template.commands[{index}].duration must be >= 0")
+            if duration is not None and (not isinstance(duration, (int, float)) or duration < 0):
+                raise ValueError(f"command_template.{field_name}[{index}].duration must be >= 0")
+
+    _validate_command_list(command_template.get("commands"), "commands")
+    if "else_commands" in command_template:
+        _validate_command_list(command_template.get("else_commands"), "else_commands")
 
     return command_template
 
@@ -83,19 +87,29 @@ def _validate_script_payload(
     schedule_config: dict,
     python_code: str,
 ) -> None:
+    def _validate_threshold_condition(condition: dict, prefix: str) -> None:
+        metric = condition.get("metric")
+        operator = condition.get("operator")
+        value = condition.get("value")
+        if not metric:
+            raise ValueError(f"{prefix}.metric is required")
+        if not operator:
+            raise ValueError(f"{prefix}.operator is required")
+        if value is None:
+            raise ValueError(f"{prefix}.value is required")
+
     if script_type in {
         ScriptTemplate.ScriptType.THRESHOLD,
         ScriptTemplate.ScriptType.HYBRID,
     }:
-        metric = threshold_config.get("metric")
-        operator = threshold_config.get("operator")
-        value = threshold_config.get("value")
-        if not metric:
-            raise ValueError("threshold_config.metric is required")
-        if not operator:
-            raise ValueError("threshold_config.operator is required")
-        if value is None:
-            raise ValueError("threshold_config.value is required")
+        conditions = threshold_config.get("conditions")
+        if isinstance(conditions, list) and conditions:
+            for index, condition in enumerate(conditions, start=1):
+                if not isinstance(condition, dict):
+                    raise ValueError(f"threshold_config.conditions[{index}] must be an object")
+                _validate_threshold_condition(condition, f"threshold_config.conditions[{index}]")
+        else:
+            _validate_threshold_condition(threshold_config, "threshold_config")
 
     if script_type in {
         ScriptTemplate.ScriptType.SCHEDULE,
@@ -110,8 +124,11 @@ def _validate_script_payload(
     if script_type == ScriptTemplate.ScriptType.PYTHON:
         if not python_code.strip():
             raise ValueError("python_code is required for python scripts")
-        if "commands" not in python_code:
-            raise ValueError("python_code must define commands")
+        if "commands" not in python_code and "actions" not in python_code:
+            raise ValueError("python_code must define commands or actions")
+        cron = str(schedule_config.get("cron", "")).strip()
+        if cron and not _is_valid_cron_expression(cron):
+            raise ValueError("schedule_config.cron must contain 5 or 6 parts")
 
 
 def _script_to_dict(script: ScriptTemplate) -> dict:
