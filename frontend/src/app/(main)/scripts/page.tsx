@@ -838,8 +838,12 @@ function parseCommandRowsForKey(text: string, key: "commands" | "else_commands")
 					action: isConfigUpdate ? undefined : typeof row.action === "string" ? row.action : "on",
 					duration: typeof row.duration === "number" ? row.duration : undefined,
 					configText:
-						isConfigUpdate && row.config && typeof row.config === "object" && !Array.isArray(row.config)
-							? JSON.stringify(row.config, null, 2)
+						isConfigUpdate
+							? typeof row.config_text === "string"
+								? row.config_text
+								: row.config && typeof row.config === "object" && !Array.isArray(row.config)
+								? JSON.stringify(row.config, null, 2)
+								: ""
 							: undefined,
 				};
 			});
@@ -864,10 +868,19 @@ function updateCommandTemplateRows(
 			...parsed,
 			[key]: rows.map((row) => {
 				if (row.command === "config_update") {
-					return {
-						command: "config_update",
-						config: parseConfigText(row.configText),
-					};
+					// 输入过程中允许不完整 JSON，避免每次键入都抛错。
+					const rawText = String(row.configText || "");
+					try {
+						return {
+							command: "config_update",
+							config: parseConfigText(rawText),
+						};
+					} catch {
+						return {
+							command: "config_update",
+							config_text: rawText,
+						};
+					}
 				}
 				return {
 					command: row.command,
@@ -1068,12 +1081,24 @@ function stripCommandTemplateMeta(commandTemplate?: Record<string, unknown>) {
 }
 
 function buildCommandRowPayload(row: CommandRow) {
+	if (row.command === "config_update") {
+		const rawText = String(row.configText || "");
+		try {
+			return {
+				command: "config_update",
+				config: parseConfigText(rawText),
+			};
+		} catch {
+			return {
+				command: "config_update",
+				config_text: rawText,
+			};
+		}
+	}
 	return {
 		command: row.command,
-		...(row.command === "config_update"
-			? { config: parseConfigText(row.configText) }
-			: { action: row.action }),
-		...(row.command !== "config_update" && row.duration !== undefined ? { duration: row.duration } : {}),
+		action: row.action,
+		...(row.duration !== undefined ? { duration: row.duration } : {}),
 	};
 }
 
@@ -1143,18 +1168,42 @@ function getStructuredExampleText(profile: DeviceProfile, type: ScriptType) {
 	return JSON.stringify(parseCommandTemplate(getStructuredCommandExample(profile, type)), null, 2);
 }
 
+function commandRowIncludedInTemplate(row: CommandRow): boolean {
+	return Boolean(row.command && (row.command === "config_update" || row.action));
+}
+
 function buildStructuredActionCommandTemplate(values: StructuredActionFormValues) {
+	const buildCommandRowPayloadForEditor = (row: CommandRow) => {
+		if (row.command === "config_update") {
+			const rawText = String(row.configText || "");
+			try {
+				return {
+					command: "config_update",
+					config: parseConfigText(rawText),
+				};
+			} catch {
+				return {
+					command: "config_update",
+					config_text: rawText,
+				};
+			}
+		}
+		return {
+			command: row.command,
+			action: row.action,
+			...(row.duration !== undefined ? { duration: row.duration } : {}),
+		};
+	};
+
 	const primaryActions =
-		safeArray<CommandRow>(values.primaryActions).filter((item) =>
-			item.command && (item.command === "config_update" ? item.configText : item.action),
-		).length
+		safeArray<CommandRow>(values.primaryActions).filter(commandRowIncludedInTemplate).length
 			? safeArray<CommandRow>(values.primaryActions)
-					.filter((item) => item.command && (item.command === "config_update" ? item.configText : item.action))
-					.map((item) => buildCommandRowPayload(item))
+					.filter(commandRowIncludedInTemplate)
+					.map((item) => buildCommandRowPayloadForEditor(item))
 			: [];
 	const elseCommands = safeArray<CommandRow>(values.elseCommands)
-		.filter((item) => item.command && (item.command === "config_update" ? item.configText : item.action))
-		.map((item) => buildCommandRowPayload(item));
+		.filter(commandRowIncludedInTemplate)
+		.map((item) => buildCommandRowPayloadForEditor(item));
 
 	return {
 		...(values.targetDeviceId ? { target_device_id: values.targetDeviceId } : {}),
@@ -1187,9 +1236,7 @@ function buildRuleActionFormValuesFromDraft(
 }
 
 function hasStructuredPrimaryActions(values: StructuredActionFormValues) {
-	return safeArray<CommandRow>(values.primaryActions).some((item) =>
-		item.command && (item.command === "config_update" ? item.configText : item.action),
-	);
+	return safeArray<CommandRow>(values.primaryActions).some(commandRowIncludedInTemplate);
 }
 
 function normalizeActionRowsForProfile(
@@ -1699,7 +1746,27 @@ function commandTemplateToPythonByKey(
 	try {
 		const commands = safeArray<Record<string, unknown>>(commandTemplate?.[key]);
 		if (!commands.length) return `${variableName} = []`;
-		return `${variableName} = ${JSON.stringify(commands, null, 2)}`;
+		let hasConfigDraft = false;
+		const previewCommands = commands.map((item) => {
+			if (item.command !== "config_update" || typeof item.config_text !== "string") {
+				return item;
+			}
+			try {
+				const parsedConfig = parseConfigText(item.config_text);
+				return {
+					...item,
+					config: parsedConfig,
+				};
+			} catch {
+				hasConfigDraft = true;
+				return {
+					...item,
+					config: {},
+				};
+			}
+		});
+		const prefix = hasConfigDraft ? "# 提示：存在未完成的 config_update JSON 草稿，预览按空对象显示\n" : "";
+		return `${prefix}${variableName} = ${JSON.stringify(previewCommands, null, 2)}`;
 	} catch (error) {
 		return `# 当前命令预览无法生成\n# ${error instanceof Error ? error.message : "命令模板格式不正确"}\n${variableName} = []`;
 	}
@@ -2132,6 +2199,31 @@ function CommandEditor({
 }) {
 	const rows = useMemo(() => parseCommandRowsForKey(value, fieldKey), [fieldKey, value]);
 	const updateRows = (nextRows: CommandRow[]) => onChange(updateCommandTemplateRows(value, fieldKey, nextRows));
+	const [configDraftMap, setConfigDraftMap] = useState<Record<number, string>>({});
+	const getConfigDraftValue = (index: number, fallback: string) =>
+		Object.prototype.hasOwnProperty.call(configDraftMap, index) ? configDraftMap[index] : fallback;
+	const clearConfigDraft = (index: number) =>
+		setConfigDraftMap((prev) => {
+			if (!Object.prototype.hasOwnProperty.call(prev, index)) return prev;
+			const next = { ...prev };
+			delete next[index];
+			return next;
+		});
+	const commitConfigDraft = (index: number) => {
+		if (!Object.prototype.hasOwnProperty.call(configDraftMap, index)) return;
+		const draft = configDraftMap[index];
+		updateRows(
+			rows.map((item, i) =>
+				i === index
+					? {
+							...item,
+							configText: draft,
+					  }
+					: item,
+			),
+		);
+		clearConfigDraft(index);
+	};
 	const body = (
 		<Space orientation="vertical" style={{ width: "100%" }}>
 			<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -2180,20 +2272,15 @@ function CommandEditor({
 							<Input.TextArea
 								style={{ width: 320 }}
 								rows={4}
-								value={row.configText}
+								value={getConfigDraftValue(index, row.configText ?? "")}
 								placeholder={'例如：{\n  "read_interval": 120000,\n  "pump_run_time": 80000\n}'}
 								onChange={(event) =>
-									updateRows(
-										rows.map((item, i) =>
-											i === index
-												? {
-														...item,
-														configText: event.target.value,
-												  }
-												: item,
-										),
-									)
+									setConfigDraftMap((prev) => ({
+										...prev,
+										[index]: event.target.value,
+									}))
 								}
+								onBlur={() => commitConfigDraft(index)}
 							/>
 						) : (
 							<>
@@ -2368,7 +2455,7 @@ function RulePreviewCard({
 			{metricGuide.length ? (
 				<Space orientation="vertical" size={6} style={{ width: "100%" }}>
 					{metricGuide.map((row) => (
-						<Space key={row.metric} direction="vertical" size={4} style={{ width: "100%" }}>
+						<Space key={row.metric} orientation="vertical" size={4} style={{ width: "100%" }}>
 							<Space wrap size={6}>
 								<Text>
 									{row.label}：metric=<Text code>{row.metric}</Text>
@@ -2640,6 +2727,12 @@ function ScriptModal({
 	const [form] = Form.useForm<ScriptFormValues>();
 	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
+	const submitWithDraftFlush = () => {
+		if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
+		form.submit();
+	};
 	const currentType = Form.useWatch(singleRuleFields.type, form) ?? "threshold";
 	const conditionMode = Form.useWatch(singleRuleFields.conditionMode, form) ?? "all";
 	const commandText = Form.useWatch(singleRuleFields.commandTemplateText!, form) ?? "";
@@ -2689,13 +2782,6 @@ function ScriptModal({
 	}, [commandText, currentType, form, open, targetProfile]);
 
 	useEffect(() => {
-		if (!open || currentType === "python") return;
-		if (commandText !== scriptActionText) {
-			form.setFieldValue(singleRuleFields.commandTemplateText! as never, scriptActionText);
-		}
-	}, [commandText, currentType, form, open, scriptActionText]);
-
-	useEffect(() => {
 		if (!open || currentType === "python" || !targetDeviceId) return;
 		const nextPrimaryActions = normalizeActionRowsForProfile(primaryActions, targetProfile, commandOptions);
 		const nextElseActions = normalizeActionRowsForProfile(elseCommands, targetProfile, commandOptions);
@@ -2743,6 +2829,9 @@ function ScriptModal({
 							}
 						}}
 					>
+						<Form.Item name={singleRuleFields.commandTemplateText!} hidden>
+							<Input />
+						</Form.Item>
 						<Form.Item name={singleRuleFields.primaryActions} hidden>
 							<Input />
 						</Form.Item>
@@ -2857,7 +2946,7 @@ function ScriptModal({
 
 						{currentType !== "python" ? (
 							<StructuredActionEditorSection
-								actionText={scriptActionText}
+								actionText={commandText}
 								onChange={(next) =>
 									applyStructuredActionEditorChange(
 										next,
@@ -2908,7 +2997,7 @@ function ScriptModal({
 				<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
 					<Space>
 						<Button onClick={onClose}>取消</Button>
-						<Button type="primary" loading={loading} onClick={() => form.submit()}>
+						<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
 							{script ? "保存规则" : "创建规则"}
 						</Button>
 					</Space>
@@ -2924,7 +3013,7 @@ function ScriptModal({
 			extra={
 				<Space>
 					<Button onClick={onClose}>取消</Button>
-					<Button type="primary" loading={loading} onClick={() => form.submit()}>
+					<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
 						{script ? "保存规则" : "创建规则"}
 					</Button>
 				</Space>
@@ -2955,6 +3044,12 @@ function LinkageModal({
 	const [form] = Form.useForm<LinkageFormValues>();
 	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
+	const submitWithDraftFlush = () => {
+		if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
+		form.submit();
+	};
 	const linkageType = Form.useWatch(linkageRuleFields.type, form) ?? "threshold";
 	const linkageConditionMode = Form.useWatch(linkageRuleFields.conditionMode, form) ?? "all";
 	const targetDeviceId = Form.useWatch(linkageRuleFields.targetDeviceId, form);
@@ -3174,7 +3269,7 @@ function LinkageModal({
 				<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
 					<Space>
 						<Button onClick={onClose}>取消</Button>
-						<Button type="primary" loading={loading} onClick={() => form.submit()}>
+						<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
 							{script ? "保存规则" : "创建规则"}
 						</Button>
 					</Space>
@@ -3190,7 +3285,7 @@ function LinkageModal({
 			extra={
 				<Space>
 					<Button onClick={onClose}>取消</Button>
-					<Button type="primary" loading={loading} onClick={() => form.submit()}>
+					<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
 						{script ? "保存规则" : "创建规则"}
 					</Button>
 				</Space>
