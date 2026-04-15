@@ -85,6 +85,13 @@ type ScriptExecution = {
 	started_at?: string;
 };
 
+type MetricGuideRow = {
+	label: string;
+	metric: string;
+	channelCodes: string[];
+	channelNames: string[];
+};
+
 type ExecutionFilter = "all" | "manual" | "threshold_check" | "schedule_check" | "failed";
 type RuleStatusFilter = "all" | "active" | "inactive";
 type RuleScope = "single" | "linkage";
@@ -109,6 +116,8 @@ type RuleDraft = {
 	cron?: string;
 	pythonCode: string;
 	commandTemplate: Record<string, unknown>;
+	/** 自动阈值检查最小间隔（秒）；0 / 未设置表示不额外限制 */
+	minCheckIntervalSeconds?: number;
 };
 
 type RuleFormIdentityFields = {
@@ -130,6 +139,8 @@ type ThresholdConfigFormValue = {
 	operator?: string;
 	value?: number;
 	conditions?: RuleConditionFormValue[];
+	/** 后台自动阈值检查最小间隔（秒），与设备上报周期对齐，如 60 */
+	min_check_interval_seconds?: number;
 };
 
 type ScheduleConfigFormValue = {
@@ -145,6 +156,7 @@ type SharedRuleDraftInput = RuleFormIdentityFields & {
 	cron?: string;
 	pythonCode?: string;
 	commandTemplate: Record<string, unknown>;
+	minCheckIntervalSeconds?: number;
 };
 
 type SharedRuleEditorValues = RuleFormIdentityFields &
@@ -157,6 +169,7 @@ type SharedRuleEditorValues = RuleFormIdentityFields &
 		cron?: string;
 		pythonCode?: string;
 		commandTemplateText?: string;
+		minCheckIntervalSeconds?: number;
 	};
 
 type ScriptFormValues = RuleFormIdentityFields &
@@ -199,6 +212,7 @@ type LinkageFormValues = RuleFormIdentityFields &
 	scheduleCron?: string;
 	pythonCode?: string;
 	targetDeviceId?: number;
+	min_check_interval_seconds?: number;
 };
 
 type RuleEditorFieldMap = {
@@ -362,9 +376,10 @@ function getStructuredCommandExample(profile: DeviceProfile, type: ScriptType) {
 }
 
 function getDefaultPythonExample(profile: DeviceProfile) {
+	const intervalLine = "MIN_CHECK_INTERVAL_SECONDS = 60\n\n";
 	switch (profile) {
 		case "cp500-v3":
-			return `temp = get_latest_value("temperature")
+			return `${intervalLine}temp = get_latest_value("temperature")
 commands = []
 
 if temp is not None and temp >= 75:
@@ -372,7 +387,7 @@ if temp is not None and temp >= 75:
 else:
     commands.append({"command": "aeration", "action": "off"})`;
 		case "smart-compost":
-			return `temp = get_latest_value("temperature")
+			return `${intervalLine}temp = get_latest_value("temperature")
 commands = []
 
 if temp is not None and temp >= 75:
@@ -380,7 +395,7 @@ if temp is not None and temp >= 75:
 else:
     commands.append({"command": "exhaust", "action": "off"})`;
 		case "mmcgs":
-			return `temp = get_latest_value("temperature")
+			return `${intervalLine}temp = get_latest_value("temperature")
 commands = []
 
 if temp is not None and temp >= 75:
@@ -388,7 +403,7 @@ if temp is not None and temp >= 75:
 else:
     commands.append({"command": "point1", "action": "off"})`;
 		default:
-			return `temp = get_latest_value("temperature")
+			return `${intervalLine}temp = get_latest_value("temperature")
 commands = []
 
 if temp is not None and temp >= 75:
@@ -399,9 +414,10 @@ else:
 }
 
 function getDefaultLinkagePythonExample(profile: DeviceProfile) {
+	const intervalLine = "MIN_CHECK_INTERVAL_SECONDS = 60\n\n";
 	switch (profile) {
 		case "cp500-v3":
-			return `source_temp = get_latest_value("temperature", device_code="CP500-01")
+			return `${intervalLine}source_temp = get_latest_value("temperature", device_code="CP500-01")
 actions = []
 
 if source_temp is not None and source_temp >= 75:
@@ -415,7 +431,7 @@ else:
         "commands": [{"command": "aeration", "action": "off"}]
     })`;
 		case "mmcgs":
-			return `source_temp = get_latest_value("temperature", device_code="CP500-01")
+			return `${intervalLine}source_temp = get_latest_value("temperature", device_code="CP500-01")
 actions = []
 
 if source_temp is not None and source_temp >= 75:
@@ -430,7 +446,7 @@ else:
     })`;
 		case "smart-compost":
 		default:
-			return `source_temp = get_latest_value("temperature", device_code="CP500-01")
+			return `${intervalLine}source_temp = get_latest_value("temperature", device_code="CP500-01")
 actions = []
 
 if source_temp is not None and source_temp >= 75:
@@ -694,7 +710,7 @@ function getMetricOptionsForDevice(device?: Device | null) {
 
 function getMetricGuideForDevice(device?: Device | null) {
 	const channels = safeArray<Channel>(device?.channels);
-	const rows = new Map<string, string[]>();
+	const rows = new Map<string, { metric: string; channelCodes: string[]; channelNames: string[] }>();
 	for (const channel of channels) {
 		const metric = detectChannelMetric({
 			code: channel.code || "",
@@ -704,14 +720,26 @@ function getMetricGuideForDevice(device?: Device | null) {
 			metric: channel.metric || "",
 		});
 		if (metric === "unknown") continue;
-		const key = scriptMetricLabel(metric);
-		const code = String(channel.display_name || channel.name || channel.code || "").trim();
-		if (!rows.has(key)) rows.set(key, []);
-		if (code && !rows.get(key)?.includes(code)) {
-			rows.get(key)?.push(code);
+		const metricKey = normalizeMetric(metric);
+		const channelCode = String(channel.code || "").trim();
+		const channelName = String(channel.display_name || channel.name || channel.code || "").trim();
+		if (!rows.has(metricKey)) {
+			rows.set(metricKey, { metric: metricKey, channelCodes: [], channelNames: [] });
+		}
+		const row = rows.get(metricKey)!;
+		if (channelCode && !row.channelCodes.includes(channelCode)) {
+			row.channelCodes.push(channelCode);
+		}
+		if (channelName && !row.channelNames.includes(channelName)) {
+			row.channelNames.push(channelName);
 		}
 	}
-	return Array.from(rows.entries());
+	return Array.from(rows.values()).map((item): MetricGuideRow => ({
+		label: scriptMetricLabel(item.metric),
+		metric: item.metric,
+		channelCodes: item.channelCodes,
+		channelNames: item.channelNames,
+	}));
 }
 
 function getChannelOptionsForMetric(device: Device | null | undefined, metricValue?: string) {
@@ -945,6 +973,24 @@ function getDefaultDurationForCommand(command?: string) {
 function trimCronValue(value?: string) {
 	const cron = String(value || "").trim();
 	return cron || undefined;
+}
+
+const minCheckIntervalFormRule = {
+	validator: async (_: unknown, value: unknown) => {
+		if (value === undefined || value === null || value === "") return;
+		const n = Number(value);
+		if (!Number.isFinite(n) || n < 0) throw new Error("请输入有效的秒数");
+		if (n > 0 && n < 5) throw new Error("至少 5 秒，或填 0 / 留空表示不限制");
+		if (n > 604800) throw new Error("不能超过 604800（7 天）");
+	},
+};
+
+/** 与后端一致：仅识别行首赋值 ``MIN_CHECK_INTERVAL_SECONDS = N`` */
+function extractMinCheckIntervalFromPythonCode(code: string | undefined): number | undefined {
+	if (!code?.trim()) return undefined;
+	const assign = code.match(/^\s*MIN_CHECK_INTERVAL_SECONDS\s*=\s*(\d+)\s*(?:#.*)?$/m);
+	if (assign) return parseInt(assign[1], 10);
+	return undefined;
 }
 
 function isCronLike(value?: string) {
@@ -1218,6 +1264,16 @@ function normalizeScriptEditorValues(values: Partial<ScriptFormValues>): SharedR
 		commandTemplateText: values.command_template || "",
 		primaryActions: values.primaryActions,
 		elseCommands: values.elseCommands,
+		minCheckIntervalSeconds: (() => {
+			if (values.script_type === "python" && values.python_code) {
+				const fromCode = extractMinCheckIntervalFromPythonCode(values.python_code);
+				if (fromCode !== undefined) return fromCode;
+			}
+			if (typeof values.threshold_config?.min_check_interval_seconds === "number") {
+				return values.threshold_config.min_check_interval_seconds;
+			}
+			return undefined;
+		})(),
 	};
 }
 
@@ -1242,6 +1298,16 @@ function normalizeLinkageEditorValues(values: Partial<LinkageFormValues>): Share
 		pythonCode: values.pythonCode || "",
 		primaryActions: values.primaryActions,
 		elseCommands: values.elseCommands,
+		minCheckIntervalSeconds: (() => {
+			if (values.linkage_type === "python" && values.pythonCode) {
+				const fromCode = extractMinCheckIntervalFromPythonCode(values.pythonCode);
+				if (fromCode !== undefined) return fromCode;
+			}
+			if (typeof values.min_check_interval_seconds === "number") {
+				return values.min_check_interval_seconds;
+			}
+			return undefined;
+		})(),
 	};
 }
 
@@ -1258,6 +1324,7 @@ function buildRuleDraftFromEditorValues(values: SharedRuleEditorValues): RuleDra
 		conditions: values.conditions || [],
 		cron: values.cron,
 		pythonCode: values.pythonCode,
+		minCheckIntervalSeconds: values.minCheckIntervalSeconds,
 		commandTemplate: buildStructuredActionCommandTemplate(
 			buildStructuredActionFormValues({
 				targetDeviceId: values.targetDeviceId,
@@ -1283,6 +1350,8 @@ function buildRuleDraft(input: SharedRuleDraftInput): RuleDraft {
 		cron: trimCronValue(input.cron),
 		pythonCode: input.pythonCode || "",
 		commandTemplate: safeRecord(input.commandTemplate),
+		minCheckIntervalSeconds:
+			typeof input.minCheckIntervalSeconds === "number" ? input.minCheckIntervalSeconds : undefined,
 	};
 }
 
@@ -1346,6 +1415,10 @@ function buildRuleDraftFromScriptRecord(script?: Script | null): RuleDraft {
 		cron: typeof scheduleConfig.cron === "string" ? scheduleConfig.cron : undefined,
 		pythonCode: script?.python_code,
 		commandTemplate: safeRecord(script?.command_template),
+		minCheckIntervalSeconds:
+			typeof thresholdConfig.min_check_interval_seconds === "number"
+				? thresholdConfig.min_check_interval_seconds
+				: undefined,
 	});
 }
 
@@ -1420,6 +1493,9 @@ function buildScriptFormValuesFromDraft(
 			operator: conditions[0]?.operator || ">=",
 			value: conditions[0]?.value ?? 75,
 			conditions,
+			...(typeof draft.minCheckIntervalSeconds === "number" && draft.minCheckIntervalSeconds > 0
+				? { min_check_interval_seconds: draft.minCheckIntervalSeconds }
+				: {}),
 		},
 		schedule_config: {
 			cron: triggerFields.cron,
@@ -1459,6 +1535,9 @@ function buildLinkageFormValuesFromDraft(
 		primaryActions: actionFormValues.primaryActions,
 		targetDeviceId: actionFormValues.targetDeviceId,
 		elseCommands: actionFormValues.elseCommands,
+		...(typeof draft.minCheckIntervalSeconds === "number" && draft.minCheckIntervalSeconds > 0
+			? { min_check_interval_seconds: draft.minCheckIntervalSeconds }
+			: {}),
 	};
 }
 
@@ -1489,7 +1568,7 @@ function buildRulePayloadFromDraft(
 		throw new Error("请补全联动动作");
 	}
 
-	const threshold_config =
+	let threshold_config: Record<string, unknown> =
 		draft.type === "threshold" || draft.type === "hybrid"
 			? buildThresholdConfigDraft({
 					...(scope === "linkage" ? { sourceDeviceId: draft.sourceDeviceId } : {}),
@@ -1499,6 +1578,17 @@ function buildRulePayloadFromDraft(
 			: scope === "linkage" && draft.type === "python" && draft.sourceDeviceId
 			? { source_device_id: draft.sourceDeviceId }
 			: {};
+	if (
+		draft.type !== "python" &&
+		typeof draft.minCheckIntervalSeconds === "number" &&
+		Number.isFinite(draft.minCheckIntervalSeconds) &&
+		draft.minCheckIntervalSeconds > 0
+	) {
+		threshold_config = {
+			...threshold_config,
+			min_check_interval_seconds: Math.floor(draft.minCheckIntervalSeconds),
+		};
+	}
 
 	const schedule_config =
 		draft.type === "schedule" || draft.type === "hybrid"
@@ -1556,6 +1646,22 @@ function validateRuleDraft(
 	}
 	if (options.requireStructuredTarget && draft.type !== "python" && !draft.targetDeviceId) {
 		throw new Error(options.scope === "linkage" ? "请补全联动动作" : "请先选择目标设备");
+	}
+	let interval = draft.minCheckIntervalSeconds;
+	if (draft.type === "python") {
+		const fromCode = extractMinCheckIntervalFromPythonCode(draft.pythonCode);
+		if (fromCode !== undefined) interval = fromCode;
+	}
+	if (typeof interval === "number" && Number.isFinite(interval)) {
+		if (interval < 0) {
+			throw new Error("自动检查最小间隔不能为负数");
+		}
+		if (interval > 0 && interval < 5) {
+			throw new Error("自动检查最小间隔至少为 5 秒（或留空/0 表示不限制）");
+		}
+		if (interval > 604800) {
+			throw new Error("自动检查最小间隔过大（最多 7 天）");
+		}
 	}
 }
 
@@ -1669,6 +1775,24 @@ function buildActionPlanPreviewFromTemplate(
 	}
 }
 
+/** 预览顶部与脚本模式一致的赋值；源码里已有则不再重复 */
+function buildMinCheckIntervalPreviewPrefix(
+	draft: RuleDraft,
+	options?: { pythonSource?: string },
+): string {
+	const v = draft.minCheckIntervalSeconds;
+	if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
+		return "";
+	}
+	if (
+		options?.pythonSource !== undefined &&
+		extractMinCheckIntervalFromPythonCode(options.pythonSource) !== undefined
+	) {
+		return "";
+	}
+	return `MIN_CHECK_INTERVAL_SECONDS = ${Math.floor(v)}\n\n`;
+}
+
 function buildRulePythonPreview(
 	draft: RuleDraft,
 	options: {
@@ -1685,12 +1809,17 @@ function buildRulePythonPreview(
 	const targetLabel = options.targetDevice?.code || options.targetDevice?.name || "TARGET_DEVICE";
 	const isPython = draft.type === "python";
 	const cron = draft.cron || "0 9 * * *";
+	const scriptBodyForPython = isPython ? draft.pythonCode || orchestrationPythonExample : "";
+	const intervalPrefix = buildMinCheckIntervalPreviewPrefix(
+		draft,
+		isPython ? { pythonSource: scriptBodyForPython } : undefined,
+	);
 
 	if (isPython) {
-		const scriptBody = draft.pythonCode || orchestrationPythonExample;
+		const scriptBody = scriptBodyForPython;
 		return options.scope === "single"
-			? `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${scriptBody}`
-			: `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${scriptBody}`;
+			? `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${scriptBody}`
+			: `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${scriptBody}`;
 	}
 
 	if (draft.type === "schedule") {
@@ -1699,13 +1828,13 @@ function buildRulePythonPreview(
 				? commandTemplateToPythonByKey(draft.commandTemplate, "commands", "commands")
 				: buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
 		if (options.scope === "single") {
-			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${wrapPythonWithCronGuard(
+			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${wrapPythonWithCronGuard(
 				scheduleBody,
 				cron,
 				"commands = []",
 			)}`;
 		}
-		return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${wrapPythonWithCronGuard(
+		return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${wrapPythonWithCronGuard(
 			scheduleBody,
 			cron,
 			"actions = []",
@@ -1727,13 +1856,13 @@ function buildRulePythonPreview(
 			const hybridBody = `${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(
 				hasElseBlock ? elseCommandBlock : "commands = []",
 			)}`;
-			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${wrapPythonWithCronGuard(
+			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${wrapPythonWithCronGuard(
 				hybridBody,
 				cron,
 				"commands = []",
 			)}`;
 		}
-		return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
+		return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
 	}
 
 	const actionBlock = buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
@@ -1746,13 +1875,13 @@ function buildRulePythonPreview(
 		const hybridBody = `${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(
 			hasElseActionBlock ? elseActionBlock : "actions = []",
 		)}`;
-		return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${wrapPythonWithCronGuard(
+		return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${wrapPythonWithCronGuard(
 			hybridBody,
 			cron,
 			"actions = []",
 		)}`;
 	}
-	return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(hasElseActionBlock ? elseActionBlock : "actions = []")}`;
+	return `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${assignments}\n\nif ${ifExpr}:\n${indentLines(actionBlock)}\nelse:\n${indentLines(hasElseActionBlock ? elseActionBlock : "actions = []")}`;
 }
 
 function buildScriptPythonPreview(values: Partial<ScriptFormValues>, targetDevice?: Device | null) {
@@ -2185,10 +2314,23 @@ function RulePreviewCard({
 	bullets: string[];
 	preview: string;
 	metricGuideTitle: string;
-	metricGuide: Array<[string, string[]]>;
+	metricGuide: MetricGuideRow[];
 	emptyMetricText: string;
 	unselectedMetricText: string;
 }) {
+	const copyText = async (text: string, successMessage: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			message.success(successMessage);
+		} catch {
+			message.error("复制失败，请手动复制");
+		}
+	};
+
+	const metricCallSnippet = (metric: string) => `get_latest_value("${metric}")`;
+	const channelCallSnippet = (metric: string, channelCode: string) =>
+		`get_latest_value("${metric}", "${channelCode}")`;
+
 	return (
 		<Card size="small" title="规则说明与预览">
 			<Tag color={typeColor[type]}>{typeLabel(type)}</Tag>
@@ -2220,12 +2362,47 @@ function RulePreviewCard({
 			</Title>
 			<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{preview}</pre>
 			<Title level={5}>{metricGuideTitle}</Title>
+			<Paragraph type="secondary" style={{ marginBottom: 8 }}>
+				Python 中优先使用 <Text code>metric</Text>（如 <Text code>temperature</Text>），如需精确到某个通道，再传 <Text code>channel_code</Text>。
+			</Paragraph>
 			{metricGuide.length ? (
 				<Space orientation="vertical" size={6} style={{ width: "100%" }}>
-					{metricGuide.map(([metric, codes]) => (
-						<Text key={metric}>
-							{metric}：{codes.join(" / ")}
-						</Text>
+					{metricGuide.map((row) => (
+						<Space key={row.metric} direction="vertical" size={4} style={{ width: "100%" }}>
+							<Space wrap size={6}>
+								<Text>
+									{row.label}：metric=<Text code>{row.metric}</Text>
+								</Text>
+								<Button
+									size="small"
+									onClick={() => copyText(metricCallSnippet(row.metric), `已复制 ${row.metric} 调用模板`)}
+								>
+									复制 metric 调用
+								</Button>
+							</Space>
+							{row.channelCodes.length ? (
+								<Space wrap size={6}>
+									<Text type="secondary">channel_code：</Text>
+									{row.channelCodes.map((code, index) => (
+										<Button
+											key={`${row.metric}-${code}`}
+											size="small"
+											onClick={() =>
+												copyText(
+													channelCallSnippet(row.metric, code),
+													`已复制 ${code} 调用模板`,
+												)
+											}
+										>
+											{code}
+											{row.channelNames[index] ? `（${row.channelNames[index]}）` : ""}
+										</Button>
+									))}
+								</Space>
+							) : (
+								<Text type="secondary">channel_code：可不填</Text>
+							)}
+						</Space>
 					))}
 				</Space>
 			) : (
@@ -2328,8 +2505,8 @@ function PythonLogicCard({
 			<Alert
 				type="info"
 				showIcon
-				title="脚本模式不单独提供定时选项"
-				description="如果需要定时执行，请直接把时间判断写在 Python 脚本里。上面的快速模板已经补了按时间窗口执行、时间加指标判断的示例。"
+				title="检查间隔（可选）"
+				description="在脚本顶部写 MIN_CHECK_INTERVAL_SECONDS = 60（数字可改），保存后生效；删掉该行或改为 0 表示不限制。不必填表单。"
 			/>
 		</Card>
 	);
@@ -2646,6 +2823,38 @@ function ScriptModal({
 							/>
 						) : null}
 
+						{currentType === "threshold" || currentType === "hybrid" || currentType === "schedule" ? (
+							<Card
+								size="small"
+								title="自动检查间隔（可选）"
+								style={{ marginBottom: 24 }}
+								styles={{ body: { paddingTop: 18, paddingBottom: 22, background: "#fafafa", borderRadius: 8 } }}
+							>
+								<Paragraph type="secondary" style={{ marginBottom: 18, lineHeight: 1.65 }}>
+									让后台<strong>不要比这里填的秒数更频繁</strong>地自动检查这条规则。不填表示不额外限制。
+								</Paragraph>
+								<Row gutter={[24, 12]}>
+									<Col xs={24} sm={18} md={12} lg={10}>
+										<Form.Item
+											label="最短间隔（秒）"
+											name={["threshold_config", "min_check_interval_seconds"]}
+											extra="例如数据大约每分钟才更新，可填 60。"
+											style={{ marginBottom: 0 }}
+											rules={[minCheckIntervalFormRule]}
+										>
+											<InputNumber
+												min={0}
+												max={604800}
+												step={1}
+												style={{ width: "100%", maxWidth: 320 }}
+												placeholder="留空不限制"
+											/>
+										</Form.Item>
+									</Col>
+								</Row>
+							</Card>
+						) : null}
+
 						{currentType !== "python" ? (
 							<StructuredActionEditorSection
 								actionText={scriptActionText}
@@ -2845,16 +3054,16 @@ function LinkageModal({
 								</Form.Item>
 
 								{linkageType === "threshold" || linkageType === "hybrid" ? (
-								<ConditionsEditor
-									form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
-									listName={linkageRuleFields.conditions}
-									conditionModeName={linkageRuleFields.conditionMode}
-									conditionMode={linkageConditionMode}
-									metricOptions={sourceMetricOptions}
-									getChannelOptions={(metricValue) => getChannelOptionsForMetric(sourceDevice, metricValue)}
-									defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
-								/>
-							) : null}
+									<ConditionsEditor
+										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
+										listName={linkageRuleFields.conditions}
+										conditionModeName={linkageRuleFields.conditionMode}
+										conditionMode={linkageConditionMode}
+										metricOptions={sourceMetricOptions}
+										getChannelOptions={(metricValue) => getChannelOptionsForMetric(sourceDevice, metricValue)}
+										defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
+									/>
+								) : null}
 
 								{linkageType === "schedule" || linkageType === "hybrid" ? (
 									<Form.Item
@@ -2874,6 +3083,38 @@ function LinkageModal({
 								) : null}
 							</Card>
 						)}
+
+						{linkageType === "threshold" || linkageType === "hybrid" || linkageType === "schedule" ? (
+							<Card
+								size="small"
+								title="自动检查间隔（可选）"
+								style={{ marginBottom: 24 }}
+								styles={{ body: { paddingTop: 18, paddingBottom: 22, background: "#fafafa", borderRadius: 8 } }}
+							>
+								<Paragraph type="secondary" style={{ marginBottom: 18, lineHeight: 1.65 }}>
+									让后台<strong>不要比这里填的秒数更频繁</strong>地自动检查这条规则。不填表示不额外限制。
+								</Paragraph>
+								<Row gutter={[24, 12]}>
+									<Col xs={24} sm={18} md={12} lg={10}>
+										<Form.Item
+											label="最短间隔（秒）"
+											name="min_check_interval_seconds"
+											extra="例如数据大约每分钟才更新，可填 60。"
+											style={{ marginBottom: 0 }}
+											rules={[minCheckIntervalFormRule]}
+										>
+											<InputNumber
+												min={0}
+												max={604800}
+												step={1}
+												style={{ width: "100%", maxWidth: 320 }}
+												placeholder="留空不限制"
+											/>
+										</Form.Item>
+									</Col>
+								</Row>
+							</Card>
+						) : null}
 
 						{linkageType !== "python" ? (
 							<StructuredActionEditorSection

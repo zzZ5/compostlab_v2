@@ -230,7 +230,8 @@ class ScriptTemplate(models.Model):
     threshold_config = models.JSONField(
         default=dict,
         blank=True,
-        help_text='阈值配置，例如: {"metric": "temperature", "operator": ">=", "value": 75, "action": "pump_off"}',
+        help_text='阈值配置，例如: {"metric": "temperature", "operator": ">=", "value": 75}；可选 '
+        '"min_check_interval_seconds": 60（Python 脚本可由 MIN_CHECK_INTERVAL_SECONDS 赋值在保存时写入）',
     )
 
     # 定时配置（用于定时执行类型）

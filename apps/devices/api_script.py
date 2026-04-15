@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from django.http import JsonResponse
 from django.utils import timezone
@@ -85,6 +86,32 @@ def _is_valid_cron_expression(value: str) -> bool:
     return 5 <= len(parts) <= 6
 
 
+def _extract_min_check_interval_from_python_code(python_code: str) -> int | None:
+    """Parse optional interval from top-level ``MIN_CHECK_INTERVAL_SECONDS = N`` assignment."""
+    if not python_code or not str(python_code).strip():
+        return None
+    text = str(python_code)
+    m = re.search(
+        r"(?m)^\s*MIN_CHECK_INTERVAL_SECONDS\s*=\s*(\d+)\s*(?:#.*)?$",
+        text,
+    )
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _finalize_python_script_threshold_config(
+    threshold_config: dict, python_code: str
+) -> dict:
+    tc = dict(threshold_config) if isinstance(threshold_config, dict) else {}
+    extracted = _extract_min_check_interval_from_python_code(python_code)
+    if extracted is None or extracted == 0:
+        tc.pop("min_check_interval_seconds", None)
+    else:
+        tc["min_check_interval_seconds"] = extracted
+    return tc
+
+
 def _validate_script_payload(
     script_type: str,
     threshold_config: dict,
@@ -114,6 +141,25 @@ def _validate_script_payload(
                 _validate_threshold_condition(condition, f"threshold_config.conditions[{index}]")
         else:
             _validate_threshold_condition(threshold_config, "threshold_config")
+
+    raw_interval = threshold_config.get("min_check_interval_seconds")
+    if raw_interval is not None and raw_interval != "":
+        try:
+            n = int(raw_interval)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "threshold_config.min_check_interval_seconds must be an integer"
+            ) from exc
+        if n < 0:
+            raise ValueError("threshold_config.min_check_interval_seconds must be >= 0")
+        if n > 0 and n < 5:
+            raise ValueError(
+                "threshold_config.min_check_interval_seconds must be >= 5 when nonzero"
+            )
+        if n > 86400 * 7:
+            raise ValueError(
+                "threshold_config.min_check_interval_seconds is too large (max 604800)"
+            )
 
     if script_type in {
         ScriptTemplate.ScriptType.SCHEDULE,
@@ -217,6 +263,10 @@ class ScriptTemplateListView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonBod
                 _json_object_field(data, "command_template", {})
             )
             python_code = data.get("python_code", "")
+            if script_type == ScriptTemplate.ScriptType.PYTHON:
+                threshold_config = _finalize_python_script_threshold_config(
+                    threshold_config, python_code
+                )
             _validate_script_payload(
                 script_type,
                 threshold_config,
@@ -280,7 +330,7 @@ class ScriptTemplateDetailView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonB
             threshold_config = (
                 _json_object_field(data, "threshold_config", script.threshold_config)
                 if "threshold_config" in data
-                else script.threshold_config
+                else dict(script.threshold_config or {})
             )
             schedule_config = (
                 _json_object_field(data, "schedule_config", script.schedule_config)
@@ -294,6 +344,10 @@ class ScriptTemplateDetailView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonB
                 if "command_template" in data
                 else script.command_template
             )
+            if next_script_type == ScriptTemplate.ScriptType.PYTHON:
+                threshold_config = _finalize_python_script_threshold_config(
+                    threshold_config, next_python_code
+                )
             _validate_script_payload(
                 next_script_type,
                 threshold_config,
@@ -317,7 +371,7 @@ class ScriptTemplateDetailView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonB
             if data["script_type"] in valid_types:
                 script.script_type = data["script_type"]
 
-        if "threshold_config" in data:
+        if "threshold_config" in data or next_script_type == ScriptTemplate.ScriptType.PYTHON:
             script.threshold_config = threshold_config
 
         if "schedule_config" in data:

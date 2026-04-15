@@ -14,6 +14,18 @@ from apps.telemetry.models import TelemetryKV
 logger = logging.getLogger(__name__)
 
 
+def _min_auto_check_interval_seconds(script: ScriptTemplate) -> int:
+    cfg = script.threshold_config if isinstance(script.threshold_config, dict) else {}
+    raw = cfg.get("min_check_interval_seconds")
+    if raw is None or raw == "":
+        return 0
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, n)
+
+
 def _cron_field_matches(field: str, value: int) -> bool:
     field = (field or "").strip()
     if not field or field == "*":
@@ -505,6 +517,25 @@ class ThresholdMonitor:
                 continue
 
             for device in devices:
+                interval = _min_auto_check_interval_seconds(script)
+                if interval > 0:
+                    target_device = self.executor._resolve_target_device(script, device)
+                    last_start = (
+                        ScriptExecution.objects.filter(
+                            script=script,
+                            device=target_device,
+                            trigger_reason="threshold_check",
+                        )
+                        .order_by("-started_at")
+                        .values_list("started_at", flat=True)
+                        .first()
+                    )
+                    if last_start:
+                        elapsed = (timezone.now() - last_start).total_seconds()
+                        if elapsed < interval:
+                            results["skipped"] += 1
+                            continue
+
                 try:
                     execution = self.executor.execute_script(script, device, trigger_reason="threshold_check")
                     if execution.status == ScriptExecution.Status.SUCCESS:
@@ -574,6 +605,25 @@ class ScheduleMonitor:
                 continue
 
             for device in devices:
+                interval = _min_auto_check_interval_seconds(script)
+                if interval > 0:
+                    target_device = self.executor._resolve_target_device(script, device)
+                    last_start = (
+                        ScriptExecution.objects.filter(
+                            script=script,
+                            device=target_device,
+                            trigger_reason="schedule_check",
+                        )
+                        .order_by("-started_at")
+                        .values_list("started_at", flat=True)
+                        .first()
+                    )
+                    if last_start:
+                        elapsed = (timezone.now() - last_start).total_seconds()
+                        if elapsed < interval:
+                            results["skipped"] += 1
+                            continue
+
                 try:
                     execution = self.executor.execute_script(
                         script,
