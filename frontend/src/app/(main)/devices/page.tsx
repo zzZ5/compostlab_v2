@@ -145,7 +145,7 @@ export default function DevicesPage() {
 	const router = useRouter();
 
 	const [page, setPage] = useState(1);
-	const [pageSize, setPageSize] = useState(10);
+	const [pageSize, setPageSize] = useState(20);
 	const [q, setQ] = useState("");
 	const devicesQ = useDevicesTree(true, page, pageSize, q.trim() || undefined);
 	const devices = devicesQ.data?.data || [];

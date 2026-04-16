@@ -700,10 +700,20 @@ class DeviceUpdateView(BasicAuthMixin, ResourcePermissionMixin, JsonBodyMixin, V
                 else:
                     # 前端编辑的配置：异步流程
                     # 1. 先下发MQTT命令
+                    current_configuration = getattr(d, "configuration", {}) or {}
                     expected_configuration = _merge_config_patch(
-                        getattr(d, "configuration", {}) or {},
+                        current_configuration,
                         configuration,
                     )
+                    if expected_configuration == current_configuration:
+                        return JsonResponse(
+                            {
+                                "detail": "Configuration unchanged, skipped sending config command",
+                                "status": "skipped",
+                                "device": _device_to_dict(d),
+                            },
+                            status=200,
+                        )
                     if not getattr(d, "response_topic", ""):
                         return _json_400("Device.response_topic is empty, cannot send config.")
                     

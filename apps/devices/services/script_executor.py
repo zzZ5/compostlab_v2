@@ -2,6 +2,7 @@
 # docstring removed
 import json
 import logging
+from copy import deepcopy
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from django.utils import timezone
@@ -207,14 +208,29 @@ class ScriptExecutor:
                 }
                 execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
             elif commands:
-                success, result = self._send_commands(target_device, commands)
-                execution.commands = commands
-                execution.result = {
-                    **result,
-                    "source_device": source_device.code,
-                    "target_device": target_device.code,
-                }
-                execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
+                effective_commands, skipped_config_updates = self._filter_noop_config_updates(target_device, commands)
+                if effective_commands:
+                    success, result = self._send_commands(target_device, effective_commands)
+                    execution.commands = effective_commands
+                    execution.result = {
+                        **result,
+                        "source_device": source_device.code,
+                        "target_device": target_device.code,
+                        **(
+                            {"skipped_commands": skipped_config_updates}
+                            if skipped_config_updates
+                            else {}
+                        ),
+                    }
+                    execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
+                else:
+                    execution.status = ScriptExecution.Status.SKIPPED
+                    execution.result = {
+                        "message": "No effective commands generated",
+                        "source_device": source_device.code,
+                        "target_device": target_device.code,
+                        "skipped_commands": skipped_config_updates,
+                    }
             else:
                 execution.status = ScriptExecution.Status.SKIPPED
                 execution.result = {
@@ -414,6 +430,73 @@ class ScriptExecutor:
         except Exception:
             return False
 
+    def _merge_config_patch(self, base: Optional[dict], patch: Optional[dict]) -> dict:
+        """Merge partial config patch with same semantics as device API."""
+        if patch is None:
+            return {}
+        if not isinstance(base, dict):
+            base = {}
+        result = deepcopy(base)
+        for key, value in patch.items():
+            if value is None:
+                result.pop(key, None)
+                continue
+            if isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = self._merge_config_patch(result.get(key), value)
+                continue
+            result[key] = deepcopy(value)
+        return result
+
+    def _extract_config_patch(self, command: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        cfg = command.get("config")
+        if isinstance(cfg, dict):
+            return cfg
+        raw_text = command.get("config_text")
+        if isinstance(raw_text, str) and raw_text.strip():
+            try:
+                parsed = json.loads(raw_text)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                return None
+        return None
+
+    def _filter_noop_config_updates(
+        self, device: Device, commands: List[Dict[str, Any]]
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        current_config = getattr(device, "configuration", {}) or {}
+        if not isinstance(current_config, dict):
+            current_config = {}
+
+        effective_commands: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+
+        for command in commands:
+            if not isinstance(command, dict) or command.get("command") != "config_update":
+                effective_commands.append(command)
+                continue
+
+            patch = self._extract_config_patch(command)
+            if not isinstance(patch, dict):
+                effective_commands.append(command)
+                continue
+
+            expected_config = self._merge_config_patch(current_config, patch)
+            if expected_config == current_config:
+                skipped.append(
+                    {
+                        "command": "config_update",
+                        "reason": "no_configuration_change",
+                        "config": patch,
+                    }
+                )
+                continue
+
+            effective_commands.append(command)
+            current_config = expected_config
+
+        return effective_commands, skipped
+
 
     def _send_commands(
         self, device: Device, commands: List[Dict[str, Any]]
@@ -470,14 +553,32 @@ class ScriptExecutor:
                 )
                 continue
 
-            success, result = self._send_commands(target_device, commands)
+            effective_commands, skipped_config_updates = self._filter_noop_config_updates(target_device, commands)
+            if not effective_commands:
+                targets_result.append(
+                    {
+                        "target_device": target_device.code,
+                        "success": True,
+                        "skipped": True,
+                        "detail": "No effective commands for target device",
+                        "skipped_commands": skipped_config_updates,
+                    }
+                )
+                continue
+
+            success, result = self._send_commands(target_device, effective_commands)
             overall_success = overall_success and success
-            executed_commands.extend(commands)
+            executed_commands.extend(effective_commands)
             targets_result.append(
                 {
                     "target_device": target_device.code,
                     "success": success,
-                    "commands": commands,
+                    "commands": effective_commands,
+                    **(
+                        {"skipped_commands": skipped_config_updates}
+                        if skipped_config_updates
+                        else {}
+                    ),
                     "result": result,
                 }
             )

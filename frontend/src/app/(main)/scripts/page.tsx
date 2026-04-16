@@ -2001,8 +2001,7 @@ function isLinkageScript(script: Script) {
 	return (
 		commandTemplate.rule_scope === "linkage" ||
 		typeof thresholdConfig.source_device_id === "number" ||
-		typeof scheduleConfig.source_device_id === "number" ||
-		typeof commandTemplate.target_device_id === "number"
+		typeof scheduleConfig.source_device_id === "number"
 	);
 }
 

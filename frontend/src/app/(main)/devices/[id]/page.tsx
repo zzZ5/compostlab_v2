@@ -945,8 +945,12 @@ export default function DeviceDetailPage() {
 				),
 			};
 
-			await updateDevice.mutateAsync(body);
-			message.success("设备配置已保存");
+			const result = await updateDevice.mutateAsync(body) as any;
+			if (result?.status === "skipped") {
+				message.info(result?.detail || "配置无变化，已跳过下发");
+			} else {
+				message.success("设备配置已保存");
+			}
 			setConfigModalOpen(false);
 		} catch (err) {
 			if ((err as any)?.errorFields) return;
