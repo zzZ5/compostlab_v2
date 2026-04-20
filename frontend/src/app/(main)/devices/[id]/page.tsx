@@ -1561,7 +1561,7 @@ export default function DeviceDetailPage() {
 					title="MMCGS 快速切换"
 					style={{ marginBottom: 12, borderRadius: 16, background: "#fafcff" }}
 				>
-					<Space direction="vertical" size={10} style={{ width: "100%" }}>
+					<Space orientation="vertical" size={10} style={{ width: "100%" }}>
 						<Text type="secondary">
 							当前系统：{mmcgsControllerCode}。配置统一在控制器维护，数据可按点位快速切换查看。
 						</Text>
