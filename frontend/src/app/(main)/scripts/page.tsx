@@ -30,6 +30,23 @@ import { detectChannelMetric, normalizeMetric } from "@/lib/metrics";
 
 const { Paragraph, Text, Title } = Typography;
 
+const panelCardStyle = {
+	borderRadius: 16,
+	border: "1px solid #edf1f5",
+	boxShadow: "0 8px 24px rgba(15, 23, 42, 0.04)",
+};
+
+const softCardBodyStyle = {
+	background: "linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%)",
+	borderRadius: 16,
+};
+
+const compactMetricCardStyle = {
+	borderRadius: 14,
+	border: "1px solid #eef2f6",
+	boxShadow: "0 4px 14px rgba(15, 23, 42, 0.03)",
+};
+
 type ScriptType = "threshold" | "schedule" | "hybrid" | "python";
 type DeviceProfile = "cp500-v3" | "smart-compost" | "mmcgs" | "generic";
 
@@ -90,6 +107,22 @@ type MetricGuideRow = {
 	metric: string;
 	channelCodes: string[];
 	channelNames: string[];
+};
+
+type ModelRegistryItem = {
+	name: string;
+	kind?: string;
+	rule_type?: string;
+	thresholds?: Record<string, unknown>;
+	suggestions?: Record<string, unknown>;
+};
+
+type ModelHealthItem = {
+	name: string;
+	kind?: string;
+	healthy?: boolean;
+	status?: string;
+	detail?: string;
 };
 
 type ExecutionFilter = "all" | "manual" | "threshold_check" | "schedule_check" | "failed";
@@ -375,118 +408,238 @@ function getStructuredCommandExample(profile: DeviceProfile, type: ScriptType) {
 	return examplesByProfile[profile][type];
 }
 
-function getDefaultPythonExample(profile: DeviceProfile) {
-	const intervalLine = "MIN_CHECK_INTERVAL_SECONDS = 60\n\n";
+function getProfileExampleDeviceCode(profile: DeviceProfile) {
 	switch (profile) {
 		case "cp500-v3":
-			return `${intervalLine}temp = get_latest_value("temperature")
-commands = []
-
-if temp is not None and temp >= 75:
-    commands.append({"command": "aeration", "action": "on", "duration": 300000})
-else:
-    commands.append({"command": "aeration", "action": "off"})`;
-		case "smart-compost":
-			return `${intervalLine}temp = get_latest_value("temperature")
-commands = []
-
-if temp is not None and temp >= 75:
-    commands.append({"command": "exhaust", "action": "on", "duration": 300000})
-else:
-    commands.append({"command": "exhaust", "action": "off"})`;
+			return "CP500-01";
 		case "mmcgs":
-			return `${intervalLine}temp = get_latest_value("temperature")
-commands = []
-
-if temp is not None and temp >= 75:
-    commands.append({"command": "point1", "action": "on", "duration": 300000})
-else:
-    commands.append({"command": "point1", "action": "off"})`;
+			return "MMCGS-01";
+		case "smart-compost":
+			return "SMART-01";
 		default:
-			return `${intervalLine}temp = get_latest_value("temperature")
-commands = []
-
-if temp is not None and temp >= 75:
-    commands.append({"command": "fan", "action": "on", "duration": 300000})
-else:
-    commands.append({"command": "fan", "action": "off"})`;
+			return "DEVICE-01";
 	}
 }
 
-function getDefaultLinkagePythonExample(profile: DeviceProfile) {
-	const intervalLine = "MIN_CHECK_INTERVAL_SECONDS = 60\n\n";
+function getDeviceCodeOrExample(device: Device | null | undefined, profile?: DeviceProfile) {
+	return String(device?.code || "").trim() || getProfileExampleDeviceCode(profile || inferDeviceProfile(device));
+}
+
+function getPrimaryCommandForProfile(profile: DeviceProfile) {
 	switch (profile) {
 		case "cp500-v3":
-			return `${intervalLine}source_temp = get_latest_value("temperature", device_code="CP500-01")
-actions = []
-
-if source_temp is not None and source_temp >= 75:
-    actions.append({
-        "target_device_code": "CP500-01",
-        "commands": [{"command": "aeration", "action": "on", "duration": 300000}]
-    })
-else:
-    actions.append({
-        "target_device_code": "CP500-01",
-        "commands": [{"command": "aeration", "action": "off"}]
-    })`;
-		case "mmcgs":
-			return `${intervalLine}source_temp = get_latest_value("temperature", device_code="CP500-01")
-actions = []
-
-if source_temp is not None and source_temp >= 75:
-    actions.append({
-        "target_device_code": "MMCGS-01",
-        "commands": [{"command": "point1", "action": "on", "duration": 300000}]
-    })
-else:
-    actions.append({
-        "target_device_code": "MMCGS-01",
-        "commands": [{"command": "point1", "action": "off"}]
-    })`;
+			return "aeration";
 		case "smart-compost":
+			return "aeration";
+		case "mmcgs":
+			return "point1";
 		default:
-			return `${intervalLine}source_temp = get_latest_value("temperature", device_code="CP500-01")
+			return "fan";
+	}
+}
+
+function getSecondaryCommandForProfile(profile: DeviceProfile) {
+	switch (profile) {
+		case "cp500-v3":
+			return "pump";
+		case "smart-compost":
+			return "exhaust";
+		case "mmcgs":
+			return "purge";
+		default:
+			return "pump";
+	}
+}
+
+function getExampleChannelForMetric(profile: DeviceProfile, metric: string) {
+	if (profile === "cp500-v3") {
+		if (metric === "temperature") return "TempIn";
+		if (metric === "o2") return "O2";
+	}
+	return undefined;
+}
+
+function buildLatestMetricRead(
+	metric: string,
+	profile: DeviceProfile,
+	variableName: string,
+	options?: { deviceCode?: string },
+) {
+	const channelCode = getExampleChannelForMetric(profile, metric);
+	const channelArg = channelCode ? `, ${JSON.stringify(channelCode)}` : "";
+	const deviceArg = options?.deviceCode ? `, device_code=${JSON.stringify(options.deviceCode)}` : "";
+	return `${variableName} = get_latest_value(${JSON.stringify(metric)}${channelArg}${deviceArg})`;
+}
+
+function buildHistoryMetricRead(
+	metric: string,
+	profile: DeviceProfile,
+	variableName: string,
+	minutes: number,
+	options?: { deviceCode?: string },
+) {
+	const channelCode = getExampleChannelForMetric(profile, metric);
+	const channelArg = channelCode ? `, ${JSON.stringify(channelCode)}` : "";
+	const deviceArg = options?.deviceCode ? `, device_code=${JSON.stringify(options.deviceCode)}` : "";
+	return `${variableName} = get_history(${JSON.stringify(metric)}, ${minutes}${channelArg}${deviceArg})`;
+}
+
+function getMetricReadHint(profile: DeviceProfile) {
+	if (profile === "cp500-v3") {
+		return '# CP500 温度通道较多，这里示例固定读取 "TempIn"（堆体温度）。';
+	}
+	return "# 默认读取当前规则设备上的语义指标；如需精确到通道，可补 channel_code。";
+}
+
+function buildSingleModelPythonExample(
+	profile: DeviceProfile,
+	modelName: string,
+	options?: { command?: string; maxDuration?: number },
+) {
+	const command = options?.command || getPrimaryCommandForProfile(profile);
+	const maxDuration = options?.maxDuration ?? 180000;
+	return `MIN_CHECK_INTERVAL_SECONDS = 60
+
+${getMetricReadHint(profile)}
+${buildHistoryMetricRead("temperature", profile, "temp_series", 5)}
+${buildHistoryMetricRead("o2", profile, "o2_series", 5)}
+
+FEATURES["temp_avg_5m"] = sum(temp_series) / len(temp_series) if temp_series else None
+FEATURES["o2_min_5m"] = min(o2_series) if o2_series else None
+FEATURES["sample_count_temp"] = len(temp_series)
+FEATURES["sample_count_o2"] = len(o2_series)
+
+pred = predict(${JSON.stringify(modelName)}, FEATURES)
+commands = []
+
+decision = pred.get("decision")
+duration = int(pred.get("suggestions", {}).get("duration_ms", 60000))
+duration = clamp(duration, 5000, ${maxDuration})
+
+if decision == "on":
+    commands.append({"command": ${JSON.stringify(command)}, "action": "on", "duration": duration})
+elif decision == "off":
+    commands.append({"command": ${JSON.stringify(command)}, "action": "off"})`;
+}
+
+function buildHeaterModelPythonExample(profile: DeviceProfile) {
+	return `MIN_CHECK_INTERVAL_SECONDS = 60
+
+${getMetricReadHint(profile)}
+${buildHistoryMetricRead("temperature", profile, "temp_series", 5)}
+
+FEATURES["temp_avg_5m"] = sum(temp_series) / len(temp_series) if temp_series else None
+FEATURES["sample_count_temp"] = len(temp_series)
+
+pred = predict("heater_v1", FEATURES)
+commands = []
+
+decision = pred.get("decision")
+duration = int(pred.get("suggestions", {}).get("duration_ms", 60000))
+duration = clamp(duration, 5000, 180000)
+
+if decision == "on":
+    commands.append({"command": "heater", "action": "on", "duration": duration})
+elif decision == "off":
+    commands.append({"command": "heater", "action": "off"})`;
+}
+
+function getDefaultLinkagePythonExample(
+	profile: DeviceProfile,
+	sourceDevice?: Device | null,
+	targetDevice?: Device | null,
+) {
+	const intervalLine = "MIN_CHECK_INTERVAL_SECONDS = 60\n\n";
+	const sourceProfile = inferDeviceProfile(sourceDevice);
+	const sourceCode = getDeviceCodeOrExample(sourceDevice, sourceProfile);
+	const targetCode = getDeviceCodeOrExample(targetDevice, profile);
+	const primaryCommand = getPrimaryCommandForProfile(profile);
+	return `${intervalLine}# 跨设备脚本建议显式写 device_code；如果源设备是 CP500，也建议补 TempIn / O2 这类 channel_code。
+${buildLatestMetricRead("temperature", sourceProfile, "source_temp", { deviceCode: sourceCode })}
 actions = []
 
 if source_temp is not None and source_temp >= 75:
     actions.append({
-        "target_device_code": "SMART-01",
-        "commands": [{"command": "exhaust", "action": "on", "duration": 300000}]
+        "target_device_code": ${JSON.stringify(targetCode)},
+        "commands": [{"command": ${JSON.stringify(primaryCommand)}, "action": "on", "duration": 300000}]
     })
 else:
     actions.append({
-        "target_device_code": "SMART-01",
-        "commands": [{"command": "exhaust", "action": "off"}]
+        "target_device_code": ${JSON.stringify(targetCode)},
+        "commands": [{"command": ${JSON.stringify(primaryCommand)}, "action": "off"}]
     })`;
-	}
+}
+
+function getCrossDeviceOrchestrationExample(
+	sourceDevice?: Device | null,
+	targetDevice?: Device | null,
+) {
+	const sourceProfile = inferDeviceProfile(sourceDevice);
+	const targetProfile = inferDeviceProfile(targetDevice);
+	const cp500Code =
+		sourceProfile === "cp500-v3"
+			? getDeviceCodeOrExample(sourceDevice, "cp500-v3")
+			: targetProfile === "cp500-v3"
+			? getDeviceCodeOrExample(targetDevice, "cp500-v3")
+			: getProfileExampleDeviceCode("cp500-v3");
+	const mmcgsCode =
+		sourceProfile === "mmcgs"
+			? getDeviceCodeOrExample(sourceDevice, "mmcgs")
+			: targetProfile === "mmcgs"
+			? getDeviceCodeOrExample(targetDevice, "mmcgs")
+			: getProfileExampleDeviceCode("mmcgs");
+
+	return `MIN_CHECK_INTERVAL_SECONDS = 60
+
+# 这个示例演示：读取 CP500 多个测点，再同时给 CP500 和 MMCGS 下发动作。
+reactor_temp = get_latest_value("temperature", "TempIn", device_code="${cp500Code}")
+tank_temp = get_latest_value("temperature", "TankTemp", device_code="${cp500Code}")
+o2_value = get_latest_value("o2", "O2", device_code="${cp500Code}")
+
+actions = []
+
+if reactor_temp is not None and reactor_temp >= 70:
+    actions.append({
+        "target_device_code": "${cp500Code}",
+        "commands": [
+            {"command": "aeration", "action": "on", "duration": 180000}
+        ]
+    })
+
+if reactor_temp is not None and reactor_temp >= 70 and o2_value is not None and o2_value <= 8:
+    actions.append({
+        "target_device_code": "${mmcgsCode}",
+        "commands": [
+            {"command": "point1", "action": "on", "duration": 60000},
+            {"command": "purge", "action": "on", "duration": 30000}
+        ]
+    })
+
+if tank_temp is not None and tank_temp >= 55:
+    actions.append({
+        "target_device_code": "${cp500Code}",
+        "commands": [
+            {"command": "pump", "action": "on", "duration": 120000}
+        ]
+    })`;
+}
+
+function getDefaultPythonExample(profile: DeviceProfile) {
+	const intervalLine = "MIN_CHECK_INTERVAL_SECONDS = 60\n\n";
+	const primaryCommand = getPrimaryCommandForProfile(profile);
+	return `${intervalLine}${getMetricReadHint(profile)}
+${buildLatestMetricRead("temperature", profile, "temp")}
+commands = []
+
+if temp is not None and temp >= 75:
+    commands.append({"command": ${JSON.stringify(primaryCommand)}, "action": "on", "duration": 300000})
+else:
+    commands.append({"command": ${JSON.stringify(primaryCommand)}, "action": "off"})`;
 }
 
 const pythonExample = getDefaultPythonExample("generic");
 const linkagePythonExample = getDefaultLinkagePythonExample("smart-compost");
-
-const orchestrationPythonExample = `reactor_temp = get_latest_value("temperature", "TempIn", device_code="CP500-01")
-o2_value = get_latest_value("o2", device_code="SMART-01")
-humidity = get_latest_value("humidity", device_code="SMART-01")
-
-actions = []
-
-if reactor_temp is not None and reactor_temp >= 70 and o2_value is not None and o2_value <= 8:
-    actions.append({
-        "target_device_code": "SMART-01",
-        "commands": [
-            {"command": "exhaust", "action": "on", "duration": 300000}
-        ]
-    })
-
-if humidity is not None and humidity >= 85:
-    actions.append({
-        "target_device_code": "CP500-01",
-        "commands": [
-            {"command": "aeration", "action": "on", "duration": 180000},
-            {"command": "pump", "action": "on", "duration": 120000}
-        ]
-    })`;
+const orchestrationPythonExample = getCrossDeviceOrchestrationExample();
 
 const pythonScriptTemplates = [
 	{
@@ -497,8 +650,7 @@ const pythonScriptTemplates = [
 	{
 		key: "single-time-window",
 		label: "按时间窗口执行",
-		code: `from datetime import datetime
-
+		code: `# 当前脚本默认面向本设备；如需跨设备下发，请改用 actions 并显式写 target_device_code。
 now = datetime.now()
 commands = []
 
@@ -510,7 +662,8 @@ else:
 	{
 		key: "single-multi-command",
 		label: "单设备多动作联动",
-		code: `temp = get_latest_value("temperature", "TempIn")
+		code: `# 演示在同一台设备上组合两个指标做决策。
+temp = get_latest_value("temperature")
 o2_value = get_latest_value("o2")
 commands = []
 
@@ -521,12 +674,30 @@ if o2_value is not None and o2_value <= 8:
     commands.append({"command": "pump", "action": "on", "duration": 120000})`,
 	},
 	{
+		key: "single-model-aeration-v1",
+		label: "算法模型控制（aeration_v1）",
+		code: buildSingleModelPythonExample("generic", "aeration_v1", { command: "fan", maxDuration: 300000 }),
+	},
+	{
+		key: "single-model-aeration-test-v1",
+		label: "测试模型控制（aeration_test_v1）",
+		code: buildSingleModelPythonExample("generic", "aeration_test_v1", { command: "fan", maxDuration: 180000 }),
+	},
+	{
+		key: "single-model-heater-v1",
+		label: "加热器模型控制（heater_v1）",
+		code: buildHeaterModelPythonExample("generic"),
+	},
+	{
+		key: "single-model-aeration-sklearn-v1",
+		label: "真实模型控制（aeration_sklearn_v1）",
+		code: buildSingleModelPythonExample("generic", "aeration_sklearn_v1", { command: "fan", maxDuration: 300000 }),
+	},
+	{
 		key: "single-time-and-threshold",
 		label: "时间加阈值",
-		code: `from datetime import datetime
-
-now = datetime.now()
-temp = get_latest_value("temperature", "TempIn")
+		code: `now = datetime.now()
+temp = get_latest_value("temperature")
 commands = []
 
 if 13 <= now.hour < 18 and temp is not None and temp >= 70:
@@ -548,11 +719,41 @@ const linkagePythonTemplates = [
 		code: linkagePythonExample,
 	},
 	{
+		key: "linkage-model-aeration-test-v1",
+		label: "联动测试模型（aeration_test_v1）",
+		code: `MIN_CHECK_INTERVAL_SECONDS = 60
+
+# 跨设备模型示例：显式写 source device_code，并把动作下发给另一台设备。
+temp_series = get_history("temperature", 5, "TempIn", device_code="CP500-01")
+o2_series = get_history("o2", 5, "O2", device_code="CP500-01")
+
+FEATURES["temp_avg_5m"] = sum(temp_series) / len(temp_series) if temp_series else None
+FEATURES["o2_min_5m"] = min(o2_series) if o2_series else None
+FEATURES["sample_count_temp"] = len(temp_series)
+FEATURES["sample_count_o2"] = len(o2_series)
+
+pred = predict("aeration_test_v1", FEATURES)
+actions = []
+
+decision = pred.get("decision")
+duration = int(pred.get("suggestions", {}).get("duration_ms", 60000))
+duration = clamp(duration, 5000, 180000)
+
+if decision == "on":
+    actions.append({
+        "target_device_code": "SMART-01",
+        "commands": [{"command": "aeration", "action": "on", "duration": duration}]
+    })
+elif decision == "off":
+    actions.append({
+        "target_device_code": "SMART-01",
+        "commands": [{"command": "aeration", "action": "off"}]
+    })`,
+	},
+	{
 		key: "linkage-time-window",
 		label: "按时间联动",
-		code: `from datetime import datetime
-
-now = datetime.now()
+		code: `now = datetime.now()
 actions = []
 
 if 8 <= now.hour < 20:
@@ -569,9 +770,7 @@ else:
 	{
 		key: "linkage-time-and-threshold",
 		label: "时间加指标联动",
-		code: `from datetime import datetime
-
-now = datetime.now()
+		code: `now = datetime.now()
 source_temp = get_latest_value("temperature", device_code="CP500-01")
 actions = []
 
@@ -593,9 +792,264 @@ else:
 	},
 ] as const;
 
+const singleTemplatePriority = [
+	"single-threshold",
+	"single-multi-command",
+	"single-model-aeration-test-v1",
+] as const;
+
+const linkageTemplatePriority = [
+	"basic-linkage",
+	"linkage-model-aeration-test-v1",
+	"multi-device-orchestration",
+] as const;
+
+function getLinkagePythonTemplates(
+	sourceDevice: Device | null | undefined,
+	targetDevice: Device | null | undefined,
+) {
+	const targetProfile = inferDeviceProfile(targetDevice);
+	const sourceProfile = inferDeviceProfile(sourceDevice);
+	const sourceCode = getDeviceCodeOrExample(sourceDevice, inferDeviceProfile(sourceDevice));
+	const targetCode = getDeviceCodeOrExample(targetDevice, targetProfile);
+	const primaryCommand = getPrimaryCommandForProfile(targetProfile);
+
+	return linkagePythonTemplates
+		.filter((template) => linkageTemplatePriority.includes(template.key as (typeof linkageTemplatePriority)[number]))
+		.map((template) => {
+		if (template.key === "basic-linkage") {
+			return {
+				...template,
+				code: getDefaultLinkagePythonExample(targetProfile, sourceDevice, targetDevice),
+			};
+		}
+		if (template.key === "linkage-time-window") {
+			return {
+				...template,
+				code: `# 定时联动示例：到点后把动作下发到目标设备。
+now = datetime.now()
+actions = []
+
+if 8 <= now.hour < 20:
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "on", "duration": 300000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "off"}]
+    })`,
+			};
+		}
+		if (template.key === "linkage-model-aeration-test-v1") {
+			return {
+				...template,
+				code: `MIN_CHECK_INTERVAL_SECONDS = 60
+
+# 跨设备模型示例：显式写 source device_code，并按目标设备类型自动选动作。
+${buildHistoryMetricRead("temperature", sourceProfile, "temp_series", 5, { deviceCode: sourceCode })}
+${buildHistoryMetricRead("o2", sourceProfile, "o2_series", 5, { deviceCode: sourceCode })}
+
+FEATURES["temp_avg_5m"] = sum(temp_series) / len(temp_series) if temp_series else None
+FEATURES["o2_min_5m"] = min(o2_series) if o2_series else None
+FEATURES["sample_count_temp"] = len(temp_series)
+FEATURES["sample_count_o2"] = len(o2_series)
+
+pred = predict("aeration_test_v1", FEATURES)
+actions = []
+
+decision = pred.get("decision")
+duration = int(pred.get("suggestions", {}).get("duration_ms", 60000))
+duration = clamp(duration, 5000, 180000)
+
+if decision == "on":
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "on", "duration": duration}]
+    })
+elif decision == "off":
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "off"}]
+    })`,
+			};
+		}
+		if (template.key === "multi-device-orchestration") {
+			return {
+				...template,
+				code: getCrossDeviceOrchestrationExample(sourceDevice, targetDevice),
+			};
+		}
+		if (template.key === "linkage-time-and-threshold") {
+			return {
+				...template,
+				code: `now = datetime.now()
+${buildLatestMetricRead("temperature", sourceProfile, "source_temp", { deviceCode: sourceCode })}
+actions = []
+
+if 9 <= now.hour < 18 and source_temp is not None and source_temp >= 75:
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "on", "duration": 300000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "off"}]
+    })`,
+			};
+		}
+		return template;
+		});
+}
+
+function getPythonTemplatesForProfile(profile: DeviceProfile) {
+	const primaryCommand = getPrimaryCommandForProfile(profile);
+	const secondaryCommand = getSecondaryCommandForProfile(profile);
+
+	return pythonScriptTemplates
+		.filter((template) => {
+			if (!singleTemplatePriority.includes(template.key as (typeof singleTemplatePriority)[number])) {
+				return false;
+			}
+			if (profile === "mmcgs") {
+				return ![
+					"single-model-aeration-v1",
+					"single-model-aeration-test-v1",
+					"single-model-heater-v1",
+					"single-model-aeration-sklearn-v1",
+				].includes(template.key);
+			}
+			if (profile === "smart-compost") {
+				return template.key !== "single-model-heater-v1";
+			}
+			return true;
+		})
+		.map((template) => {
+			if (template.key === "single-threshold") {
+				return {
+					...template,
+					code: getDefaultPythonExample(profile),
+				};
+			}
+			if (template.key === "single-time-window") {
+				return {
+					...template,
+					code: `# 当前脚本默认面向本设备；如需跨设备下发，请改用 actions 并显式写 target_device_code。
+now = datetime.now()
+commands = []
+
+if 9 <= now.hour < 11:
+    commands.append({"command": "${primaryCommand}", "action": "on", "duration": 180000})
+else:
+    commands.append({"command": "${primaryCommand}", "action": "off"})`,
+				};
+			}
+			if (template.key === "single-multi-command") {
+				return {
+					...template,
+					code: `# 演示在同一台设备上组合多个指标做决策。
+${buildLatestMetricRead("temperature", profile, "temp")}
+${buildLatestMetricRead("o2", profile, "o2_value")}
+commands = []
+
+if temp is not None and temp >= 70:
+    commands.append({"command": "${primaryCommand}", "action": "on", "duration": 180000})
+
+if o2_value is not None and o2_value <= 8:
+    commands.append({"command": "${secondaryCommand}", "action": "on", "duration": 120000})`,
+				};
+			}
+			if (template.key === "single-model-aeration-v1") {
+				return {
+					...template,
+					code: buildSingleModelPythonExample(profile, "aeration_v1", {
+						command: primaryCommand,
+						maxDuration: 300000,
+					}),
+				};
+			}
+			if (template.key === "single-model-aeration-test-v1") {
+				return {
+					...template,
+					code: buildSingleModelPythonExample(profile, "aeration_test_v1", {
+						command: primaryCommand,
+						maxDuration: 180000,
+					}),
+				};
+			}
+			if (template.key === "single-model-aeration-sklearn-v1") {
+				return {
+					...template,
+					code: buildSingleModelPythonExample(profile, "aeration_sklearn_v1", {
+						command: primaryCommand,
+						maxDuration: 300000,
+					}),
+				};
+			}
+			if (template.key === "single-model-heater-v1") {
+				return {
+					...template,
+					code: buildHeaterModelPythonExample(profile),
+				};
+			}
+			if (template.key === "single-time-and-threshold") {
+				return {
+					...template,
+					code: `now = datetime.now()
+${buildLatestMetricRead("temperature", profile, "temp")}
+commands = []
+
+if 13 <= now.hour < 18 and temp is not None and temp >= 70:
+    commands.append({"command": "${primaryCommand}", "action": "on", "duration": 300000})
+else:
+    commands.append({"command": "${primaryCommand}", "action": "off"})`,
+				};
+			}
+			return template;
+		});
+}
+
+function findTemplateKeyByCode(
+	templates: readonly { key: string; label: string; code: string }[],
+	code: string | undefined,
+) {
+	const text = String(code || "");
+	return templates.find((template) => template.code === text)?.key;
+}
+
 function getRecordValue(record: Record<string, unknown> | null | undefined, key: string): string {
 	const value = record?.[key];
 	return typeof value === "string" ? value : "";
+}
+
+function summarizeModelThresholds(ruleType: string, thresholds?: Record<string, unknown>): string {
+	const t = thresholds || {};
+	if (ruleType === "aeration") {
+		const tempFeature = String(t.temp_feature || "temp_avg_5m");
+		const tempHigh = String(t.temp_high ?? 70);
+		const o2Feature = String(t.o2_feature || "o2_min_5m");
+		const o2Low = String(t.o2_low ?? 8);
+		return `${tempFeature} >= ${tempHigh} 或 ${o2Feature} <= ${o2Low}`;
+	}
+	if (ruleType === "heater") {
+		const tempFeature = String(t.temp_feature || "temp_avg_5m");
+		const tempLow = String(t.temp_low ?? 52);
+		const tempHigh = String(t.temp_high ?? 58);
+		return `${tempFeature} <= ${tempLow} 开启，>= ${tempHigh} 关闭（中间区间 hold）`;
+	}
+	if (!Object.keys(t).length) return "未配置阈值";
+	return JSON.stringify(t);
+}
+
+function summarizeModelSuggestions(suggestions?: Record<string, unknown>): string {
+	const s = suggestions || {};
+	if (typeof s.on_duration_ms === "number") {
+		return `on_duration_ms=${s.on_duration_ms}`;
+	}
+	if (!Object.keys(s).length) return "未配置建议参数";
+	return JSON.stringify(s);
 }
 
 function isDeviceProfile(value: string): value is DeviceProfile {
@@ -966,7 +1420,7 @@ function getCommandActionOptions(command?: string, profile?: DeviceProfile) {
 }
 
 function getDefaultCommandForProfile(profile: DeviceProfile) {
-	return getDeviceCommandCatalog(profile)[0]?.value || "pump";
+	return getPrimaryCommandForProfile(profile);
 }
 
 function getDefaultActionForCommand(command?: string, profile?: DeviceProfile) {
@@ -981,6 +1435,16 @@ function getDefaultDurationForCommand(command?: string) {
 		return 60000;
 	}
 	return 300000;
+}
+
+function getPreferredAddCommand(
+	commandOptions: Array<{ value: string; label: string }>,
+	profile: DeviceProfile,
+) {
+	return (
+		commandOptions.find((item) => !["config_update", "restart", "emergency"].includes(item.value))
+			?.value || getDefaultCommandForProfile(profile)
+	);
 }
 
 function trimCronValue(value?: string) {
@@ -1250,7 +1714,10 @@ function normalizeActionRowsForProfile(
 		return [];
 	}
 	return rows.map((row) => {
-		const nextCommand = row.command && allowedCommands.has(row.command) ? row.command : getDefaultCommandForProfile(profile);
+		const nextCommand =
+			row.command && allowedCommands.has(row.command)
+				? row.command
+				: getPreferredAddCommand(commandOptions, profile);
 		const actionOptions = getCommandActionOptions(nextCommand, profile);
 		const nextAction =
 			nextCommand === "config_update"
@@ -1670,6 +2137,9 @@ function validateRuleDraft(
 	if (!draft.name) {
 		throw new Error(options.scope === "linkage" ? "请输入联动名称" : "请输入规则名称");
 	}
+	if (options.scope === "single" && !draft.targetDeviceId) {
+		throw new Error("请选择所属设备");
+	}
 	if ((draft.type === "threshold" || draft.type === "hybrid") && !draft.conditions.length) {
 		throw new Error(options.scope === "linkage" ? "请补全联动的阈值条件" : "请补全阈值条件");
 	}
@@ -1692,7 +2162,7 @@ function validateRuleDraft(
 		}
 	}
 	if (options.requireStructuredTarget && draft.type !== "python" && !draft.targetDeviceId) {
-		throw new Error(options.scope === "linkage" ? "请补全联动动作" : "请先选择目标设备");
+		throw new Error(options.scope === "linkage" ? "请补全联动动作" : "请先选择所属设备");
 	}
 	let interval = draft.minCheckIntervalSeconds;
 	if (draft.type === "python") {
@@ -1869,12 +2339,15 @@ function buildRulePythonPreview(
 	},
 ) {
 	const scopeLabel = options.scope === "single" ? "单设备规则预览" : "设备联动规则预览";
+	const isPython = draft.type === "python";
 	const sourceLabel =
 		options.scope === "single"
 			? options.targetDevice?.code || options.targetDevice?.name || "TARGET_DEVICE"
 			: options.sourceDevice?.code || options.sourceDevice?.name || "SOURCE_DEVICE";
-	const targetLabel = options.targetDevice?.code || options.targetDevice?.name || "TARGET_DEVICE";
-	const isPython = draft.type === "python";
+	const targetLabel =
+		options.targetDevice?.code ||
+		options.targetDevice?.name ||
+		(options.scope === "single" ? "当前规则设备" : "TARGET_DEVICE");
 	const cron = draft.cron || "0 9 * * *";
 	const scriptBodyForPython = isPython ? draft.pythonCode || orchestrationPythonExample : "";
 	const intervalPrefix = buildMinCheckIntervalPreviewPrefix(
@@ -1885,7 +2358,7 @@ function buildRulePythonPreview(
 	if (isPython) {
 		const scriptBody = scriptBodyForPython;
 		return options.scope === "single"
-			? `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${scriptBody}`
+			? `# ${scopeLabel}\n# 所属设备: ${targetLabel}\n${intervalPrefix}${scriptBody}`
 			: `# ${scopeLabel}\n# 触发设备: ${sourceLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${scriptBody}`;
 	}
 
@@ -1895,7 +2368,7 @@ function buildRulePythonPreview(
 				? commandTemplateToPythonByKey(draft.commandTemplate, "commands", "commands")
 				: buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
 		if (options.scope === "single") {
-			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n${intervalPrefix}${wrapPythonWithCronGuard(
+			return `# ${scopeLabel}\n# 所属设备: ${targetLabel}\n${intervalPrefix}${wrapPythonWithCronGuard(
 				scheduleBody,
 				cron,
 				"commands = []",
@@ -1923,13 +2396,13 @@ function buildRulePythonPreview(
 			const hybridBody = `${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(
 				hasElseBlock ? elseCommandBlock : "commands = []",
 			)}`;
-			return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${wrapPythonWithCronGuard(
+			return `# ${scopeLabel}\n# 所属设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${wrapPythonWithCronGuard(
 				hybridBody,
 				cron,
 				"commands = []",
 			)}`;
 		}
-		return `# ${scopeLabel}\n# 目标设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
+		return `# ${scopeLabel}\n# 所属设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
 	}
 
 	const actionBlock = buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
@@ -2233,9 +2706,14 @@ function CommandEditor({
 						updateRows([
 							...rows,
 							{
-								command: commandOptions[0]?.value || "pump",
-								action: getDefaultActionForCommand(commandOptions[0]?.value, profile),
-								duration: getDefaultDurationForCommand(commandOptions[0]?.value),
+								command: getPreferredAddCommand(commandOptions, profile || "generic"),
+								action: getDefaultActionForCommand(
+									getPreferredAddCommand(commandOptions, profile || "generic"),
+									profile,
+								),
+								duration: getDefaultDurationForCommand(
+									getPreferredAddCommand(commandOptions, profile || "generic"),
+								),
 							},
 						])
 					}
@@ -2343,7 +2821,7 @@ function RuleBasicCard({
 	footerHint?: ReactNode;
 }) {
 	return (
-		<Card size="small" title="规则信息" style={{ marginBottom: 16 }}>
+		<Card size="small" title="规则信息" style={{ ...panelCardStyle, marginBottom: 16 }} styles={{ body: softCardBodyStyle }}>
 			<Row gutter={12}>
 				<Col xs={24} md={14}>
 					<Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]}>
@@ -2418,22 +2896,22 @@ function RulePreviewCard({
 		`get_latest_value("${metric}", "${channelCode}")`;
 
 	return (
-		<Card size="small" title="规则说明与预览">
+		<Card size="small" title="规则说明与预览" style={panelCardStyle} styles={{ body: softCardBodyStyle }}>
 			<Tag color={typeColor[type]}>{typeLabel(type)}</Tag>
 			<Paragraph type="secondary" style={{ marginTop: 12 }}>
 				{scopeSummary}
 			</Paragraph>
 			<Paragraph>
 				{type === "threshold"
-					? "适合按单个指标触发动作。"
+					? "适合按指标阈值触发动作。"
 					: type === "schedule"
-					? "适合做固定周期任务，预览代码会直接展示时间守卫和执行动作。"
+					? "适合固定周期任务，预览里会直接展开时间判断和动作。"
 					: type === "hybrid"
-					? "适合把时间条件和指标条件放在同一条规则里一起判断。"
-					: "适合写更复杂的编排逻辑，包括多参数、多设备和自定义时间判断。"}
+					? "适合把时间条件和指标条件放在同一条规则里。"
+					: "适合更复杂的编排逻辑，比如多参数、多设备和自定义时间判断。"}
 			</Paragraph>
 			<Paragraph type="secondary">
-				Python 预览和脚本里使用的是 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标，不是 <Text code>TempIn</Text>、<Text code>AirTemp</Text> 这类原始通道 code。
+				脚本里优先使用 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标；只有需要精确到测点时，再补 <Text code>channel_code</Text>。
 			</Paragraph>
 			{type === "python" && pythonHint ? <Paragraph type="secondary">{pythonHint}</Paragraph> : null}
 			{type !== "python" && structuredHint ? <Paragraph type="secondary">{structuredHint}</Paragraph> : null}
@@ -2447,9 +2925,11 @@ function RulePreviewCard({
 				最终 Python 脚本预览
 			</Title>
 			<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{preview}</pre>
+			{type === "python" ? null : (
+				<>
 			<Title level={5}>{metricGuideTitle}</Title>
 			<Paragraph type="secondary" style={{ marginBottom: 8 }}>
-				Python 中优先使用 <Text code>metric</Text>（如 <Text code>temperature</Text>），如需精确到某个通道，再传 <Text code>channel_code</Text>。
+				优先按 <Text code>metric</Text> 读取；只有同一指标下有多个测点时，再补 <Text code>channel_code</Text>。
 			</Paragraph>
 			{metricGuide.length ? (
 				<Space orientation="vertical" size={6} style={{ width: "100%" }}>
@@ -2494,7 +2974,143 @@ function RulePreviewCard({
 			) : (
 				<Text type="secondary">{emptyMetricText || unselectedMetricText}</Text>
 			)}
+				</>
+			)}
 		</Card>
+	);
+}
+
+function PythonDeviceLookup({
+	devices,
+	title = "查看设备与通道",
+}: {
+	devices: Device[];
+	title?: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [selectedDeviceId, setSelectedDeviceId] = useState<number | undefined>(undefined);
+	const deviceOptions = useMemo(
+		() => devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) })),
+		[devices],
+	);
+	const selectedDevice = useMemo(
+		() => devices.find((device) => device.device_id === selectedDeviceId) || devices[0],
+		[devices, selectedDeviceId],
+	);
+	const metricGuide = useMemo(() => getMetricGuideForDevice(selectedDevice), [selectedDevice]);
+	const copyText = async (text: string, successMessage: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			message.success(successMessage);
+		} catch {
+			message.error("复制失败，请手动复制");
+		}
+	};
+	const latestCall = (metric: string, channelCode: string, deviceCode: string) =>
+		`get_latest_value(${JSON.stringify(metric)}, ${JSON.stringify(channelCode)}, device_code=${JSON.stringify(deviceCode)})`;
+	const historyCall = (metric: string, channelCode: string, deviceCode: string) =>
+		`get_history(${JSON.stringify(metric)}, 5, ${JSON.stringify(channelCode)}, device_code=${JSON.stringify(deviceCode)})`;
+
+	return (
+		<>
+			<Button
+				size="small"
+				onClick={() => {
+					if (!selectedDeviceId && devices[0]?.device_id) {
+						setSelectedDeviceId(devices[0].device_id);
+					}
+					setOpen(true);
+				}}
+			>
+				{title}
+			</Button>
+			<Modal
+				open={open}
+				title="设备与通道速查"
+				onCancel={() => setOpen(false)}
+				footer={null}
+				width={860}
+			>
+				<Space orientation="vertical" size={12} style={{ width: "100%" }}>
+					<Text type="secondary">
+						查设备编码、指标名和通道名时用这里最快；跨设备脚本建议显式写 <Text code>device_code</Text>。
+					</Text>
+					{devices.length ? (
+						<>
+							<Form.Item label="选择设备" style={{ marginBottom: 0 }}>
+								<Select
+									options={deviceOptions}
+									value={selectedDevice?.device_id}
+									onChange={(value) => setSelectedDeviceId(value)}
+									placeholder="选择要查看的设备"
+								/>
+							</Form.Item>
+							{selectedDevice ? (
+								<Card
+									size="small"
+									style={compactMetricCardStyle}
+									title={
+										<Space wrap size={8}>
+											<Text strong>{deviceLabel(selectedDevice)}</Text>
+											{selectedDevice.code ? <Text code>{selectedDevice.code}</Text> : null}
+											<Tag color="blue">{getProfileLabel(inferDeviceProfile(selectedDevice))}</Tag>
+										</Space>
+									}
+								>
+									{metricGuide.length ? (
+										<Space orientation="vertical" size={6} style={{ width: "100%" }}>
+											{metricGuide.map((row) => (
+												<div key={`${selectedDevice.device_id}-${row.metric}`}>
+													<Text type="secondary">
+														{row.label}：metric=<Text code>{row.metric}</Text>
+														{row.channelCodes.length ? `，channel_code=${row.channelCodes.join(" / ")}` : ""}
+													</Text>
+													{selectedDevice.code && row.channelCodes.length ? (
+														<Space wrap size={6} style={{ marginTop: 4 }}>
+															{row.channelCodes.map((channelCode) => (
+																<Space key={`${selectedDevice.device_id}-${row.metric}-${channelCode}`} wrap size={6}>
+																	<Text code>{channelCode}</Text>
+																	<Button
+																		size="small"
+																		onClick={() =>
+																			copyText(
+																				latestCall(row.metric, channelCode, selectedDevice.code || ""),
+																				`已复制 ${channelCode} 的 latest 调用`,
+																			)
+																		}
+																	>
+																		复制 latest
+																	</Button>
+																	<Button
+																		size="small"
+																		onClick={() =>
+																			copyText(
+																				historyCall(row.metric, channelCode, selectedDevice.code || ""),
+																				`已复制 ${channelCode} 的 history 调用`,
+																			)
+																		}
+																	>
+																		复制 history
+																	</Button>
+																</Space>
+															))}
+														</Space>
+													) : null}
+												</div>
+											))}
+										</Space>
+									) : (
+										<Text type="secondary">暂无通道信息</Text>
+									)}
+								</Card>
+							) : null}
+						</>
+					) : (
+						<Text type="secondary">暂无设备数据</Text>
+					)}
+				</Space>
+			</Modal>
+		</>
 	);
 }
 
@@ -2521,7 +3137,7 @@ function ConditionsEditor({
 				<Select style={{ width: 160 }} options={conditionModeOptions as never} />
 			</Form.Item>
 			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-				{conditionMode === "any" ? "任一条件满足即可触发。" : "默认全部条件同时满足后触发。"}
+				{conditionMode === "any" ? "任一条件满足后执行。" : "全部条件满足后执行。"}
 			</Text>
 			<Form.List name={listName}>
 				{(fields, { add, remove }) => (
@@ -2565,20 +3181,51 @@ function PythonLogicCard({
 	codeValueName,
 	templates,
 	beforeContent,
+	auxActions,
 }: {
 	codeFieldName: FormFieldName;
 	codeLabel: string;
 	codeValueName: "python_code" | "pythonCode";
 	templates: readonly { key: string; label: string; code: string }[];
 	beforeContent?: ReactNode;
+	auxActions?: ReactNode;
 }) {
 	const form = Form.useFormInstance();
+	const modelRegistryQ = useQuery({
+		queryKey: ["script-model-registry"],
+		queryFn: async () =>
+			(await api.get("/scripts/model-registry")).data as { count: number; data: ModelRegistryItem[] },
+		staleTime: 60 * 1000,
+	});
+	const modelHealthQ = useQuery({
+		queryKey: ["script-model-health"],
+		queryFn: async () =>
+			(await api.get("/scripts/model-health")).data as { count: number; data: ModelHealthItem[] },
+		staleTime: 30 * 1000,
+	});
+	const modelGuideRows = useMemo(
+		() => (modelRegistryQ.data?.data || []).filter((item) => item.name.includes("_test_")),
+		[modelRegistryQ.data],
+	);
+	const modelHealthMap = useMemo(
+		() =>
+			new Map(
+				(modelHealthQ.data?.data || []).map((item) => [item.name, item]),
+			),
+		[modelHealthQ.data],
+	);
 
 	return (
-		<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
+		<Card
+			size="small"
+			title="触发逻辑"
+			extra={auxActions}
+			style={{ ...panelCardStyle, marginBottom: 16 }}
+			styles={{ body: softCardBodyStyle }}
+		>
 			{beforeContent}
 			<Space wrap style={{ marginBottom: 12 }}>
-				<Text type="secondary">快速模板</Text>
+				<Text type="secondary">推荐模板</Text>
 			{templates.map((template) => (
 					<Button key={template.key} size="small" onClick={() => form.setFieldValue(codeValueName, template.code)}>
 						{template.label}
@@ -2591,9 +3238,61 @@ function PythonLogicCard({
 			<Alert
 				type="info"
 				showIcon
-				title="检查间隔（可选）"
-				description="在脚本顶部写 MIN_CHECK_INTERVAL_SECONDS = 60（数字可改），保存后生效；删掉该行或改为 0 表示不限制。不必填表单。"
+				title="脚本说明"
+				description="先用模板跑通链路，再逐步改成自己的逻辑。脚本里可直接使用 datetime、timedelta、sum、min、max、round、abs、clamp 和 predict；如需限制检查频率，在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。"
 			/>
+			<Card
+				size="small"
+				title="模型概览"
+				style={{ ...compactMetricCardStyle, marginTop: 12 }}
+				styles={{ body: { background: "#fafafa", borderRadius: 14 } }}
+			>
+				<Space orientation="vertical" size={8} style={{ width: "100%" }}>
+					<Text type="secondary">
+						模型脚本通过 <Text code>predict("model_name", FEATURES)</Text> 调用；执行后可在记录里查看 <Text code>python_meta.model_trace</Text>。
+					</Text>
+					{modelGuideRows.length ? modelGuideRows.map((item) => (
+						<div key={item.name} style={{ border: "1px solid #f0f0f0", borderRadius: 8, padding: 10, background: "#fff" }}>
+							<Space wrap size={8}>
+								<Tag color="blue">{item.name}</Tag>
+								<Tag>{item.rule_type || item.kind || "-"}</Tag>
+								{(() => {
+									const health = modelHealthMap.get(item.name);
+									if (!health) return null;
+									return (
+										<Tag color={health.healthy ? "green" : "red"}>
+											{health.healthy ? "健康" : "异常"} · {health.status || "-"}
+										</Tag>
+									);
+								})()}
+							</Space>
+							<div style={{ marginTop: 6 }}>
+								<Text>判定阈值：{summarizeModelThresholds(String(item.rule_type || ""), item.thresholds)}</Text>
+							</div>
+							<div style={{ marginTop: 2 }}>
+								<Text type="secondary">动作建议：{summarizeModelSuggestions(item.suggestions)}</Text>
+							</div>
+							{modelHealthMap.get(item.name)?.detail ? (
+								<div style={{ marginTop: 2 }}>
+									<Text type="secondary">健康检查：{modelHealthMap.get(item.name)?.detail}</Text>
+								</div>
+							) : null}
+							{item.name === "aeration_test_v1" ? (
+								<div style={{ marginTop: 6 }}>
+									<Text type="secondary">
+										建议先用测试模板核对特征值、决策结果和建议时长，再接真实模型。
+									</Text>
+								</div>
+							) : null}
+						</div>
+					)) : (
+						<Text type="secondary">
+							{modelRegistryQ.isLoading ? "测试模型加载中..." : "暂无测试模型数据"}
+						</Text>
+					)}
+					<Text type="secondary">建议先把动作跑通，再逐步调整特征和阈值。</Text>
+				</Space>
+			</Card>
 		</Card>
 	);
 }
@@ -2614,7 +3313,7 @@ function StructuredActionCard({
 	extraContent?: ReactNode;
 }) {
 	return (
-		<Card size="small" title={title}>
+		<Card size="small" title={title} style={panelCardStyle} styles={{ body: softCardBodyStyle }}>
 			<Space orientation="vertical" size={16} style={{ width: "100%" }}>
 				{targetSelector}
 				{targetHint}
@@ -2726,6 +3425,7 @@ function ScriptModal({
 	const [form] = Form.useForm<ScriptFormValues>();
 	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
+	const previousPythonTemplatesRef = useRef<readonly { key: string; label: string; code: string }[]>([]);
 	const submitWithDraftFlush = () => {
 		if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
 			document.activeElement.blur();
@@ -2742,6 +3442,7 @@ function ScriptModal({
 	const targetDevice = useMemo(() => devices.find((device) => device.device_id === targetDeviceId), [devices, targetDeviceId]);
 	const targetProfile = inferDeviceProfile(targetDevice);
 	const commandOptions = getDeviceCommandCatalog(targetProfile);
+	const pythonTemplates = useMemo(() => getPythonTemplatesForProfile(targetProfile), [targetProfile]);
 	const metricOptions = useMemo(() => getMetricOptionsForDevice(targetDevice), [targetDevice]);
 	const metricGuide = useMemo(() => getMetricGuideForDevice(targetDevice), [targetDevice]);
 	const scriptActionText = useMemo(
@@ -2805,14 +3506,24 @@ function ScriptModal({
 
 	useEffect(() => {
 		if (!open || currentType !== "python") return;
-		const currentCode = String(form.getFieldValue(singleRuleFields.pythonCode as never) || "").trim();
-		if (!currentCode) return;
+		const currentCode = String(form.getFieldValue(singleRuleFields.pythonCode as never) || "");
+		const previousTemplates = previousPythonTemplatesRef.current;
+		previousPythonTemplatesRef.current = pythonTemplates;
+		if (!currentCode.trim()) return;
+		const matchedKey = findTemplateKeyByCode(previousTemplates, currentCode);
+		if (matchedKey) {
+			const nextTemplate = pythonTemplates.find((item) => item.key === matchedKey);
+			if (nextTemplate && nextTemplate.code !== currentCode) {
+				form.setFieldValue(singleRuleFields.pythonCode as never, nextTemplate.code);
+			}
+			return;
+		}
 		const genericCode = getDefaultPythonExample("generic").trim();
 		const profileCode = getDefaultPythonExample(targetProfile).trim();
-		if (currentCode === genericCode && currentCode !== profileCode) {
+		if (currentCode.trim() === genericCode && currentCode.trim() !== profileCode) {
 			form.setFieldValue(singleRuleFields.pythonCode as never, profileCode);
 		}
-	}, [currentType, form, open, targetProfile, targetDeviceId]);
+	}, [currentType, form, open, pythonTemplates, targetProfile, targetDeviceId]);
 
 	const content = (
 		<Row gutter={[20, 20]}>
@@ -2846,7 +3557,10 @@ function ScriptModal({
 							footerHint={
 								targetDevice ? (
 									<Paragraph type="secondary" style={{ marginBottom: 0 }}>
-										目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
+										所属设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>
+										{currentType === "python"
+											? "。脚本默认从这台设备读数；如需跨设备下发，可显式写 target_device_code。"
+											: "。条件读取和动作执行默认都围绕这台设备。"}
 									</Paragraph>
 								) : null
 							}
@@ -2854,13 +3568,12 @@ function ScriptModal({
 							<Row gutter={12}>
 								<Col xs={24} md={16}>
 									<Form.Item
-										label="目标设备"
+										label="所属设备"
 										name={singleRuleFields.targetDeviceId}
-										rules={currentType !== "python" ? [{ required: true, message: "请选择目标设备" }] : undefined}
+										rules={[{ required: true, message: "请选择所属设备" }]}
 									>
 										<Select
-											allowClear
-											placeholder="选择执行动作的设备"
+											placeholder="选择这条单设备规则挂载的设备"
 											options={devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) }))}
 										/>
 									</Form.Item>
@@ -2907,14 +3620,15 @@ function ScriptModal({
 								codeFieldName={singleRuleFields.pythonCode}
 								codeLabel="Python 脚本"
 								codeValueName="python_code"
-								templates={pythonScriptTemplates}
+								templates={pythonTemplates}
+								auxActions={<PythonDeviceLookup devices={devices} />}
 							/>
 						) : null}
 
 						{currentType === "threshold" || currentType === "hybrid" || currentType === "schedule" ? (
 							<Card
 								size="small"
-								title="自动检查间隔（可选）"
+								title="自动检查间隔"
 								style={{ marginBottom: 24 }}
 								styles={{ body: { paddingTop: 18, paddingBottom: 22, background: "#fafafa", borderRadius: 8 } }}
 							>
@@ -2926,7 +3640,7 @@ function ScriptModal({
 										<Form.Item
 											label="最短间隔（秒）"
 											name={["threshold_config", "min_check_interval_seconds"]}
-											extra="例如数据大约每分钟才更新，可填 60。"
+										extra="例如数据大约每分钟才更新，可填 60。"
 											style={{ marginBottom: 0 }}
 											rules={[minCheckIntervalFormRule]}
 										>
@@ -2965,23 +3679,38 @@ function ScriptModal({
 
 				<Col xs={24} xl={9}>
 					<RulePreviewCard
-						scopeSummary="当前范围：本设备规则。条件读取和动作执行默认都围绕同一台目标设备。"
+						scopeSummary={
+							currentType === "python"
+								? "当前范围：本设备脚本。读取指标默认围绕所属设备；如需跨设备下发，可在代码里显式写 target_device_code。"
+								: "当前范围：本设备规则。条件读取和动作执行默认都围绕所属设备。"
+						}
 						type={currentType}
-						pythonHint="Python 模式支持更复杂的组合判断。你可以读取多个设备、多个通道的值；如果需要定时，请直接把时间判断写进脚本本体。"
-						structuredHint="结构化规则支持可选的 else_commands。当条件不满足时，可以执行一组备用动作；定时模式和混合模式也会直接体现在预览代码里。"
-						bullets={[
-							"先选目标设备，再补触发条件和动作。",
-							"建议先从单条动作开始，再逐步增加复杂度。",
-							"保存后先手动执行一次，再查看执行记录。",
-							"CP500 设备的 heater / pump / aeration 会提供 on / off / auto 三种动作。",
-							"“监控指标”对应的是设备的语义指标，不是原始通道 code。",
-							"如果一个指标下有多个通道，建议再明确选择“监控通道”。",
-						]}
+						pythonHint="Python 模式适合更复杂的判断。可以读取多设备、多通道，也可以把定时判断直接写进脚本。"
+						structuredHint="结构化规则支持备用动作；条件不满足时可以切到 else 动作，定时与混合模式也会直接体现在预览里。"
+						bullets={
+							currentType === "python"
+								? [
+										"先选所属设备；不显式写 device_code 时，脚本默认就从这台设备读取数据。",
+										"需要下发到别的设备时，直接在代码里写 target_device_code。",
+										"建议先从单条 commands 或 actions 开始，再逐步增加条件和分支。",
+										"保存后先手动执行一次，再看执行记录。",
+										"读取指标时优先用语义 metric；如果一个指标下有多个通道，再补 channel_code。",
+										"多设备读取和定时判断都应直接写在脚本本体里。",
+								  ]
+								: [
+										"先选所属设备，再补触发条件和动作。",
+										"建议先从单条动作开始，再逐步增加复杂度。",
+										"保存后先手动执行一次，再看执行记录。",
+										"动作列表会跟着设备类型自动变化；CP500 的 heater / pump / aeration 额外支持 auto。",
+										"“监控指标”对应设备语义指标，不是原始通道名。",
+										"如果一个指标下有多个通道，建议再明确选择“监控通道”。",
+								  ]
+						}
 						preview={scriptPreview}
-						metricGuideTitle="当前设备可用指标"
+						metricGuideTitle="所属设备可用指标"
 						metricGuide={metricGuide}
-						emptyMetricText={targetDevice ? "当前设备还没有通道信息，暂时使用通用指标。" : "先选择目标设备，再查看当前设备可用指标。"}
-						unselectedMetricText="先选择目标设备，再查看当前设备可用指标。"
+						emptyMetricText={targetDevice ? "所属设备还没有通道信息，暂时使用通用指标。" : "先选择所属设备，再查看这台设备的常用指标。"}
+						unselectedMetricText="先选择所属设备，再查看这台设备的常用指标。"
 					/>
 				</Col>
 			</Row>
@@ -3043,6 +3772,7 @@ function LinkageModal({
 	const [form] = Form.useForm<LinkageFormValues>();
 	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
+	const previousLinkageTemplatesRef = useRef<readonly { key: string; label: string; code: string }[]>([]);
 	const submitWithDraftFlush = () => {
 		if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
 			document.activeElement.blur();
@@ -3060,6 +3790,10 @@ function LinkageModal({
 	const sourceDevice = useMemo(() => devices.find((device) => device.device_id === sourceDeviceId), [devices, sourceDeviceId]);
 	const sourceMetricOptions = useMemo(() => getMetricOptionsForDevice(sourceDevice), [sourceDevice]);
 	const sourceMetricGuide = useMemo(() => getMetricGuideForDevice(sourceDevice), [sourceDevice]);
+	const linkageTemplates = useMemo(
+		() => getLinkagePythonTemplates(sourceDevice, targetDevice),
+		[sourceDevice, targetDevice],
+	);
 	const primaryActions = safeArray<CommandRow>(Form.useWatch(linkageRuleFields.primaryActions, form));
 	const elseCommands = safeArray<CommandRow>(Form.useWatch(linkageRuleFields.elseCommands, form));
 	const linkageActionText = useMemo(
@@ -3093,11 +3827,27 @@ function LinkageModal({
 			form.setFieldValue(linkageRuleFields.cron as never, "0 9 * * *");
 		}
 		if (linkageType === "python" && !String(form.getFieldValue(linkageRuleFields.pythonCode as never) || "").trim()) {
-			form.setFieldValue(linkageRuleFields.pythonCode as never, getDefaultLinkagePythonExample(targetProfile));
+			form.setFieldValue(
+				linkageRuleFields.pythonCode as never,
+				getDefaultLinkagePythonExample(targetProfile, sourceDevice, targetDevice),
+			);
 			form.setFieldValue(linkageRuleFields.cron as never, undefined);
 		}
 		previousTypeRef.current = linkageType;
-	}, [form, linkageType, open, targetProfile]);
+	}, [form, linkageType, open, sourceDevice, targetDevice, targetProfile]);
+
+	useEffect(() => {
+		if (!open || linkageType !== "python") return;
+		const currentCode = String(form.getFieldValue(linkageRuleFields.pythonCode as never) || "");
+		const previousTemplates = previousLinkageTemplatesRef.current;
+		previousLinkageTemplatesRef.current = linkageTemplates;
+		if (!currentCode.trim()) return;
+		const matchedKey = findTemplateKeyByCode(previousTemplates, currentCode);
+		if (!matchedKey) return;
+		const nextTemplate = linkageTemplates.find((item) => item.key === matchedKey);
+		if (!nextTemplate || nextTemplate.code === currentCode) return;
+		form.setFieldValue(linkageRuleFields.pythonCode as never, nextTemplate.code);
+	}, [form, linkageTemplates, linkageType, open]);
 
 	useEffect(() => {
 		if (!open || !targetDeviceId) return;
@@ -3134,11 +3884,16 @@ function LinkageModal({
 								codeFieldName={linkageRuleFields.pythonCode}
 								codeLabel="Python 脚本"
 								codeValueName="pythonCode"
-								templates={linkagePythonTemplates}
+								templates={linkageTemplates}
+								auxActions={<PythonDeviceLookup devices={devices} />}
 								beforeContent={
-									<Form.Item label="触发设备" name={linkageRuleFields.sourceDeviceId} style={{ marginBottom: 16 }}>
-										<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
-									</Form.Item>
+									<Alert
+										type="info"
+										showIcon
+										title="脚本说明"
+										description='跨设备脚本建议显式写 device_code；如果同一指标下有多个测点，再补 channel_code，例如 get_latest_value("temperature", "TempIn", device_code="CP500-01")。'
+										style={{ marginBottom: 16 }}
+									/>
 								}
 							/>
 						) : (
@@ -3181,12 +3936,12 @@ function LinkageModal({
 						{linkageType === "threshold" || linkageType === "hybrid" || linkageType === "schedule" ? (
 							<Card
 								size="small"
-								title="自动检查间隔（可选）"
+								title="自动检查间隔"
 								style={{ marginBottom: 24 }}
 								styles={{ body: { paddingTop: 18, paddingBottom: 22, background: "#fafafa", borderRadius: 8 } }}
 							>
 								<Paragraph type="secondary" style={{ marginBottom: 18, lineHeight: 1.65 }}>
-									让后台<strong>不要比这里填的秒数更频繁</strong>地自动检查这条规则。不填表示不额外限制。
+									限制后台自动检查的最短间隔。不填表示不额外限制。
 								</Paragraph>
 								<Row gutter={[24, 12]}>
 									<Col xs={24} sm={18} md={12} lg={10}>
@@ -3226,7 +3981,7 @@ function LinkageModal({
 								targetHint={
 									targetDevice ? (
 										<Paragraph type="secondary" style={{ marginBottom: 0 }}>
-											目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>，动作选项已自动适配。
+											目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>。动作选项已自动适配。
 										</Paragraph>
 									) : null
 								}
@@ -3239,13 +3994,13 @@ function LinkageModal({
 					<RulePreviewCard
 						scopeSummary="当前范围：跨设备规则。条件由触发设备提供，动作发送给目标设备。"
 						type={linkageType}
-						pythonHint="Python 联动支持同时读取多台设备的值，也支持返回 actions 列表，把动作分发到多台目标设备。如果需要定时，请直接把时间判断写进脚本本体。"
-						structuredHint="联动规则也支持未满足条件时动作。如果需要在条件不满足时关闭设备、停止排气或切回保守状态，可以在下方单独配置；定时模式会直接体现在预览代码里。"
+						pythonHint="Python 联动可以同时读取多台设备，也可以通过 actions 把动作分发到多台目标设备；定时判断直接写进脚本即可。"
+						structuredHint="联动规则同样支持备用动作；条件不满足时可切到 else 动作，定时模式也会直接体现在预览里。"
 						bullets={[
 							"先选触发设备，再选目标设备。",
 							"动作命令会跟着目标设备类型自动收窄。",
-							"保存后先手动执行一次，再查看执行记录。",
-							"CP500 目标设备的 heater / pump / aeration 会提供 on / off / auto 三种动作。",
+							"保存后先手动执行一次，再看执行记录。",
+							"如果目标设备是 CP500，heater / pump / aeration 还会提供 auto。",
 							"联动里的“监控指标”对应触发设备的语义指标，不是通道 code。",
 							"如果同一指标下有多个通道，建议明确选择“监控通道”。",
 						]}
@@ -3592,9 +4347,13 @@ export default function ScriptsPage() {
 		{ title: "范围", width: 90, render: (_, row) => <Tag color={isLinkageScript(row) ? "orange" : "blue"}>{ruleScopeLabel(row)}</Tag> },
 		{ title: "类型", width: 120, render: (_, row) => <Tag color={typeColor[row.script_type]}>{row.script_type_display || row.script_type}</Tag> },
 		{
-			title: "触发设备",
+			title: "设备上下文",
 			width: 220,
 			render: (_, row) => {
+				if (!isLinkageScript(row)) {
+					const device = devicesList.find((item) => item.device_id === row.device_ids?.[0]);
+					return device ? <>{deviceLabel(device)}<Tag style={{ marginLeft: 8 }}>{getProfileLabel(inferDeviceProfile(device))}</Tag></> : "-";
+				}
 				const thresholdConfig = (row.threshold_config || {}) as Record<string, unknown>;
 				const scheduleConfig = (row.schedule_config || {}) as Record<string, unknown>;
 				const sourceDeviceId =
@@ -3608,9 +4367,12 @@ export default function ScriptsPage() {
 			},
 		},
 		{
-			title: "执行设备",
+			title: "动作目标",
 			width: 210,
 			render: (_, row) => {
+				if (!isLinkageScript(row)) {
+					return <Text type="secondary">默认同所属设备</Text>;
+				}
 				const commandTemplate = (row.command_template || {}) as Record<string, unknown>;
 				const targetDeviceId =
 					typeof commandTemplate.target_device_id === "number" ? commandTemplate.target_device_id : row.device_ids?.[0];
@@ -3687,7 +4449,11 @@ export default function ScriptsPage() {
 			<Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
 				{statCards.map((item) => (
 					<Col key={item.title} xs={12} xl={6}>
-						<Card size="small">
+						<Card
+							size="small"
+							style={panelCardStyle}
+							styles={{ body: { ...softCardBodyStyle, padding: 18 } }}
+						>
 							<Text type="secondary">{item.title}</Text>
 							<Title level={3} style={{ margin: "8px 0 0", color: item.color }}>{item.value}</Title>
 						</Card>
@@ -3695,14 +4461,14 @@ export default function ScriptsPage() {
 				))}
 			</Row>
 
-			<Card style={{ marginBottom: 16 }}>
+			<Card style={{ ...panelCardStyle, marginBottom: 16 }} styles={{ body: { ...softCardBodyStyle, padding: 20 } }}>
 				<Row gutter={[16, 16]}>
 					<Col xs={24} xl={13}>
 						<Title level={5} style={{ marginTop: 0 }}>使用方式</Title>
 						<ul style={{ paddingLeft: 18, marginBottom: 0 }}>
-							<li>本设备规则和跨设备规则使用同一套创建、编辑和执行方式。</li>
+							<li>本设备规则适合同一台设备内完成判断和执行。</li>
+							<li>跨设备规则适合由一台设备提供条件、另一台设备执行动作。</li>
 							<li>结构化规则适合常规阈值、定时和备用动作；脚本模式适合复杂判断和自定义时间逻辑。</li>
-							<li>动作命令会按目标设备类型自动过滤，减少误选。</li>
 							<li>规则的创建、复制、导入、导出、执行和结果排查都在这里完成。</li>
 						</ul>
 					</Col>
@@ -3712,7 +4478,7 @@ export default function ScriptsPage() {
 				</Row>
 			</Card>
 
-			<Card size="small" style={{ marginBottom: 16 }}>
+			<Card size="small" style={{ ...panelCardStyle, marginBottom: 16 }} styles={{ body: { ...softCardBodyStyle, padding: 18 } }}>
 				<Row gutter={[12, 12]} align="middle">
 					<Col xs={24} md={8} xl={6}>
 						<Text type="secondary">规则状态</Text>
@@ -3728,7 +4494,7 @@ export default function ScriptsPage() {
 						/>
 					</Col>
 					<Col xs={24} md={10} xl={8}>
-						<Text type="secondary">目标设备</Text>
+						<Text type="secondary">按设备筛选</Text>
 						<Select
 							allowClear
 							style={{ width: "100%", marginTop: 6 }}
@@ -3739,7 +4505,7 @@ export default function ScriptsPage() {
 						/>
 					</Col>
 					<Col xs={24} md={6} xl={4}>
-						<Text type="secondary">当前结果</Text>
+						<Text type="secondary">筛选结果</Text>
 						<Paragraph style={{ margin: "6px 0 0" }}>
 							{filteredRules.length} 条规则
 						</Paragraph>
@@ -3752,6 +4518,8 @@ export default function ScriptsPage() {
 					<Card
 						title="最近执行"
 						size="small"
+						style={panelCardStyle}
+						styles={{ body: { ...softCardBodyStyle, padding: 18 } }}
 						extra={
 							<Select
 								size="small"
@@ -3771,7 +4539,16 @@ export default function ScriptsPage() {
 						{filteredExecutions.length ? (
 							<Space orientation="vertical" style={{ width: "100%" }} size={12}>
 								{filteredExecutions.map((item) => (
-									<Row key={item.execution_id} gutter={[12, 8]} style={{ padding: "10px 0", borderBottom: "1px solid #f0f0f0" }}>
+									<Row
+										key={item.execution_id}
+										gutter={[12, 8]}
+										style={{
+											padding: "12px 14px",
+											border: "1px solid #eef2f6",
+											borderRadius: 12,
+											background: "#fff",
+										}}
+									>
 										<Col xs={24} lg={12}>
 											<Space wrap>
 												<Tag color={item.trigger_reason === "manual" ? "blue" : item.trigger_reason === "schedule_check" ? "green" : "orange"}>
@@ -3802,18 +4579,18 @@ export default function ScriptsPage() {
 					</Card>
 				</Col>
 				<Col xs={24} xl={9}>
-					<Card title="自动控制状态" size="small">
+					<Card title="自动控制状态" size="small" style={panelCardStyle} styles={{ body: { ...softCardBodyStyle, padding: 18 } }}>
 						<Row gutter={[12, 12]}>
 							<Col span={12}>
-								<Card size="small">
+								<Card size="small" style={compactMetricCardStyle}>
 									<Text type="secondary">阈值规则</Text>
-									<Paragraph style={{ margin: "8px 0 0" }}>支持手动检查和后台自动检查</Paragraph>
+									<Paragraph style={{ margin: "8px 0 0" }}>支持手动检查，也支持后台自动检查。</Paragraph>
 								</Card>
 							</Col>
 							<Col span={12}>
-								<Card size="small">
+								<Card size="small" style={compactMetricCardStyle}>
 									<Text type="secondary">定时规则</Text>
-									<Paragraph style={{ margin: "8px 0 0" }}>结构化定时规则支持自动检查和后台周期执行</Paragraph>
+									<Paragraph style={{ margin: "8px 0 0" }}>结构化定时规则支持后台周期执行。</Paragraph>
 								</Card>
 							</Col>
 							<Col span={24}>
@@ -3821,7 +4598,7 @@ export default function ScriptsPage() {
 									type="info"
 									showIcon
 									title="运行提示"
-									description="如果这里长期没有新记录，优先检查 auto_control_worker 是否已启动；脚本模式里的时间逻辑则由脚本本体自行控制。"
+									description="如果这里长期没有新记录，优先检查 auto_control_worker 是否已启动；脚本模式里的时间逻辑由脚本本体自行控制。"
 								/>
 							</Col>
 						</Row>
@@ -3831,8 +4608,9 @@ export default function ScriptsPage() {
 
 			{editorOpen ? (
 				<Card
-					style={{ marginBottom: 16 }}
+					style={{ ...panelCardStyle, marginBottom: 16 }}
 					size="small"
+					styles={{ body: { ...softCardBodyStyle, padding: 20 } }}
 					title={
 						editorScope === "single"
 							? editingScript
@@ -3859,7 +4637,7 @@ export default function ScriptsPage() {
 					}
 				>
 					<Paragraph type="secondary" style={{ marginBottom: 16 }}>
-						先确定规则作用范围，再填写触发条件和执行动作。本设备规则适合同一台设备内完成判断和执行；跨设备规则适合由一台设备提供条件、另一台设备执行动作。
+						先确定规则范围，再填写触发条件和动作。本设备规则适合同一台设备内完成判断和执行；跨设备规则适合一台设备提供条件、另一台设备执行动作。
 					</Paragraph>
 					{editorScope === "single" ? (
 						<ScriptModal
@@ -3893,7 +4671,9 @@ export default function ScriptsPage() {
 
 			<Card
 				title="统一规则列表"
-				extra={<Text type="secondary">本设备和跨设备规则都在这里统一查看和管理。</Text>}
+				style={panelCardStyle}
+				styles={{ body: { ...softCardBodyStyle, padding: 18 } }}
+				extra={<Text type="secondary">本设备和跨设备规则统一在这里查看、筛选和执行。</Text>}
 			>
 				<Table rowKey="id" loading={scriptsQ.isLoading} dataSource={filteredRules} columns={ruleColumns} pagination={{ pageSize: 20 }} scroll={{ x: 1480 }} />
 			</Card>
@@ -3915,7 +4695,7 @@ export default function ScriptsPage() {
 						type="info"
 						showIcon
 						title="导入说明"
-						description="支持导入单条规则 JSON，也支持一次粘贴一个规则数组批量导入。导入后的内容会作为新规则保存，不会覆盖现有规则。"
+						description="支持导入单条规则 JSON，也支持一次粘贴规则数组批量导入。导入后的内容会新增为规则，不会覆盖现有规则。"
 					/>
 					<Input.TextArea
 						rows={16}

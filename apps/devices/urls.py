@@ -198,6 +198,16 @@ urlpatterns = [
         script_views.ScriptExecutionDetailView.as_view(),
         name="script_execution_detail",
     ),
+    path(
+        "scripts/model-registry",
+        script_views.ScriptModelRegistryView.as_view(),
+        name="script_model_registry",
+    ),
+    path(
+        "scripts/model-health",
+        script_views.ScriptModelHealthView.as_view(),
+        name="script_model_health",
+    ),
     # POST /api/v2/scripts/check-thresholds (手动触发阈值检查）
     path(
         "scripts/check-thresholds",

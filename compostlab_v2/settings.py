@@ -189,3 +189,85 @@ REST_FRAMEWORK = {
     ],
 }
 
+# Python 控制脚本模型注册表（Phase 2: 可配置路由）
+# 使用方式：脚本里调用 predict("aeration_v1", features)
+CONTROL_MODEL_REGISTRY = {
+    "aeration_v1": {
+        "kind": "rule",
+        "rule_type": "aeration",
+        "thresholds": {
+            "temp_feature": "temp_avg_5m",
+            "temp_high": 70,
+            "o2_feature": "o2_min_5m",
+            "o2_low": 8,
+        },
+        "suggestions": {
+            "on_duration_ms": 120000,
+            "off_duration_ms": 0,
+            "hold_duration_ms": 30000,
+        },
+        "confidence": {
+            "on": 0.78,
+            "off": 0.72,
+            "hold": 0.2,
+        },
+    },
+    "aeration_test_v1": {
+        "kind": "rule",
+        "rule_type": "aeration",
+        "thresholds": {
+            "temp_feature": "temp_avg_5m",
+            "temp_high": 65,
+            "o2_feature": "o2_min_5m",
+            "o2_low": 9,
+        },
+        "suggestions": {
+            "on_duration_ms": 60000,
+            "off_duration_ms": 0,
+            "hold_duration_ms": 20000,
+        },
+        "confidence": {
+            "on": 0.88,
+            "off": 0.76,
+            "hold": 0.35,
+        },
+    },
+    "heater_v1": {
+        "kind": "rule",
+        "rule_type": "heater",
+        "thresholds": {
+            "temp_feature": "temp_avg_5m",
+            "temp_low": 52,
+            "temp_high": 58,
+        },
+        "suggestions": {
+            "on_duration_ms": 90000,
+            "off_duration_ms": 0,
+            "hold_duration_ms": 30000,
+        },
+        "confidence": {
+            "on": 0.76,
+            "off": 0.74,
+            "hold": 0.5,
+        },
+    },
+    "aeration_sklearn_v1": {
+        "kind": "sklearn",
+        # 相对路径基于 BASE_DIR；可放置 joblib/pkl 模型文件
+        "path": "models/aeration_sklearn_v1.joblib",
+        "features": ["temp_avg_5m", "o2_min_5m", "sample_count_temp", "sample_count_o2"],
+        # 缺失特征策略：hold | zero | fill
+        "missing_feature_strategy": "hold",
+        "default_feature_value": 0,
+        # 模型输出到控制决策映射（示例：二分类 1/0）
+        "decision_map": {
+            "1": "on",
+            "0": "off",
+        },
+        "suggestions": {
+            "on_duration_ms": 120000,
+            "off_duration_ms": 0,
+            "hold_duration_ms": 30000,
+        },
+    },
+}

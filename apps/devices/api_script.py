@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -221,6 +222,142 @@ def _execution_to_dict(execution: ScriptExecution) -> dict:
         "created_by": execution.created_by.username if execution.created_by else None,
         "created_at": _dt_local_str(execution.created_at),
     }
+
+
+def _model_registry_summary() -> list[dict]:
+    registry = getattr(settings, "CONTROL_MODEL_REGISTRY", None)
+    if not isinstance(registry, dict):
+        return []
+
+    items: list[dict] = []
+    for name, config in registry.items():
+        if not isinstance(config, dict):
+            continue
+        items.append(
+            {
+                "name": str(name),
+                "kind": str(config.get("kind", "")),
+                "rule_type": str(config.get("rule_type", "")),
+                "thresholds": config.get("thresholds") if isinstance(config.get("thresholds"), dict) else {},
+                "suggestions": config.get("suggestions") if isinstance(config.get("suggestions"), dict) else {},
+            }
+        )
+    items.sort(key=lambda item: item.get("name", ""))
+    return items
+
+
+def _model_health_summary(name_filter: str | None = None) -> list[dict]:
+    registry = getattr(settings, "CONTROL_MODEL_REGISTRY", None)
+    if not isinstance(registry, dict):
+        return []
+
+    executor = ScriptExecutor()
+    target_name = str(name_filter or "").strip().lower()
+    items: list[dict] = []
+
+    for raw_name, raw_config in registry.items():
+        name = str(raw_name)
+        if target_name and name.lower() != target_name:
+            continue
+
+        if not isinstance(raw_config, dict):
+            items.append(
+                {
+                    "name": name,
+                    "kind": "unknown",
+                    "healthy": False,
+                    "status": "invalid",
+                    "detail": "model config must be an object",
+                }
+            )
+            continue
+
+        kind = str(raw_config.get("kind", "rule")).lower()
+        if kind == "rule":
+            rule_type = str(raw_config.get("rule_type", "")).strip()
+            items.append(
+                {
+                    "name": name,
+                    "kind": kind,
+                    "healthy": bool(rule_type),
+                    "status": "ready" if rule_type else "invalid",
+                    "detail": f"rule_type={rule_type}" if rule_type else "rule_type is required",
+                }
+            )
+            continue
+
+        if kind == "sklearn":
+            model_path = str(raw_config.get("path", "")).strip()
+            feature_names = raw_config.get("features")
+            if not model_path:
+                items.append(
+                    {
+                        "name": name,
+                        "kind": kind,
+                        "healthy": False,
+                        "status": "invalid",
+                        "detail": "path is required",
+                    }
+                )
+                continue
+            if not isinstance(feature_names, list) or not feature_names:
+                items.append(
+                    {
+                        "name": name,
+                        "kind": kind,
+                        "healthy": False,
+                        "status": "invalid",
+                        "detail": "features must be a non-empty list",
+                    }
+                )
+                continue
+            try:
+                resolved = executor._resolve_model_path(model_path)
+                if not resolved.exists():
+                    items.append(
+                        {
+                            "name": name,
+                            "kind": kind,
+                            "healthy": False,
+                            "status": "missing",
+                            "detail": f"model file not found: {model_path}",
+                        }
+                    )
+                    continue
+                executor._load_sklearn_model(model_path)
+                items.append(
+                    {
+                        "name": name,
+                        "kind": kind,
+                        "healthy": True,
+                        "status": "ready",
+                            "detail": f"loaded: {model_path}",
+                    }
+                )
+            except Exception as exc:
+                items.append(
+                    {
+                        "name": name,
+                        "kind": kind,
+                        "healthy": False,
+                        "status": "load_failed",
+                        "detail": str(exc),
+                    }
+                )
+            continue
+
+        items.append(
+            {
+                "name": name,
+                "kind": kind,
+                "healthy": False,
+                "status": "unsupported",
+                "detail": f"unsupported kind: {kind}",
+            }
+        )
+
+    items.sort(key=lambda item: item.get("name", ""))
+    return items
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -535,6 +672,27 @@ class ScriptExecutionDetailView(BasicAuthMixin, ResourcePermissionMixin, View):
         except ScriptExecution.DoesNotExist:
             return JsonResponse({"detail": "Execution not found."}, status=404)
         return JsonResponse(_execution_to_dict(execution), status=200)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ScriptModelRegistryView(BasicAuthMixin, ResourcePermissionMixin, View):
+    resource_type = ResourceType.SCRIPT
+    action_type = ActionType.READ
+
+    def get(self, request):
+        data = _model_registry_summary()
+        return JsonResponse({"count": len(data), "data": data}, status=200)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ScriptModelHealthView(BasicAuthMixin, ResourcePermissionMixin, View):
+    resource_type = ResourceType.SCRIPT
+    action_type = ActionType.READ
+
+    def get(self, request):
+        name = request.GET.get("name")
+        data = _model_health_summary(name)
+        return JsonResponse({"count": len(data), "data": data}, status=200)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

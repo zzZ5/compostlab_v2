@@ -2,9 +2,12 @@
 # docstring removed
 import json
 import logging
+import pickle
 from copy import deepcopy
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+from pathlib import Path
+from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q
 
@@ -13,6 +16,11 @@ from apps.devices.services.mqtt_pub import publish_json, MqttPublishError
 from apps.telemetry.models import TelemetryKV
 
 logger = logging.getLogger(__name__)
+
+try:
+    import joblib  # type: ignore
+except Exception:
+    joblib = None
 
 
 def _min_auto_check_interval_seconds(script: ScriptTemplate) -> int:
@@ -121,6 +129,7 @@ class ScriptExecutor:
 
     def __init__(self):
         self.result_cache = {}
+        self.model_cache: Dict[str, Any] = {}
 
     def _resolve_source_device(self, script: ScriptTemplate, fallback_device: Device) -> Device:
         source_device_id = None
@@ -183,6 +192,7 @@ class ScriptExecutor:
         try:
             action_plan = None
             commands: List[Dict[str, Any]] = []
+            python_meta: Dict[str, Any] = {}
             allow_else = trigger_reason != "threshold_check"
 
             if script.script_type == ScriptTemplate.ScriptType.THRESHOLD:
@@ -191,8 +201,12 @@ class ScriptExecutor:
                 commands = self._execute_schedule_script(script)
             elif script.script_type == ScriptTemplate.ScriptType.PYTHON:
                 python_result = self._execute_python_script(script, source_device)
-                if isinstance(python_result, dict) and isinstance(python_result.get("actions"), list):
-                    action_plan = python_result.get("actions") or []
+                if isinstance(python_result, dict):
+                    python_meta = python_result.get("_meta", {}) if isinstance(python_result.get("_meta"), dict) else {}
+                    if isinstance(python_result.get("actions"), list):
+                        action_plan = python_result.get("actions") or []
+                    elif isinstance(python_result.get("commands"), list):
+                        commands = python_result.get("commands") or []
                 else:
                     commands = python_result if isinstance(python_result, list) else []
             else:
@@ -205,6 +219,7 @@ class ScriptExecutor:
                     **result,
                     "source_device": source_device.code,
                     "target_device": target_device.code,
+                    **({"python_meta": python_meta} if python_meta else {}),
                 }
                 execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
             elif commands:
@@ -221,6 +236,7 @@ class ScriptExecutor:
                             if skipped_config_updates
                             else {}
                         ),
+                        **({"python_meta": python_meta} if python_meta else {}),
                     }
                     execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
                 else:
@@ -230,6 +246,7 @@ class ScriptExecutor:
                         "source_device": source_device.code,
                         "target_device": target_device.code,
                         "skipped_commands": skipped_config_updates,
+                        **({"python_meta": python_meta} if python_meta else {}),
                     }
             else:
                 execution.status = ScriptExecution.Status.SKIPPED
@@ -237,6 +254,7 @@ class ScriptExecutor:
                     "message": "No commands generated",
                     "source_device": source_device.code,
                     "target_device": target_device.code,
+                    **({"python_meta": python_meta} if python_meta else {}),
                 }
 
             execution.completed_at = timezone.now()
@@ -314,16 +332,40 @@ class ScriptExecutor:
             return []
 
         try:
+            model_trace: List[Dict[str, Any]] = []
+            features_trace: Dict[str, Any] = {}
+
+            def _predict(model_name: str, features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                prediction = self._predict_rule_model(model_name, features or {})
+                model_kind = self._get_model_kind(model_name)
+                model_trace.append(
+                    {
+                        "model_name": model_name,
+                        "model_kind": model_kind,
+                        "features": deepcopy(features or {}),
+                        "output": deepcopy(prediction),
+                    }
+                )
+                return prediction
+
             exec_globals = {
                 "__builtins__": {
                     "print": print,
                     "len": len,
                     "range": range,
+                    "enumerate": enumerate,
                     "int": int,
                     "float": float,
+                    "bool": bool,
                     "str": str,
                     "list": list,
+                    "tuple": tuple,
                     "dict": dict,
+                    "sum": sum,
+                    "min": min,
+                    "max": max,
+                    "abs": abs,
+                    "round": round,
                     "True": True,
                     "False": False,
                     "None": None,
@@ -337,18 +379,46 @@ class ScriptExecutor:
                     self._resolve_device_ref(device, device_id, device_code),
                     channel_code,
                 ),
+                "get_history": lambda metric, minutes, channel_code=None, device_id=None, device_code=None: self._get_history_values(
+                    self._resolve_device_ref(device, device_id, device_code),
+                    metric,
+                    minutes,
+                    channel_code,
+                ),
+                "get_history_points": lambda metric, minutes, channel_code=None, device_id=None, device_code=None: self._get_history_points(
+                    self._resolve_device_ref(device, device_id, device_code),
+                    metric,
+                    minutes,
+                    channel_code,
+                ),
+                "predict": _predict,
+                "clamp": lambda value, min_v, max_v: max(min_v, min(max_v, value)),
+                "now_ts": lambda: timezone.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "device": device,
                 "datetime": datetime,
                 "timedelta": timedelta,
+                "FEATURES": features_trace,
             }
 
             exec_result = {}
             exec(script.python_code, exec_globals, exec_result)
 
             if "actions" in exec_result:
-                return {"actions": exec_result["actions"]}
+                return {
+                    "actions": exec_result["actions"],
+                    "_meta": {
+                        "model_trace": model_trace,
+                        "features_snapshot": exec_result.get("FEATURES", features_trace),
+                    },
+                }
             if "commands" in exec_result:
-                return exec_result["commands"]
+                return {
+                    "commands": exec_result["commands"],
+                    "_meta": {
+                        "model_trace": model_trace,
+                        "features_snapshot": exec_result.get("FEATURES", features_trace),
+                    },
+                }
             logger.warning(f"Python script {script.name} did not return 'commands' or 'actions'")
             return []
 
@@ -408,6 +478,330 @@ class ScriptExecutor:
         except Exception as e:
             logger.error(f"Failed to get latest channel value: {e}")
             return None
+
+    def _get_history_points(
+        self,
+        device: Device,
+        metric: str,
+        minutes: int,
+        channel_code: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        try:
+            window_minutes = max(1, int(minutes))
+        except Exception:
+            window_minutes = 1
+        since = timezone.now() - timedelta(minutes=window_minutes)
+
+        try:
+            code = str(channel_code or "").strip()
+            if not code:
+                channel = device.channels.filter(metric__iexact=metric).first()
+                if not channel:
+                    return []
+                code = channel.code
+
+            values = (
+                TelemetryKV.objects.filter(device=device, code__iexact=code, ts__gte=since)
+                .order_by("ts")
+                .values("ts", "value")
+            )
+            points: List[Dict[str, Any]] = []
+            for item in values:
+                try:
+                    numeric_value = float(item.get("value"))
+                except Exception:
+                    continue
+                ts = item.get("ts")
+                points.append(
+                    {
+                        "ts": timezone.localtime(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else None,
+                        "value": numeric_value,
+                    }
+                )
+            return points
+        except Exception as e:
+            logger.error(f"Failed to get history points: {e}")
+            return []
+
+    def _get_history_values(
+        self,
+        device: Device,
+        metric: str,
+        minutes: int,
+        channel_code: Optional[str] = None,
+    ) -> List[float]:
+        points = self._get_history_points(device, metric, minutes, channel_code)
+        return [float(item["value"]) for item in points if isinstance(item, dict) and item.get("value") is not None]
+
+    def _get_model_registry(self) -> Dict[str, Any]:
+        registry = getattr(settings, "CONTROL_MODEL_REGISTRY", None)
+        if isinstance(registry, dict):
+            return registry
+        return {}
+
+    def _get_model_config(self, model_name: str) -> Optional[Dict[str, Any]]:
+        registry = self._get_model_registry()
+        raw_name = str(model_name or "").strip()
+        if not raw_name:
+            return None
+        if isinstance(registry.get(raw_name), dict):
+            return registry.get(raw_name)
+        lowered = raw_name.lower()
+        if isinstance(registry.get(lowered), dict):
+            return registry.get(lowered)
+        for key, value in registry.items():
+            if str(key).strip().lower() == lowered and isinstance(value, dict):
+                return value
+        return None
+
+    def _get_model_kind(self, model_name: str) -> str:
+        config = self._get_model_config(model_name)
+        if isinstance(config, dict):
+            return str(config.get("kind", "rule")).lower()
+        return "rule"
+
+    def _resolve_model_path(self, raw_path: str) -> Path:
+        raw = str(raw_path or "").strip()
+        if not raw:
+            raise ValueError("model path is empty")
+        path = Path(raw)
+        if path.as_posix() in (".", ""):
+            raise ValueError("model path is empty")
+        if path.is_absolute():
+            return path
+        base_dir = getattr(settings, "BASE_DIR", None)
+        if base_dir:
+            return Path(base_dir) / path
+        return path
+
+    def _load_sklearn_model(self, model_path: str):
+        resolved = self._resolve_model_path(model_path)
+        cache_key = str(resolved)
+        if cache_key in self.model_cache:
+            return self.model_cache[cache_key]
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"model file not found: {resolved}")
+
+        model = None
+        if joblib is not None:
+            try:
+                model = joblib.load(resolved)
+            except Exception:
+                model = None
+        if model is None:
+            with open(resolved, "rb") as fp:
+                model = pickle.load(fp)
+        self.model_cache[cache_key] = model
+        return model
+
+    def _to_number(self, value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _predict_aeration_rule(self, model_name: str, model_config: Dict[str, Any], features: Dict[str, Any]) -> Dict[str, Any]:
+        thresholds = model_config.get("thresholds", {}) if isinstance(model_config.get("thresholds"), dict) else {}
+        suggestions = model_config.get("suggestions", {}) if isinstance(model_config.get("suggestions"), dict) else {}
+        confidence_cfg = model_config.get("confidence", {}) if isinstance(model_config.get("confidence"), dict) else {}
+
+        temp_key = str(thresholds.get("temp_feature", "temp_avg_5m"))
+        o2_key = str(thresholds.get("o2_feature", "o2_min_5m"))
+        temp_high = self._to_number(thresholds.get("temp_high"))
+        o2_low = self._to_number(thresholds.get("o2_low"))
+
+        temp_value = self._to_number(features.get(temp_key))
+        o2_value = self._to_number(features.get(o2_key))
+
+        if temp_value is None and o2_value is None:
+            return {
+                "decision": "hold",
+                "confidence": self._to_number(confidence_cfg.get("hold")) or 0.2,
+                "suggestions": {"duration_ms": int(self._to_number(suggestions.get("hold_duration_ms")) or 30000)},
+                "reason": "missing_features",
+            }
+
+        hit_temp = temp_high is not None and temp_value is not None and temp_value >= temp_high
+        hit_o2 = o2_low is not None and o2_value is not None and o2_value <= o2_low
+        if hit_temp or hit_o2:
+            return {
+                "decision": "on",
+                "confidence": self._to_number(confidence_cfg.get("on")) or 0.78,
+                "suggestions": {"duration_ms": int(self._to_number(suggestions.get("on_duration_ms")) or 120000)},
+                "reason": "temp_high_or_o2_low",
+            }
+
+        return {
+            "decision": "off",
+            "confidence": self._to_number(confidence_cfg.get("off")) or 0.72,
+            "suggestions": {"duration_ms": int(self._to_number(suggestions.get("off_duration_ms")) or 0)},
+            "reason": "within_comfort_band",
+        }
+
+    def _predict_heater_rule(self, model_name: str, model_config: Dict[str, Any], features: Dict[str, Any]) -> Dict[str, Any]:
+        thresholds = model_config.get("thresholds", {}) if isinstance(model_config.get("thresholds"), dict) else {}
+        suggestions = model_config.get("suggestions", {}) if isinstance(model_config.get("suggestions"), dict) else {}
+        confidence_cfg = model_config.get("confidence", {}) if isinstance(model_config.get("confidence"), dict) else {}
+
+        temp_key = str(thresholds.get("temp_feature", "temp_avg_5m"))
+        temp_low = self._to_number(thresholds.get("temp_low"))
+        temp_high = self._to_number(thresholds.get("temp_high"))
+        temp_value = self._to_number(features.get(temp_key))
+
+        if temp_value is None:
+            return {
+                "decision": "hold",
+                "confidence": self._to_number(confidence_cfg.get("hold")) or 0.2,
+                "suggestions": {"duration_ms": int(self._to_number(suggestions.get("hold_duration_ms")) or 30000)},
+                "reason": "missing_temperature_feature",
+            }
+
+        if temp_low is not None and temp_value <= temp_low:
+            return {
+                "decision": "on",
+                "confidence": self._to_number(confidence_cfg.get("on")) or 0.76,
+                "suggestions": {"duration_ms": int(self._to_number(suggestions.get("on_duration_ms")) or 90000)},
+                "reason": "temperature_too_low",
+            }
+
+        if temp_high is not None and temp_value >= temp_high:
+            return {
+                "decision": "off",
+                "confidence": self._to_number(confidence_cfg.get("off")) or 0.74,
+                "suggestions": {"duration_ms": int(self._to_number(suggestions.get("off_duration_ms")) or 0)},
+                "reason": "temperature_recovered",
+            }
+
+        return {
+            "decision": "hold",
+            "confidence": self._to_number(confidence_cfg.get("hold")) or 0.5,
+            "suggestions": {"duration_ms": int(self._to_number(suggestions.get("hold_duration_ms")) or 30000)},
+            "reason": "temperature_in_deadband",
+        }
+
+    def _predict_sklearn_model(self, model_name: str, model_config: Dict[str, Any], features: Dict[str, Any]) -> Dict[str, Any]:
+        model_path = str(model_config.get("path", "")).strip()
+        feature_names = model_config.get("features", [])
+        if not model_path:
+            return {
+                "decision": "hold",
+                "confidence": 0.1,
+                "suggestions": {"duration_ms": 30000},
+                "reason": "model_path_missing",
+            }
+        if not isinstance(feature_names, list) or not feature_names:
+            return {
+                "decision": "hold",
+                "confidence": 0.1,
+                "suggestions": {"duration_ms": 30000},
+                "reason": "model_features_missing",
+            }
+
+        missing_strategy = str(model_config.get("missing_feature_strategy", "hold")).lower()
+        default_feature_value = self._to_number(model_config.get("default_feature_value"))
+        vector: List[float] = []
+        missing_features: List[str] = []
+
+        for feature_name in feature_names:
+            key = str(feature_name)
+            value = self._to_number(features.get(key))
+            if value is None:
+                missing_features.append(key)
+                if missing_strategy == "fill" and default_feature_value is not None:
+                    value = default_feature_value
+                elif missing_strategy == "zero":
+                    value = 0.0
+                else:
+                    return {
+                        "decision": "hold",
+                        "confidence": 0.2,
+                        "suggestions": {"duration_ms": 30000},
+                        "reason": f"missing_features:{','.join(missing_features)}",
+                    }
+            vector.append(float(value))
+
+        try:
+            model = self._load_sklearn_model(model_path)
+            confidence = None
+            raw_label = None
+
+            if hasattr(model, "predict_proba") and callable(getattr(model, "predict_proba")):
+                proba = model.predict_proba([vector])[0]
+                best_idx = 0
+                best_val = float(proba[0]) if len(proba) else 0.0
+                for i, item in enumerate(proba):
+                    v = float(item)
+                    if v > best_val:
+                        best_idx = i
+                        best_val = v
+                confidence = best_val
+                if hasattr(model, "classes_") and len(getattr(model, "classes_", [])) > best_idx:
+                    raw_label = getattr(model, "classes_")[best_idx]
+            if raw_label is None and hasattr(model, "predict") and callable(getattr(model, "predict")):
+                raw_label = model.predict([vector])[0]
+
+            decision_map = model_config.get("decision_map", {}) if isinstance(model_config.get("decision_map"), dict) else {}
+            decision = str(decision_map.get(str(raw_label), decision_map.get(str(raw_label).lower(), raw_label))).lower()
+            if decision not in ("on", "off", "hold"):
+                if str(raw_label).lower() in ("1", "on", "true"):
+                    decision = "on"
+                elif str(raw_label).lower() in ("0", "off", "false"):
+                    decision = "off"
+                else:
+                    decision = "hold"
+
+            suggestions_cfg = model_config.get("suggestions", {}) if isinstance(model_config.get("suggestions"), dict) else {}
+            duration_key = f"{decision}_duration_ms"
+            duration_ms = int(self._to_number(suggestions_cfg.get(duration_key)) or self._to_number(suggestions_cfg.get("hold_duration_ms")) or 30000)
+            return {
+                "decision": decision,
+                "confidence": confidence if confidence is not None else 0.6,
+                "suggestions": {"duration_ms": duration_ms},
+                "reason": f"sklearn_prediction:{model_name}",
+            }
+        except Exception as exc:
+            logger.error("sklearn model prediction failed for %s: %s", model_name, exc, exc_info=True)
+            return {
+                "decision": "hold",
+                "confidence": 0.1,
+                "suggestions": {"duration_ms": 30000},
+                "reason": f"model_error:{exc}",
+            }
+
+    def _predict_rule_model(self, model_name: str, features: Dict[str, Any]) -> Dict[str, Any]:
+        name = str(model_name or "").strip().lower()
+        model_config = self._get_model_config(name)
+
+        if isinstance(model_config, dict):
+            kind = str(model_config.get("kind", "rule")).lower()
+            rule_type = str(model_config.get("rule_type", "")).lower()
+            if kind in ("sklearn", "ml", "model"):
+                return self._predict_sklearn_model(name, model_config, features)
+            if kind == "rule" and rule_type in ("aeration", "aeration_v1"):
+                return self._predict_aeration_rule(name, model_config, features)
+            if kind == "rule" and rule_type in ("heater", "heater_v1"):
+                return self._predict_heater_rule(name, model_config, features)
+
+        if name in ("aeration_v1", "aeration-rule-v1", "rule_aeration_v1"):
+            return self._predict_aeration_rule(
+                name,
+                {
+                    "thresholds": {"temp_feature": "temp_avg_5m", "temp_high": 70, "o2_feature": "o2_min_5m", "o2_low": 8},
+                    "suggestions": {"on_duration_ms": 120000, "off_duration_ms": 0, "hold_duration_ms": 30000},
+                    "confidence": {"on": 0.78, "off": 0.72, "hold": 0.2},
+                },
+                features,
+            )
+
+        return {
+            "decision": "hold",
+            "confidence": 0.1,
+            "suggestions": {"duration_ms": 30000},
+            "reason": f"unknown_model:{model_name}",
+        }
 
     def _check_threshold(
         self, value: float, operator: str, threshold: float
