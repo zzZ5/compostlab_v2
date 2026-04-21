@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
@@ -9,6 +10,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     # ✅ Django Admin 后台入口
     path("admin/", admin.site.urls),
+    path("healthz", lambda request: JsonResponse({"ok": True}), name="healthz"),
     # ✅ 你的 API v2
     path("api/v2/", include("apps.accounts.urls")),
     path("api/v2/", include("apps.devices.urls")),
