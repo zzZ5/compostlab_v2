@@ -223,31 +223,51 @@ class ScriptExecutor:
                 }
                 execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
             elif commands:
-                effective_commands, skipped_config_updates = self._filter_noop_config_updates(target_device, commands)
-                if effective_commands:
-                    success, result = self._send_commands(target_device, effective_commands)
-                    execution.commands = effective_commands
+                has_per_command_target = any(
+                    isinstance(item, dict)
+                    and (
+                        isinstance(item.get("target_device_id"), int)
+                        or bool(str(item.get("target_device_code") or "").strip())
+                    )
+                    for item in commands
+                )
+                if has_per_command_target:
+                    action_plan = self._build_action_plan_from_commands(target_device, commands)
+                    success, result, executed_commands = self._send_action_plan(target_device, action_plan)
+                    execution.commands = executed_commands
                     execution.result = {
                         **result,
                         "source_device": source_device.code,
                         "target_device": target_device.code,
-                        **(
-                            {"skipped_commands": skipped_config_updates}
-                            if skipped_config_updates
-                            else {}
-                        ),
                         **({"python_meta": python_meta} if python_meta else {}),
                     }
                     execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
                 else:
-                    execution.status = ScriptExecution.Status.SKIPPED
-                    execution.result = {
-                        "message": "No effective commands generated",
-                        "source_device": source_device.code,
-                        "target_device": target_device.code,
-                        "skipped_commands": skipped_config_updates,
-                        **({"python_meta": python_meta} if python_meta else {}),
-                    }
+                    effective_commands, skipped_config_updates = self._filter_noop_config_updates(target_device, commands)
+                    if effective_commands:
+                        success, result = self._send_commands(target_device, effective_commands)
+                        execution.commands = effective_commands
+                        execution.result = {
+                            **result,
+                            "source_device": source_device.code,
+                            "target_device": target_device.code,
+                            **(
+                                {"skipped_commands": skipped_config_updates}
+                                if skipped_config_updates
+                                else {}
+                            ),
+                            **({"python_meta": python_meta} if python_meta else {}),
+                        }
+                        execution.status = ScriptExecution.Status.SUCCESS if success else ScriptExecution.Status.FAILED
+                    else:
+                        execution.status = ScriptExecution.Status.SKIPPED
+                        execution.result = {
+                            "message": "No effective commands generated",
+                            "source_device": source_device.code,
+                            "target_device": target_device.code,
+                            "skipped_commands": skipped_config_updates,
+                            **({"python_meta": python_meta} if python_meta else {}),
+                        }
             else:
                 execution.status = ScriptExecution.Status.SKIPPED
                 execution.result = {
@@ -297,9 +317,14 @@ class ScriptExecutor:
                 logger.warning(f"Invalid threshold condition for script {script.name}")
                 return []
 
-            latest_value = self._get_latest_metric_value(device, metric, channel_code)
+            condition_device = self._resolve_device_ref(
+                device,
+                condition.get("source_device_id") if isinstance(condition.get("source_device_id"), int) else None,
+                condition.get("source_device_code") if isinstance(condition.get("source_device_code"), str) else None,
+            )
+            latest_value = self._get_latest_metric_value(condition_device, metric, channel_code)
             if latest_value is None:
-                logger.warning(f"No data found for metric {metric} on device {device.code}")
+                logger.warning(f"No data found for metric {metric} on device {condition_device.code}")
                 matches.append(False)
                 continue
 
@@ -324,6 +349,38 @@ class ScriptExecutor:
         self, script: ScriptTemplate
     ) -> List[Dict[str, Any]]:
         return script.command_template.get("commands", [])
+
+    def _build_action_plan_from_commands(
+        self,
+        default_target_device: Device,
+        commands: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        grouped: Dict[str, Dict[str, Any]] = {}
+
+        for item in commands:
+            if not isinstance(item, dict):
+                continue
+
+            target_device = self._resolve_device_ref(
+                default_target_device,
+                item.get("target_device_id") if isinstance(item.get("target_device_id"), int) else None,
+                item.get("target_device_code") if isinstance(item.get("target_device_code"), str) else None,
+            )
+            command = dict(item)
+            command.pop("target_device_id", None)
+            command.pop("target_device_code", None)
+            key = f"{target_device.id}:{target_device.code}"
+
+            if key not in grouped:
+                grouped[key] = {
+                    "target_device_id": target_device.id,
+                    "target_device_code": target_device.code,
+                    "commands": [],
+                }
+
+            grouped[key]["commands"].append(command)
+
+        return list(grouped.values())
 
     def _execute_python_script(
         self, script: ScriptTemplate, device: Device
@@ -773,6 +830,11 @@ class ScriptExecutor:
 
     def _predict_rule_model(self, model_name: str, features: Dict[str, Any]) -> Dict[str, Any]:
         name = str(model_name or "").strip().lower()
+        legacy_aliases = {
+            "aeration_test_v1": "cp500_demo_control_v1",
+            "aeration_sklearn_v1": "cp500_demo_control_v1",
+        }
+        name = legacy_aliases.get(name, name)
         model_config = self._get_model_config(name)
 
         if isinstance(model_config, dict):

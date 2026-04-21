@@ -240,6 +240,9 @@ def _model_registry_summary() -> list[dict]:
                 "rule_type": str(config.get("rule_type", "")),
                 "thresholds": config.get("thresholds") if isinstance(config.get("thresholds"), dict) else {},
                 "suggestions": config.get("suggestions") if isinstance(config.get("suggestions"), dict) else {},
+                "features": config.get("features") if isinstance(config.get("features"), list) else [],
+                "path": str(config.get("path", "")) if config.get("path") else "",
+                "decision_map": config.get("decision_map") if isinstance(config.get("decision_map"), dict) else {},
             }
         )
     items.sort(key=lambda item: item.get("name", ""))
@@ -286,7 +289,7 @@ def _model_health_summary(name_filter: str | None = None) -> list[dict]:
             )
             continue
 
-        if kind == "sklearn":
+        if kind in ("sklearn", "ml", "model"):
             model_path = str(raw_config.get("path", "")).strip()
             feature_names = raw_config.get("features")
             if not model_path:
@@ -331,7 +334,7 @@ def _model_health_summary(name_filter: str | None = None) -> list[dict]:
                         "kind": kind,
                         "healthy": True,
                         "status": "ready",
-                            "detail": f"loaded: {model_path}",
+                        "detail": f"loaded: {model_path}",
                     }
                 )
             except Exception as exc:

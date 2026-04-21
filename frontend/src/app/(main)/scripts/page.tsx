@@ -13,6 +13,7 @@ import {
 	InputNumber,
 	Modal,
 	Row,
+	Segmented,
 	Select,
 	Space,
 	Switch,
@@ -47,6 +48,22 @@ const compactMetricCardStyle = {
 	boxShadow: "0 4px 14px rgba(15, 23, 42, 0.03)",
 };
 
+const sectionCardStyles = {
+	header: {
+		padding: "16px 18px 12px",
+		minHeight: "auto",
+		alignItems: "center",
+		borderBottom: "1px solid #edf1f5",
+		background: "linear-gradient(180deg, #ffffff 0%, #fcfdff 100%)",
+		borderTopLeftRadius: 16,
+		borderTopRightRadius: 16,
+	},
+	body: {
+		...softCardBodyStyle,
+		padding: "18px 18px 18px",
+	},
+} as const;
+
 type ScriptType = "threshold" | "schedule" | "hybrid" | "python";
 type DeviceProfile = "cp500-v3" | "smart-compost" | "mmcgs" | "generic";
 
@@ -73,6 +90,7 @@ type CommandRow = {
 	action?: string;
 	duration?: number;
 	configText?: string;
+	targetDeviceId?: number;
 };
 
 type Script = {
@@ -115,6 +133,9 @@ type ModelRegistryItem = {
 	rule_type?: string;
 	thresholds?: Record<string, unknown>;
 	suggestions?: Record<string, unknown>;
+	features?: string[];
+	path?: string;
+	decision_map?: Record<string, unknown>;
 };
 
 type ModelHealthItem = {
@@ -134,6 +155,7 @@ type RuleCondition = {
 	channel_code?: string;
 	operator?: string;
 	value?: number;
+	sourceDeviceId?: number;
 };
 type RuleConditionFormValue = RuleCondition;
 type RuleDraft = {
@@ -236,6 +258,7 @@ type LinkageFormValues = RuleFormIdentityFields &
 	RuleActionFormFields & {
 	linkage_type: ScriptType;
 	sourceDeviceId?: number;
+	sourceDeviceIds?: number[];
 	sourceMetric?: string;
 	sourceChannelCode?: string;
 	operator?: string;
@@ -245,6 +268,7 @@ type LinkageFormValues = RuleFormIdentityFields &
 	scheduleCron?: string;
 	pythonCode?: string;
 	targetDeviceId?: number;
+	targetDeviceIds?: number[];
 	min_check_interval_seconds?: number;
 };
 
@@ -679,19 +703,14 @@ if o2_value is not None and o2_value <= 8:
 		code: buildSingleModelPythonExample("generic", "aeration_v1", { command: "fan", maxDuration: 300000 }),
 	},
 	{
-		key: "single-model-aeration-test-v1",
-		label: "测试模型控制（aeration_test_v1）",
-		code: buildSingleModelPythonExample("generic", "aeration_test_v1", { command: "fan", maxDuration: 180000 }),
+		key: "single-model-cp500-demo-v1",
+		label: "示例模型控制（cp500_demo_control_v1）",
+		code: buildSingleModelPythonExample("generic", "cp500_demo_control_v1", { command: "fan", maxDuration: 180000 }),
 	},
 	{
 		key: "single-model-heater-v1",
 		label: "加热器模型控制（heater_v1）",
 		code: buildHeaterModelPythonExample("generic"),
-	},
-	{
-		key: "single-model-aeration-sklearn-v1",
-		label: "真实模型控制（aeration_sklearn_v1）",
-		code: buildSingleModelPythonExample("generic", "aeration_sklearn_v1", { command: "fan", maxDuration: 300000 }),
 	},
 	{
 		key: "single-time-and-threshold",
@@ -719,8 +738,8 @@ const linkagePythonTemplates = [
 		code: linkagePythonExample,
 	},
 	{
-		key: "linkage-model-aeration-test-v1",
-		label: "联动测试模型（aeration_test_v1）",
+		key: "linkage-model-cp500-demo-v1",
+		label: "联动示例模型（cp500_demo_control_v1）",
 		code: `MIN_CHECK_INTERVAL_SECONDS = 60
 
 # 跨设备模型示例：显式写 source device_code，并把动作下发给另一台设备。
@@ -732,7 +751,7 @@ FEATURES["o2_min_5m"] = min(o2_series) if o2_series else None
 FEATURES["sample_count_temp"] = len(temp_series)
 FEATURES["sample_count_o2"] = len(o2_series)
 
-pred = predict("aeration_test_v1", FEATURES)
+pred = predict("cp500_demo_control_v1", FEATURES)
 actions = []
 
 decision = pred.get("decision")
@@ -795,12 +814,12 @@ else:
 const singleTemplatePriority = [
 	"single-threshold",
 	"single-multi-command",
-	"single-model-aeration-test-v1",
+	"single-model-cp500-demo-v1",
 ] as const;
 
 const linkageTemplatePriority = [
 	"basic-linkage",
-	"linkage-model-aeration-test-v1",
+	"linkage-model-cp500-demo-v1",
 	"multi-device-orchestration",
 ] as const;
 
@@ -842,7 +861,7 @@ else:
     })`,
 			};
 		}
-		if (template.key === "linkage-model-aeration-test-v1") {
+		if (template.key === "linkage-model-cp500-demo-v1") {
 			return {
 				...template,
 				code: `MIN_CHECK_INTERVAL_SECONDS = 60
@@ -856,7 +875,7 @@ FEATURES["o2_min_5m"] = min(o2_series) if o2_series else None
 FEATURES["sample_count_temp"] = len(temp_series)
 FEATURES["sample_count_o2"] = len(o2_series)
 
-pred = predict("aeration_test_v1", FEATURES)
+pred = predict("cp500_demo_control_v1", FEATURES)
 actions = []
 
 decision = pred.get("decision")
@@ -916,9 +935,8 @@ function getPythonTemplatesForProfile(profile: DeviceProfile) {
 			if (profile === "mmcgs") {
 				return ![
 					"single-model-aeration-v1",
-					"single-model-aeration-test-v1",
+					"single-model-cp500-demo-v1",
 					"single-model-heater-v1",
-					"single-model-aeration-sklearn-v1",
 				].includes(template.key);
 			}
 			if (profile === "smart-compost") {
@@ -970,21 +988,12 @@ if o2_value is not None and o2_value <= 8:
 					}),
 				};
 			}
-			if (template.key === "single-model-aeration-test-v1") {
+			if (template.key === "single-model-cp500-demo-v1") {
 				return {
 					...template,
-					code: buildSingleModelPythonExample(profile, "aeration_test_v1", {
+					code: buildSingleModelPythonExample(profile, "cp500_demo_control_v1", {
 						command: primaryCommand,
 						maxDuration: 180000,
-					}),
-				};
-			}
-			if (template.key === "single-model-aeration-sklearn-v1") {
-				return {
-					...template,
-					code: buildSingleModelPythonExample(profile, "aeration_sklearn_v1", {
-						command: primaryCommand,
-						maxDuration: 300000,
 					}),
 				};
 			}
@@ -1050,6 +1059,47 @@ function summarizeModelSuggestions(suggestions?: Record<string, unknown>): strin
 	}
 	if (!Object.keys(s).length) return "未配置建议参数";
 	return JSON.stringify(s);
+}
+
+function summarizeModelFeatureList(features?: string[]): string {
+	if (!Array.isArray(features) || !features.length) return "未配置特征";
+	return features.join(" / ");
+}
+
+function summarizeDecisionMap(decisionMap?: Record<string, unknown>): string {
+	if (!decisionMap || typeof decisionMap !== "object" || !Object.keys(decisionMap).length) {
+		return "未配置映射";
+	}
+	return Object.entries(decisionMap)
+		.map(([key, value]) => `${key} -> ${String(value)}`)
+		.join("，");
+}
+
+function summarizeModelPath(path?: string): string {
+	const text = String(path || "").trim();
+	if (!text) return "未配置路径";
+	return text.split(/[\\/]/).pop() || text;
+}
+
+function summarizeModelType(kind?: string, ruleType?: string): string {
+	const normalizedKind = String(kind || "").toLowerCase();
+	const normalizedRuleType = String(ruleType || "").toLowerCase();
+	const domainLabel =
+		normalizedRuleType === "aeration" || normalizedRuleType === "aeration_v1"
+			? "曝气控制"
+			: normalizedRuleType === "heater" || normalizedRuleType === "heater_v1"
+			? "加热控制"
+			: normalizedRuleType
+			? normalizedRuleType
+			: "通用";
+
+	if (normalizedKind === "rule") {
+		return `规则模型 · ${domainLabel}`;
+	}
+	if (["model", "ml", "sklearn"].includes(normalizedKind)) {
+		return `文件模型 · ${domainLabel}`;
+	}
+	return domainLabel;
 }
 
 function isDeviceProfile(value: string): value is DeviceProfile {
@@ -1225,11 +1275,15 @@ function normalizeThresholdConditions(
 				channel_code?: string;
 				operator?: string;
 				value?: number;
+				sourceDeviceId?: number;
+				source_device_id?: number;
 				conditions?: Array<{
 					metric?: string;
 					channel_code?: string;
 					operator?: string;
 					value?: number;
+					sourceDeviceId?: number;
+					source_device_id?: number;
 				}>;
 		  }
 		| undefined,
@@ -1241,7 +1295,17 @@ function normalizeThresholdConditions(
 			typeof item === "object" &&
 			(item.metric || item.channel_code || item.operator || item.value !== undefined),
 	);
-	if (list.length) return list;
+	if (list.length) {
+		return list.map((item) => ({
+			...item,
+			sourceDeviceId:
+				typeof item.sourceDeviceId === "number"
+					? item.sourceDeviceId
+					: typeof item.source_device_id === "number"
+					? item.source_device_id
+					: undefined,
+		}));
+	}
 	if (config?.metric || config?.channel_code || config?.operator || config?.value !== undefined) {
 		return [
 			{
@@ -1249,6 +1313,12 @@ function normalizeThresholdConditions(
 				channel_code: config.channel_code,
 				operator: config.operator,
 				value: config.value,
+				sourceDeviceId:
+					typeof config.sourceDeviceId === "number"
+						? config.sourceDeviceId
+						: typeof config.source_device_id === "number"
+						? config.source_device_id
+						: undefined,
 			},
 		];
 	}
@@ -1291,6 +1361,8 @@ function parseCommandRowsForKey(text: string, key: "commands" | "else_commands")
 					command: typeof row.command === "string" ? row.command : "pump",
 					action: isConfigUpdate ? undefined : typeof row.action === "string" ? row.action : "on",
 					duration: typeof row.duration === "number" ? row.duration : undefined,
+					targetDeviceId:
+						typeof row.target_device_id === "number" ? row.target_device_id : undefined,
 					configText:
 						isConfigUpdate
 							? typeof row.config_text === "string"
@@ -1328,11 +1400,13 @@ function updateCommandTemplateRows(
 						return {
 							command: "config_update",
 							config: parseConfigText(rawText),
+							...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 						};
 					} catch {
 						return {
 							command: "config_update",
 							config_text: rawText,
+							...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 						};
 					}
 				}
@@ -1340,6 +1414,7 @@ function updateCommandTemplateRows(
 					command: row.command,
 					action: row.action,
 					...(row.duration !== undefined ? { duration: row.duration } : {}),
+					...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 				};
 			}),
 		},
@@ -1485,6 +1560,7 @@ function buildThresholdConfigDraft(options: {
 		channel_code?: string;
 		operator?: string;
 		value?: number;
+		sourceDeviceId?: number;
 	}>;
 }) {
 	const thresholdConfig: Record<string, unknown> = {};
@@ -1492,12 +1568,23 @@ function buildThresholdConfigDraft(options: {
 		thresholdConfig.source_device_id = options.sourceDeviceId;
 	}
 	thresholdConfig.condition_mode = options.conditionMode || "all";
-	thresholdConfig.conditions = options.conditions;
+	thresholdConfig.conditions = options.conditions.map((condition) => ({
+		metric: condition.metric,
+		channel_code: condition.channel_code,
+		operator: condition.operator,
+		value: condition.value,
+		...(typeof condition.sourceDeviceId === "number"
+			? { source_device_id: condition.sourceDeviceId }
+			: {}),
+	}));
 	if (options.conditions.length === 1) {
 		thresholdConfig.metric = options.conditions[0].metric;
 		thresholdConfig.channel_code = options.conditions[0].channel_code;
 		thresholdConfig.operator = options.conditions[0].operator;
 		thresholdConfig.value = options.conditions[0].value;
+		if (typeof options.conditions[0].sourceDeviceId === "number") {
+			thresholdConfig.source_device_id = options.conditions[0].sourceDeviceId;
+		}
 	}
 	return thresholdConfig;
 }
@@ -1551,11 +1638,13 @@ function buildCommandRowPayload(row: CommandRow) {
 			return {
 				command: "config_update",
 				config: parseConfigText(rawText),
+				...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 			};
 		} catch {
 			return {
 				command: "config_update",
 				config_text: rawText,
+				...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 			};
 		}
 	}
@@ -1563,6 +1652,7 @@ function buildCommandRowPayload(row: CommandRow) {
 		command: row.command,
 		action: row.action,
 		...(row.duration !== undefined ? { duration: row.duration } : {}),
+		...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 	};
 }
 
@@ -1644,11 +1734,13 @@ function buildStructuredActionCommandTemplate(values: StructuredActionFormValues
 				return {
 					command: "config_update",
 					config: parseConfigText(rawText),
+					...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 				};
 			} catch {
 				return {
 					command: "config_update",
 					config_text: rawText,
+					...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 				};
 			}
 		}
@@ -1656,6 +1748,7 @@ function buildStructuredActionCommandTemplate(values: StructuredActionFormValues
 			command: row.command,
 			action: row.action,
 			...(row.duration !== undefined ? { duration: row.duration } : {}),
+			...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
 		};
 	};
 
@@ -1703,6 +1796,18 @@ function hasStructuredPrimaryActions(values: StructuredActionFormValues) {
 	return safeArray<CommandRow>(values.primaryActions).some(commandRowIncludedInTemplate);
 }
 
+function getFirstActionTargetDeviceId(values?: StructuredActionFormValues) {
+	const rows = [
+		...safeArray<CommandRow>(values?.primaryActions),
+		...safeArray<CommandRow>(values?.elseCommands),
+	];
+	return rows.find((row) => typeof row.targetDeviceId === "number")?.targetDeviceId;
+}
+
+function hasAnyConditionSource(conditions: RuleCondition[] | undefined, fallbackSourceDeviceId?: number) {
+	return safeArray<RuleCondition>(conditions).some((item) => typeof item.sourceDeviceId === "number") || typeof fallbackSourceDeviceId === "number";
+}
+
 function normalizeActionRowsForProfile(
 	actions: CommandRow[] | undefined,
 	profile: DeviceProfile,
@@ -1733,6 +1838,7 @@ function normalizeActionRowsForProfile(
 				nextCommand === "config_update" || nextCommand === "restart" || nextCommand === "emergency"
 					? undefined
 					: row.duration ?? getDefaultDurationForCommand(nextCommand),
+			targetDeviceId: row.targetDeviceId,
 		};
 	});
 }
@@ -1792,20 +1898,23 @@ function normalizeScriptEditorValues(values: Partial<ScriptFormValues>): SharedR
 }
 
 function normalizeLinkageEditorValues(values: Partial<LinkageFormValues>): SharedRuleEditorValues {
+	const sourceDeviceIds = safeArray<number>(values.sourceDeviceIds);
+	const targetDeviceIds = safeArray<number>(values.targetDeviceIds);
 	return {
 		name: values.name || "",
 		description: values.description || "",
 		is_active: values.is_active ?? true,
 		priority: values.priority ?? 0,
 		type: values.linkage_type || "threshold",
-		sourceDeviceId: values.sourceDeviceId,
-		targetDeviceId: values.targetDeviceId,
+		sourceDeviceId: values.sourceDeviceId ?? sourceDeviceIds[0],
+		targetDeviceId: values.targetDeviceId ?? targetDeviceIds[0],
 		conditions: normalizeThresholdConditions({
 			conditions: values.conditions,
 			metric: values.sourceMetric,
 			channel_code: values.sourceChannelCode,
 			operator: values.operator,
 			value: values.threshold,
+			sourceDeviceId: values.sourceDeviceId ?? sourceDeviceIds[0],
 		}),
 		conditionMode: values.conditionMode || "all",
 		cron: values.scheduleCron,
@@ -2034,10 +2143,29 @@ function buildLinkageFormValuesFromDraft(
 		targetProfile,
 	);
 
+	const sourceDeviceIds = Array.from(
+		new Set(
+			[draft.sourceDeviceId, ...conditions
+				.map((item) => item.sourceDeviceId)
+				.filter((item): item is number => typeof item === "number")]
+				.filter((item): item is number => typeof item === "number"),
+		),
+	);
+	const targetDeviceIds = Array.from(
+		new Set(
+			[
+				actionFormValues.targetDeviceId,
+				...safeArray<CommandRow>(actionFormValues.primaryActions).map((item) => item.targetDeviceId),
+				...safeArray<CommandRow>(actionFormValues.elseCommands).map((item) => item.targetDeviceId),
+			].filter((item): item is number => typeof item === "number"),
+		),
+	);
+
 	return {
 		...identity,
 		linkage_type: triggerFields.type,
 		sourceDeviceId: draft.sourceDeviceId,
+		sourceDeviceIds,
 		sourceMetric: conditions[0]?.metric || defaultMetric,
 		sourceChannelCode: conditions[0]?.channel_code,
 		operator: conditions[0]?.operator || ">=",
@@ -2048,6 +2176,7 @@ function buildLinkageFormValuesFromDraft(
 		pythonCode: triggerFields.pythonCode,
 		primaryActions: actionFormValues.primaryActions,
 		targetDeviceId: actionFormValues.targetDeviceId,
+		targetDeviceIds,
 		elseCommands: actionFormValues.elseCommands,
 		...(typeof draft.minCheckIntervalSeconds === "number" && draft.minCheckIntervalSeconds > 0
 			? { min_check_interval_seconds: draft.minCheckIntervalSeconds }
@@ -2078,9 +2207,24 @@ function buildRulePayloadFromDraft(
 		requireStructuredTarget: scope === "linkage",
 		requireSourceForThreshold: scope === "linkage",
 	});
-	if (scope === "linkage" && draft.type !== "python" && (!draft.targetDeviceId || !hasStructuredPrimaryActions(actionValues || {}))) {
+	if (
+		scope === "linkage" &&
+		draft.type !== "python" &&
+		(!hasStructuredPrimaryActions(actionValues || {}) ||
+			!(typeof draft.targetDeviceId === "number" || typeof getFirstActionTargetDeviceId(actionValues) === "number"))
+	) {
 		throw new Error("请补全联动动作");
 	}
+
+	const anchorTargetDeviceId = draft.targetDeviceId ?? getFirstActionTargetDeviceId(actionValues);
+	const anchorDeviceIds =
+		scope === "linkage"
+			? anchorTargetDeviceId
+				? [anchorTargetDeviceId]
+				: draft.sourceDeviceId
+				? [draft.sourceDeviceId]
+				: []
+			: buildRulePayloadBase(draft).device_ids;
 
 	let threshold_config: Record<string, unknown> =
 		draft.type === "threshold" || draft.type === "hybrid"
@@ -2114,6 +2258,7 @@ function buildRulePayloadFromDraft(
 
 	return {
 		...buildRulePayloadBase(draft),
+		device_ids: anchorDeviceIds,
 		command_template: {
 			...draft.commandTemplate,
 			...(scope === "linkage" ? { rule_scope: "linkage" } : {}),
@@ -2121,7 +2266,6 @@ function buildRulePayloadFromDraft(
 		threshold_config,
 		schedule_config,
 		python_code: draft.type === "python" ? draft.pythonCode : "",
-		...(scope === "single" ? { device_ids: buildRulePayloadBase(draft).device_ids } : {}),
 	};
 }
 
@@ -2143,7 +2287,11 @@ function validateRuleDraft(
 	if ((draft.type === "threshold" || draft.type === "hybrid") && !draft.conditions.length) {
 		throw new Error(options.scope === "linkage" ? "请补全联动的阈值条件" : "请补全阈值条件");
 	}
-	if ((draft.type === "threshold" || draft.type === "hybrid") && options.requireSourceForThreshold && !draft.sourceDeviceId) {
+	if (
+		(draft.type === "threshold" || draft.type === "hybrid") &&
+		options.requireSourceForThreshold &&
+		!hasAnyConditionSource(draft.conditions, draft.sourceDeviceId)
+	) {
 		throw new Error("请补全联动的阈值条件");
 	}
 	if ((draft.type === "schedule" || draft.type === "hybrid") && !draft.cron) {
@@ -2161,8 +2309,13 @@ function validateRuleDraft(
 			throw new Error("Python 脚本中至少需要定义 commands 或 actions");
 		}
 	}
-	if (options.requireStructuredTarget && draft.type !== "python" && !draft.targetDeviceId) {
-		throw new Error(options.scope === "linkage" ? "请补全联动动作" : "请先选择所属设备");
+	if (
+		options.requireStructuredTarget &&
+		draft.type !== "python" &&
+		options.scope === "single" &&
+		!draft.targetDeviceId
+	) {
+		throw new Error("请先选择所属设备");
 	}
 	let interval = draft.minCheckIntervalSeconds;
 	if (draft.type === "python") {
@@ -2251,21 +2404,27 @@ function toPythonVarName(value: string, fallback: string) {
 	return sanitized || fallback;
 }
 
+function findDeviceById(devices: Device[] | undefined, deviceId?: number) {
+	return typeof deviceId === "number" ? (devices || []).find((item) => item.device_id === deviceId) : undefined;
+}
+
 function buildConditionPreview(
 	conditions: Array<{
 		metric?: string;
 		channel_code?: string;
 		operator?: string;
 		value?: number;
+		sourceDeviceId?: number;
 	}>,
 	options?: {
 		deviceId?: number;
 		deviceCode?: string;
+		devices?: Device[];
 	},
 ) {
 	const lines: string[] = [];
 	const checks: string[] = [];
-	const sourceArgs = options?.deviceCode
+	const defaultSourceArgs = options?.deviceCode
 		? `, device_code=${JSON.stringify(options.deviceCode)}`
 		: typeof options?.deviceId === "number"
 		? `, device_id=${options.deviceId}`
@@ -2275,6 +2434,13 @@ function buildConditionPreview(
 		const metric = String(condition.metric || "temperature");
 		const channelCode = typeof condition.channel_code === "string" ? condition.channel_code : "";
 		const variableName = toPythonVarName(channelCode || metric, `value_${index + 1}`);
+		const conditionDevice = findDeviceById(options?.devices, condition.sourceDeviceId);
+		const sourceArgs =
+			conditionDevice?.code
+				? `, device_code=${JSON.stringify(conditionDevice.code)}`
+				: typeof condition.sourceDeviceId === "number"
+				? `, device_id=${condition.sourceDeviceId}`
+				: defaultSourceArgs;
 		const valueExpr = channelCode
 			? `get_latest_value(${JSON.stringify(metric)}, ${JSON.stringify(channelCode)}${sourceArgs})`
 			: `get_latest_value(${JSON.stringify(metric)}, None${sourceArgs})`;
@@ -2294,12 +2460,37 @@ function buildActionPlanPreviewFromTemplate(
 	targetDevice: Device | null | undefined,
 	commandTemplate: Record<string, unknown> | undefined,
 	variableName = "actions",
+	options?: { devices?: Device[] },
 ) {
 	try {
 		const commands = safeArray<Record<string, unknown>>(commandTemplate?.commands);
-		const target: Record<string, unknown> = {
-			commands,
-		};
+		const hasPerCommandTarget = commands.some(
+			(item) => typeof item.target_device_id === "number" || typeof item.target_device_code === "string",
+		);
+		if (hasPerCommandTarget) {
+			const grouped = new Map<string, { target_device_id?: number; target_device_code?: string; commands: Record<string, unknown>[] }>();
+			commands.forEach((item) => {
+				const command = { ...item };
+				const targetDeviceId = typeof command.target_device_id === "number" ? command.target_device_id : undefined;
+				const targetDeviceCode =
+					typeof command.target_device_code === "string"
+						? command.target_device_code
+						: findDeviceById(options?.devices, targetDeviceId)?.code;
+				delete command.target_device_id;
+				delete command.target_device_code;
+				const key = `${targetDeviceId || ""}:${targetDeviceCode || ""}`;
+				if (!grouped.has(key)) {
+					grouped.set(key, {
+						...(typeof targetDeviceId === "number" ? { target_device_id: targetDeviceId } : {}),
+						...(targetDeviceCode ? { target_device_code: targetDeviceCode } : {}),
+						commands: [],
+					});
+				}
+				grouped.get(key)!.commands.push(command);
+			});
+			return `${variableName} = ${JSON.stringify(Array.from(grouped.values()), null, 2)}`;
+		}
+		const target: Record<string, unknown> = { commands };
 		if (typeof targetDevice?.device_id === "number") {
 			target.target_device_id = targetDevice.device_id;
 		}
@@ -2336,6 +2527,7 @@ function buildRulePythonPreview(
 		scope: RuleScope;
 		sourceDevice?: Device | null;
 		targetDevice?: Device | null;
+		devices?: Device[];
 	},
 ) {
 	const scopeLabel = options.scope === "single" ? "单设备规则预览" : "设备联动规则预览";
@@ -2384,6 +2576,7 @@ function buildRulePythonPreview(
 	const { assignments, checks } = buildConditionPreview(draft.conditions, {
 		deviceId: options.scope === "linkage" ? options.sourceDevice?.device_id : undefined,
 		deviceCode: options.scope === "linkage" ? options.sourceDevice?.code : undefined,
+		devices: options.devices,
 	});
 	const joiner = draft.conditionMode === "any" ? "\n    or " : "\n    and ";
 	const ifExpr = checks.join(joiner);
@@ -2405,10 +2598,14 @@ function buildRulePythonPreview(
 		return `# ${scopeLabel}\n# 所属设备: ${targetLabel}\n# 条件关系: ${draft.conditionMode === "any" ? "任一满足" : "全部满足"}\n${intervalPrefix}${assignments}\n\nif ${ifExpr}:\n${indentLines(commandBlock)}\nelse:\n${indentLines(hasElseBlock ? elseCommandBlock : "commands = []")}`;
 	}
 
-	const actionBlock = buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate);
+	const actionBlock = buildActionPlanPreviewFromTemplate(options.targetDevice, draft.commandTemplate, "actions", {
+		devices: options.devices,
+	});
 	const elseActionBlock = (() => {
 		const elseCommands = safeArray<Record<string, unknown>>(draft.commandTemplate?.else_commands);
-		return buildActionPlanPreviewFromTemplate(options.targetDevice, { commands: elseCommands });
+		return buildActionPlanPreviewFromTemplate(options.targetDevice, { commands: elseCommands }, "actions", {
+			devices: options.devices,
+		});
 	})();
 	const hasElseActionBlock = !elseActionBlock.trim().endsWith("actions = []");
 	if (draft.type === "hybrid") {
@@ -2436,6 +2633,7 @@ function buildLinkagePythonPreview(
 	values: Partial<LinkageFormValues>,
 	sourceDevice?: Device | null,
 	targetDevice?: Device | null,
+	devices?: Device[],
 ) {
 	try {
 		const draft = buildRuleDraftFromScopeValues("linkage", values);
@@ -2443,6 +2641,7 @@ function buildLinkagePythonPreview(
 			scope: "linkage",
 			sourceDevice,
 			targetDevice,
+			devices,
 		});
 	} catch (error) {
 		return `# 当前预览无法生成\n# ${error instanceof Error ? error.message : "联动配置不完整"}`;
@@ -2653,6 +2852,9 @@ function CommandEditor({
 	onChange,
 	commandOptions,
 	profile,
+	deviceOptions,
+	defaultTargetDeviceId,
+	targetLabel = "执行设备",
 	fieldKey = "commands",
 	title = "执行动作",
 	emptyTitle = "先新增一条命令，或者直接编辑下面的 JSON。",
@@ -2663,6 +2865,9 @@ function CommandEditor({
 	onChange: (value: string) => void;
 	commandOptions: Array<{ value: string; label: string }>;
 	profile?: DeviceProfile;
+	deviceOptions?: Array<{ value: number; label: string }>;
+	defaultTargetDeviceId?: number;
+	targetLabel?: string;
 	fieldKey?: "commands" | "else_commands";
 	title?: string;
 	emptyTitle?: string;
@@ -2698,7 +2903,18 @@ function CommandEditor({
 	};
 	const body = (
 		<Space orientation="vertical" style={{ width: "100%" }}>
-			<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+			<div
+				style={{
+					display: "flex",
+					justifyContent: "space-between",
+					alignItems: "center",
+					gap: 12,
+					padding: "10px 12px",
+					borderRadius: 10,
+					background: "#f7f9fc",
+					border: "1px solid #edf1f5",
+				}}
+			>
 				<Text strong>{title}</Text>
 				<Button
 					size="small"
@@ -2714,6 +2930,9 @@ function CommandEditor({
 								duration: getDefaultDurationForCommand(
 									getPreferredAddCommand(commandOptions, profile || "generic"),
 								),
+								...(typeof defaultTargetDeviceId === "number"
+									? { targetDeviceId: defaultTargetDeviceId }
+									: {}),
 							},
 						])
 					}
@@ -2721,12 +2940,23 @@ function CommandEditor({
 					{addLabel}
 				</Button>
 			</div>
-			{!rows.length ? <Alert type="info" showIcon title={emptyTitle} /> : null}
+			{!rows.length ? <Alert type="info" showIcon title={emptyTitle} style={{ borderRadius: 10 }} /> : null}
 			{rows.map((row, index) => {
 				const actionOptions = getCommandActionOptions(row.command, profile);
 				const isConfigUpdate = row.command === "config_update";
 				return (
 					<Space key={`${row.command}-${index}`} wrap align="start">
+						{deviceOptions?.length ? (
+							<Select
+								style={{ width: 220 }}
+								options={deviceOptions}
+								value={row.targetDeviceId}
+								placeholder={`选择${targetLabel}`}
+								onChange={(next) =>
+									updateRows(rows.map((item, i) => (i === index ? { ...item, targetDeviceId: next } : item)))
+								}
+							/>
+						) : null}
 						<Select
 							style={{ width: 160 }}
 							options={commandOptions}
@@ -2811,6 +3041,7 @@ function RuleBasicCard({
 	descriptionPlaceholder,
 	children,
 	footerHint,
+	topMeta,
 }: {
 	typeFieldName: FormFieldName;
 	isActiveFieldName: FormFieldName;
@@ -2819,42 +3050,44 @@ function RuleBasicCard({
 	descriptionPlaceholder: string;
 	children?: ReactNode;
 	footerHint?: ReactNode;
+	topMeta?: ReactNode;
 }) {
 	return (
-		<Card size="small" title="规则信息" style={{ ...panelCardStyle, marginBottom: 16 }} styles={{ body: softCardBodyStyle }}>
+		<Card size="small" title="规则信息" style={{ ...panelCardStyle, marginBottom: 16 }} styles={sectionCardStyles}>
+			{topMeta ? <div style={{ marginBottom: 16 }}>{topMeta}</div> : null}
 			<Row gutter={12}>
 				<Col xs={24} md={14}>
-					<Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]}>
+					<Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]} style={{ marginBottom: 12 }}>
 						<Input placeholder={namePlaceholder} />
 					</Form.Item>
 				</Col>
 				<Col xs={24} md={10}>
-					<Form.Item label="规则类型" name={typeFieldName} rules={[{ required: true, message: "请选择规则类型" }]}>
+					<Form.Item label="规则类型" name={typeFieldName} rules={[{ required: true, message: "请选择规则类型" }]} style={{ marginBottom: 12 }}>
 						<Select options={typeOptions as never} />
 					</Form.Item>
 				</Col>
 			</Row>
 
-			<Form.Item label="规则说明" name="description">
+			<Form.Item label="规则说明" name="description" style={{ marginBottom: children || footerHint ? 14 : 0 }}>
 				<Input.TextArea rows={2} placeholder={descriptionPlaceholder} />
 			</Form.Item>
 
 			{children}
 
-			<Row gutter={12}>
+			<Row gutter={12} style={{ marginTop: children ? 4 : 0 }}>
 				<Col xs={12} md={4}>
-					<Form.Item label="启用状态" name={isActiveFieldName} valuePropName="checked">
+					<Form.Item label="启用状态" name={isActiveFieldName} valuePropName="checked" style={{ marginBottom: 0 }}>
 						<Switch checkedChildren="启用" unCheckedChildren="停用" />
 					</Form.Item>
 				</Col>
 				<Col xs={12} md={4}>
-					<Form.Item label="优先级" name={priorityFieldName}>
+					<Form.Item label="优先级" name={priorityFieldName} style={{ marginBottom: 0 }}>
 						<InputNumber min={0} style={{ width: "100%" }} />
 					</Form.Item>
 				</Col>
 			</Row>
 
-			{footerHint}
+			{footerHint ? <div style={{ marginTop: 14 }}>{footerHint}</div> : null}
 		</Card>
 	);
 }
@@ -2896,9 +3129,19 @@ function RulePreviewCard({
 		`get_latest_value("${metric}", "${channelCode}")`;
 
 	return (
-		<Card size="small" title="规则说明与预览" style={panelCardStyle} styles={{ body: softCardBodyStyle }}>
+		<Card size="small" title="规则说明与预览" style={panelCardStyle} styles={sectionCardStyles}>
 			<Tag color={typeColor[type]}>{typeLabel(type)}</Tag>
-			<Paragraph type="secondary" style={{ marginTop: 12 }}>
+			<Paragraph
+				type="secondary"
+				style={{
+					marginTop: 12,
+					marginBottom: 12,
+					padding: "10px 12px",
+					background: "#f7f9fc",
+					border: "1px solid #edf1f5",
+					borderRadius: 10,
+				}}
+			>
 				{scopeSummary}
 			</Paragraph>
 			<Paragraph>
@@ -3122,20 +3365,21 @@ function ConditionsEditor({
 	metricOptions,
 	getChannelOptions,
 	defaultMetric,
+	deviceOptions,
+	sourceLabel = "触发设备",
 }: {
 	form: { getFieldValue: (name: unknown) => unknown };
 	listName: FormFieldName;
 	conditionModeName: FormFieldName;
 	conditionMode: "all" | "any";
 	metricOptions: Array<{ value: string; label: string }>;
-	getChannelOptions: (metricValue?: string) => Array<{ value: string; label: string }>;
+	getChannelOptions: (metricValue?: string, sourceDeviceId?: number) => Array<{ value: string; label: string }>;
 	defaultMetric: string;
+	deviceOptions?: Array<{ value: number; label: string }>;
+	sourceLabel?: string;
 }) {
 	return (
 		<>
-			<Form.Item label="条件关系" name={conditionModeName} initialValue="all" style={{ marginBottom: 8 }}>
-				<Select style={{ width: 160 }} options={conditionModeOptions as never} />
-			</Form.Item>
 			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
 				{conditionMode === "any" ? "任一条件满足后执行。" : "全部条件满足后执行。"}
 			</Text>
@@ -3144,28 +3388,104 @@ function ConditionsEditor({
 					<Space orientation="vertical" style={{ width: "100%" }} size={12}>
 						{fields.map((field, index) => {
 							const metricValue = form.getFieldValue([...((Array.isArray(listName) ? listName : [listName]) as (string | number)[]), field.name, "metric"]);
-							const channelOptions = getChannelOptions(typeof metricValue === "string" ? metricValue : undefined);
+							const rowSourceDeviceId = form.getFieldValue([
+								...((Array.isArray(listName) ? listName : [listName]) as (string | number)[]),
+								field.name,
+								"sourceDeviceId",
+							]);
+							const channelOptions = getChannelOptions(
+								typeof metricValue === "string" ? metricValue : undefined,
+								typeof rowSourceDeviceId === "number" ? rowSourceDeviceId : undefined,
+							);
 							return (
-								<Space key={field.key} wrap align="start">
-									<Form.Item label={index === 0 ? "监控指标" : " "} name={[field.name, "metric"]} rules={[{ required: true, message: "请选择指标" }]}>
-										<Select style={{ width: 220 }} options={metricOptions} />
-									</Form.Item>
-									<Form.Item label={index === 0 ? "监控通道" : " "} name={[field.name, "channel_code"]}>
-										<Select allowClear style={{ width: 260 }} options={channelOptions} placeholder="选择具体通道" />
-									</Form.Item>
-									<Form.Item label={index === 0 ? "比较符" : " "} name={[field.name, "operator"]} rules={[{ required: true, message: "请选择比较符" }]}>
-										<Select style={{ width: 100 }} options={operatorOptions} />
-									</Form.Item>
-									<Form.Item label={index === 0 ? "阈值" : " "} name={[field.name, "value"]} rules={[{ required: true, message: "请输入阈值" }]}>
-										<InputNumber style={{ width: 140 }} />
-									</Form.Item>
-									<Button danger size="small" onClick={() => remove(field.name)} disabled={fields.length <= 1}>
-										删除
-									</Button>
-								</Space>
+								<div
+									key={field.key}
+									style={{
+										border: "1px solid #edf1f5",
+										borderRadius: 12,
+										padding: 12,
+										background: "#fff",
+									}}
+								>
+									<Row gutter={[8, 8]} align="middle">
+										{deviceOptions?.length ? (
+											<Col xs={24} md={12} xl={7}>
+												<Form.Item
+													label={index === 0 ? <span style={{ whiteSpace: "nowrap" }}>{sourceLabel}</span> : undefined}
+													name={[field.name, "sourceDeviceId"]}
+													rules={[{ required: true, message: `请选择${sourceLabel}` }]}
+													style={{ marginBottom: 0 }}
+												>
+													<Select
+														showSearch
+														optionFilterProp="label"
+														options={deviceOptions}
+														placeholder={`选择${sourceLabel}`}
+													/>
+												</Form.Item>
+											</Col>
+										) : null}
+										<Col xs={24} md={12} xl={deviceOptions?.length ? 6 : 7}>
+											<Form.Item
+												label={index === 0 ? <span style={{ whiteSpace: "nowrap" }}>监控指标</span> : undefined}
+												name={[field.name, "metric"]}
+												rules={[{ required: true, message: "请选择指标" }]}
+												style={{ marginBottom: 0 }}
+											>
+												<Select options={metricOptions} placeholder="选择指标" />
+											</Form.Item>
+										</Col>
+										<Col xs={24} md={12} xl={deviceOptions?.length ? 7 : 8}>
+											<Form.Item
+												label={index === 0 ? <span style={{ whiteSpace: "nowrap" }}>监控通道</span> : undefined}
+												name={[field.name, "channel_code"]}
+												style={{ marginBottom: 0 }}
+											>
+												<Select allowClear options={channelOptions} placeholder="按需指定通道" />
+											</Form.Item>
+										</Col>
+										<Col xs={12} md={6} xl={2}>
+											<Form.Item
+												label={index === 0 ? <span style={{ whiteSpace: "nowrap" }}>比较符</span> : undefined}
+												name={[field.name, "operator"]}
+												rules={[{ required: true, message: "请选择比较符" }]}
+												style={{ marginBottom: 0 }}
+											>
+												<Select options={operatorOptions} />
+											</Form.Item>
+										</Col>
+										<Col xs={12} md={8} xl={4}>
+											<Form.Item
+												label={index === 0 ? <span style={{ whiteSpace: "nowrap" }}>阈值</span> : undefined}
+												name={[field.name, "value"]}
+												rules={[{ required: true, message: "请输入阈值" }]}
+												style={{ marginBottom: 0 }}
+											>
+												<InputNumber style={{ width: "100%" }} />
+											</Form.Item>
+										</Col>
+										<Col xs={24} md={4} xl={deviceOptions?.length ? 2 : 3}>
+											<div style={{ display: "flex", justifyContent: "flex-end", alignItems: "end", height: "100%" }}>
+												<Button danger size="small" onClick={() => remove(field.name)} disabled={fields.length <= 1}>
+													删除
+												</Button>
+											</div>
+										</Col>
+									</Row>
+								</div>
 							);
 						})}
-						<Button size="small" onClick={() => add({ metric: defaultMetric, operator: ">=", value: 0 })}>
+						<Button
+							size="small"
+							onClick={() =>
+								add({
+									metric: defaultMetric,
+									operator: ">=",
+									value: 0,
+									...(deviceOptions?.[0]?.value ? { sourceDeviceId: deviceOptions[0].value } : {}),
+								})
+							}
+						>
 							新增条件
 						</Button>
 					</Space>
@@ -3180,17 +3500,18 @@ function PythonLogicCard({
 	codeLabel,
 	codeValueName,
 	templates,
-	beforeContent,
 	auxActions,
+	scriptHint,
 }: {
 	codeFieldName: FormFieldName;
 	codeLabel: string;
 	codeValueName: "python_code" | "pythonCode";
 	templates: readonly { key: string; label: string; code: string }[];
-	beforeContent?: ReactNode;
 	auxActions?: ReactNode;
+	scriptHint?: string;
 }) {
 	const form = Form.useFormInstance();
+	const [showAllModels, setShowAllModels] = useState(false);
 	const modelRegistryQ = useQuery({
 		queryKey: ["script-model-registry"],
 		queryFn: async () =>
@@ -3204,7 +3525,7 @@ function PythonLogicCard({
 		staleTime: 30 * 1000,
 	});
 	const modelGuideRows = useMemo(
-		() => (modelRegistryQ.data?.data || []).filter((item) => item.name.includes("_test_")),
+		() => (modelRegistryQ.data?.data || []).filter((item) => item.name.includes("_demo_")),
 		[modelRegistryQ.data],
 	);
 	const modelHealthMap = useMemo(
@@ -3214,6 +3535,10 @@ function PythonLogicCard({
 			),
 		[modelHealthQ.data],
 	);
+	const visibleModelGuideRows = useMemo(
+		() => (showAllModels ? modelGuideRows : modelGuideRows.slice(0, 4)),
+		[modelGuideRows, showAllModels],
+	);
 
 	return (
 		<Card
@@ -3221,78 +3546,141 @@ function PythonLogicCard({
 			title="触发逻辑"
 			extra={auxActions}
 			style={{ ...panelCardStyle, marginBottom: 16 }}
-			styles={{ body: softCardBodyStyle }}
+			styles={sectionCardStyles}
 		>
-			{beforeContent}
 			<Space wrap style={{ marginBottom: 12 }}>
 				<Text type="secondary">推荐模板</Text>
-			{templates.map((template) => (
+				{templates.map((template) => (
 					<Button key={template.key} size="small" onClick={() => form.setFieldValue(codeValueName, template.code)}>
 						{template.label}
 					</Button>
 				))}
 			</Space>
-			<Form.Item label={codeLabel} name={codeFieldName} rules={[{ required: true, message: `请输入${codeLabel}` }]}>
-				<Input.TextArea rows={10} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
-			</Form.Item>
-			<Alert
-				type="info"
-				showIcon
-				title="脚本说明"
-				description="先用模板跑通链路，再逐步改成自己的逻辑。脚本里可直接使用 datetime、timedelta、sum、min、max、round、abs、clamp 和 predict；如需限制检查频率，在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。"
-			/>
+			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+				{scriptHint || '脚本里可直接使用 predict、datetime、timedelta、sum、min、max、round、abs、clamp；如需限制检查频率，在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。'}
+			</Text>
 			<Card
 				size="small"
-				title="模型概览"
-				style={{ ...compactMetricCardStyle, marginTop: 12 }}
+				title="模型速览"
+				extra={
+					modelGuideRows.length > 4 ? (
+						<Button size="small" type="link" onClick={() => setShowAllModels((value) => !value)}>
+							{showAllModels ? "收起" : `展开全部（${modelGuideRows.length}）`}
+						</Button>
+					) : null
+				}
+				style={{ ...compactMetricCardStyle, marginBottom: 12 }}
 				styles={{ body: { background: "#fafafa", borderRadius: 14 } }}
 			>
 				<Space orientation="vertical" size={8} style={{ width: "100%" }}>
 					<Text type="secondary">
-						模型脚本通过 <Text code>predict("model_name", FEATURES)</Text> 调用；执行后可在记录里查看 <Text code>python_meta.model_trace</Text>。
+						通过 <Text code>predict("model_name", FEATURES)</Text> 调用；执行后可在记录里查看 <Text code>python_meta.model_trace</Text>。
 					</Text>
-					{modelGuideRows.length ? modelGuideRows.map((item) => (
-						<div key={item.name} style={{ border: "1px solid #f0f0f0", borderRadius: 8, padding: 10, background: "#fff" }}>
-							<Space wrap size={8}>
-								<Tag color="blue">{item.name}</Tag>
-								<Tag>{item.rule_type || item.kind || "-"}</Tag>
-								{(() => {
-									const health = modelHealthMap.get(item.name);
-									if (!health) return null;
-									return (
-										<Tag color={health.healthy ? "green" : "red"}>
-											{health.healthy ? "健康" : "异常"} · {health.status || "-"}
-										</Tag>
-									);
-								})()}
-							</Space>
-							<div style={{ marginTop: 6 }}>
-								<Text>判定阈值：{summarizeModelThresholds(String(item.rule_type || ""), item.thresholds)}</Text>
-							</div>
-							<div style={{ marginTop: 2 }}>
-								<Text type="secondary">动作建议：{summarizeModelSuggestions(item.suggestions)}</Text>
-							</div>
-							{modelHealthMap.get(item.name)?.detail ? (
-								<div style={{ marginTop: 2 }}>
-									<Text type="secondary">健康检查：{modelHealthMap.get(item.name)?.detail}</Text>
-								</div>
-							) : null}
-							{item.name === "aeration_test_v1" ? (
-								<div style={{ marginTop: 6 }}>
-									<Text type="secondary">
-										建议先用测试模板核对特征值、决策结果和建议时长，再接真实模型。
-									</Text>
-								</div>
-							) : null}
-						</div>
-					)) : (
+					{modelGuideRows.length ? (
+						<Row gutter={[10, 10]}>
+							{visibleModelGuideRows.map((item) => {
+								const health = modelHealthMap.get(item.name);
+								const summaryLabel =
+									item.kind === "rule"
+										? "判定阈值"
+										: "输入特征";
+								const summaryValue =
+									item.kind === "rule"
+										? summarizeModelThresholds(String(item.rule_type || ""), item.thresholds)
+										: summarizeModelFeatureList(item.features);
+								const secondaryLabel =
+									item.kind === "rule"
+										? "动作建议"
+										: "模型文件";
+								const secondaryValue =
+									item.kind === "rule"
+										? summarizeModelSuggestions(item.suggestions)
+										: summarizeModelPath(item.path);
+								const tertiaryLabel =
+									item.kind === "rule"
+										? "状态"
+										: "输出映射";
+								const tertiaryValue =
+									item.kind === "rule"
+										? (health ? `${health.healthy ? "健康" : "异常"} · ${health.status || "-"}` : "待检查")
+										: summarizeDecisionMap(item.decision_map);
+
+								return (
+									<Col xs={24} lg={12} key={item.name}>
+										<div style={{ border: "1px solid #eceff3", borderRadius: 10, padding: 10, background: "#fff" }}>
+											<Space wrap size={6} style={{ marginBottom: 8 }}>
+												<Tag color="blue">{item.name}</Tag>
+												<Tag>{summarizeModelType(item.kind, item.rule_type)}</Tag>
+												{health ? (
+													<Tag color={health.healthy ? "green" : "red"}>
+														{health.healthy ? "健康" : "异常"}
+													</Tag>
+												) : null}
+											</Space>
+											<Row gutter={[8, 8]}>
+												<Col span={12}>
+													<Text type="secondary" style={{ fontSize: 12 }}>
+														{summaryLabel}
+													</Text>
+													<div>
+														<Text style={{ fontSize: 13 }} ellipsis={{ tooltip: summaryValue }}>
+															{summaryValue}
+														</Text>
+													</div>
+												</Col>
+												<Col span={12}>
+													<Text type="secondary" style={{ fontSize: 12 }}>
+														{secondaryLabel}
+													</Text>
+													<div>
+														<Text style={{ fontSize: 13 }} ellipsis={{ tooltip: secondaryValue }}>
+															{secondaryValue}
+														</Text>
+													</div>
+												</Col>
+												<Col span={24}>
+													<Text type="secondary" style={{ fontSize: 12 }}>
+														{tertiaryLabel}
+													</Text>
+													<div>
+														<Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: tertiaryValue }}>
+															{tertiaryValue}
+														</Text>
+													</div>
+												</Col>
+												{health?.detail && !health.healthy ? (
+													<Col span={24}>
+														<Text type="secondary" style={{ fontSize: 12 }}>
+															健康检查：{health.detail}
+														</Text>
+													</Col>
+												) : null}
+												{item.name === "cp500_demo_control_v1" ? (
+													<Col span={24}>
+														<Text type="secondary" style={{ fontSize: 12 }}>
+															适合先跑通采样、预测和动作下发链路，再替换成自己的模型。
+														</Text>
+													</Col>
+												) : null}
+											</Row>
+										</div>
+									</Col>
+								);
+							})}
+						</Row>
+					) : (
 						<Text type="secondary">
-							{modelRegistryQ.isLoading ? "测试模型加载中..." : "暂无测试模型数据"}
+							{modelRegistryQ.isLoading ? "示例模型加载中..." : "暂无示例模型数据"}
 						</Text>
 					)}
-					<Text type="secondary">建议先把动作跑通，再逐步调整特征和阈值。</Text>
+					{modelGuideRows.length > 4 && !showAllModels ? (
+						<Text type="secondary">当前仅展示前 4 个示例模型。</Text>
+					) : null}
 				</Space>
 			</Card>
+			<Form.Item label={codeLabel} name={codeFieldName} rules={[{ required: true, message: `请输入${codeLabel}` }]}>
+				<Input.TextArea rows={10} style={{ fontFamily: "Consolas, monospace", fontSize: 12 }} />
+			</Form.Item>
 		</Card>
 	);
 }
@@ -3313,7 +3701,7 @@ function StructuredActionCard({
 	extraContent?: ReactNode;
 }) {
 	return (
-		<Card size="small" title={title} style={panelCardStyle} styles={{ body: softCardBodyStyle }}>
+		<Card size="small" title={title} style={panelCardStyle} styles={sectionCardStyles}>
 			<Space orientation="vertical" size={16} style={{ width: "100%" }}>
 				{targetSelector}
 				{targetHint}
@@ -3330,6 +3718,9 @@ function StructuredActionEditorSection({
 	onChange,
 	commandOptions,
 	profile,
+	deviceOptions,
+	defaultTargetDeviceId,
+	targetLabel,
 	showAdvancedJson,
 	onToggleAdvancedJson,
 	targetSelector,
@@ -3340,6 +3731,9 @@ function StructuredActionEditorSection({
 	onChange: (value: string) => void;
 	commandOptions: Array<{ value: string; label: string }>;
 	profile?: DeviceProfile;
+	deviceOptions?: Array<{ value: number; label: string }>;
+	defaultTargetDeviceId?: number;
+	targetLabel?: string;
 	showAdvancedJson: boolean;
 	onToggleAdvancedJson: () => void;
 	targetSelector?: ReactNode;
@@ -3357,6 +3751,9 @@ function StructuredActionEditorSection({
 					onChange={onChange}
 					commandOptions={commandOptions}
 					profile={profile}
+					deviceOptions={deviceOptions}
+					defaultTargetDeviceId={defaultTargetDeviceId}
+					targetLabel={targetLabel}
 					title="满足条件时动作"
 					embedded
 				/>
@@ -3367,6 +3764,9 @@ function StructuredActionEditorSection({
 					onChange={onChange}
 					commandOptions={commandOptions}
 					profile={profile}
+					deviceOptions={deviceOptions}
+					defaultTargetDeviceId={defaultTargetDeviceId}
+					targetLabel={targetLabel}
 					fieldKey="else_commands"
 					title="未满足时动作（可选）"
 					emptyTitle="留空则不执行备用动作。"
@@ -3378,6 +3778,8 @@ function StructuredActionEditorSection({
 				<Card
 					size="small"
 					title="高级 JSON 视图"
+					style={compactMetricCardStyle}
+					styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
 					extra={
 						<Space>
 							{advancedExtra}
@@ -3554,6 +3956,46 @@ function ScriptModal({
 							priorityFieldName="priority"
 							namePlaceholder="例如：高温开启排风"
 							descriptionPlaceholder="写清楚这条规则的触发条件和预期动作。"
+							topMeta={
+								<div
+									style={{
+										padding: "12px 14px",
+										background: "#f7f9fc",
+										border: "1px solid #edf1f5",
+										borderRadius: 12,
+									}}
+								>
+									<Row gutter={[12, 12]} align="middle">
+										<Col xs={24} md={16}>
+											<Form.Item
+												label="所属设备"
+												name={singleRuleFields.targetDeviceId}
+												rules={[{ required: true, message: "请选择所属设备" }]}
+												style={{ marginBottom: 0 }}
+											>
+												<Select
+													placeholder="选择这条单设备规则挂载的设备"
+													options={devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) }))}
+												/>
+											</Form.Item>
+										</Col>
+										<Col xs={24} md={8}>
+											<div
+												style={{
+													height: "100%",
+													display: "flex",
+													alignItems: "center",
+													justifyContent: "flex-start",
+												}}
+											>
+												<Text type="secondary">
+													条件读取和动作执行默认围绕所属设备展开。
+												</Text>
+											</div>
+										</Col>
+									</Row>
+								</div>
+							}
 							footerHint={
 								targetDevice ? (
 									<Paragraph type="secondary" style={{ marginBottom: 0 }}>
@@ -3564,25 +4006,10 @@ function ScriptModal({
 									</Paragraph>
 								) : null
 							}
-						>
-							<Row gutter={12}>
-								<Col xs={24} md={16}>
-									<Form.Item
-										label="所属设备"
-										name={singleRuleFields.targetDeviceId}
-										rules={[{ required: true, message: "请选择所属设备" }]}
-									>
-										<Select
-											placeholder="选择这条单设备规则挂载的设备"
-											options={devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) }))}
-										/>
-									</Form.Item>
-								</Col>
-							</Row>
-						</RuleBasicCard>
+						/>
 
 						{currentType === "threshold" || currentType === "schedule" || currentType === "hybrid" ? (
-							<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
+							<Card size="small" title="触发逻辑" style={{ ...panelCardStyle, marginBottom: 16 }} styles={sectionCardStyles}>
 								{currentType === "threshold" || currentType === "hybrid" ? (
 									<ConditionsEditor
 										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
@@ -3622,6 +4049,7 @@ function ScriptModal({
 								codeValueName="python_code"
 								templates={pythonTemplates}
 								auxActions={<PythonDeviceLookup devices={devices} />}
+								scriptHint='脚本默认从所属设备读取数据；如需跨设备读取可显式写 device_code，如需跨设备下发可写 target_device_code。'
 							/>
 						) : null}
 
@@ -3629,10 +4057,23 @@ function ScriptModal({
 							<Card
 								size="small"
 								title="自动检查间隔"
-								style={{ marginBottom: 24 }}
-								styles={{ body: { paddingTop: 18, paddingBottom: 22, background: "#fafafa", borderRadius: 8 } }}
+								style={{ ...panelCardStyle, marginBottom: 24 }}
+								styles={{
+									...sectionCardStyles,
+									body: { ...sectionCardStyles.body, background: "#fafafa" },
+								}}
 							>
-								<Paragraph type="secondary" style={{ marginBottom: 18, lineHeight: 1.65 }}>
+								<Paragraph
+									type="secondary"
+									style={{
+										marginBottom: 18,
+										lineHeight: 1.65,
+										padding: "10px 12px",
+										background: "#fff",
+										border: "1px solid #edf1f5",
+										borderRadius: 10,
+									}}
+								>
 									让后台<strong>不要比这里填的秒数更频繁</strong>地自动检查这条规则。不填表示不额外限制。
 								</Paragraph>
 								<Row gutter={[24, 12]}>
@@ -3781,14 +4222,51 @@ function LinkageModal({
 	};
 	const linkageType = Form.useWatch(linkageRuleFields.type, form) ?? "threshold";
 	const linkageConditionMode = Form.useWatch(linkageRuleFields.conditionMode, form) ?? "all";
-	const targetDeviceId = Form.useWatch(linkageRuleFields.targetDeviceId, form);
+	const targetDeviceIds = safeArray<number>(Form.useWatch("targetDeviceIds", form));
+	const targetDeviceId = Form.useWatch(linkageRuleFields.targetDeviceId, form) ?? targetDeviceIds[0];
 	const formValues = Form.useWatch([], form) as Partial<LinkageFormValues> | undefined;
 	const targetDevice = useMemo(() => devices.find((device) => device.device_id === targetDeviceId), [devices, targetDeviceId]);
-	const targetProfile = inferDeviceProfile(targetDevice);
-	const commandOptions = getDeviceCommandCatalog(targetProfile);
-	const sourceDeviceId = Form.useWatch(linkageRuleFields.sourceDeviceId!, form);
+	const selectedTargetDevices = useMemo(
+		() => devices.filter((device) => targetDeviceIds.includes(device.device_id)),
+		[devices, targetDeviceIds],
+	);
+	const selectedTargetProfiles = useMemo(
+		() => Array.from(new Set(selectedTargetDevices.map((item) => inferDeviceProfile(item)))),
+		[selectedTargetDevices],
+	);
+	const targetProfile =
+		selectedTargetProfiles.length === 1 ? selectedTargetProfiles[0] : inferDeviceProfile(targetDevice);
+	const commandOptions = useMemo(() => {
+		const map = new Map<string, { value: string; label: string }>();
+		(selectedTargetDevices.length ? selectedTargetDevices : targetDevice ? [targetDevice] : []).forEach((device) => {
+			getDeviceCommandCatalog(inferDeviceProfile(device)).forEach((item) => {
+				if (!map.has(item.value)) map.set(item.value, item);
+			});
+		});
+		if (!map.size) {
+			getDeviceCommandCatalog(targetProfile).forEach((item) => map.set(item.value, item));
+		}
+		return Array.from(map.values());
+	}, [selectedTargetDevices, targetDevice, targetProfile]);
+	const sourceDeviceIds = safeArray<number>(Form.useWatch("sourceDeviceIds", form));
+	const sourceDeviceId = Form.useWatch(linkageRuleFields.sourceDeviceId!, form) ?? sourceDeviceIds[0];
 	const sourceDevice = useMemo(() => devices.find((device) => device.device_id === sourceDeviceId), [devices, sourceDeviceId]);
-	const sourceMetricOptions = useMemo(() => getMetricOptionsForDevice(sourceDevice), [sourceDevice]);
+	const selectedSourceDevices = useMemo(
+		() => devices.filter((device) => sourceDeviceIds.includes(device.device_id)),
+		[devices, sourceDeviceIds],
+	);
+	const sourceMetricOptions = useMemo(() => {
+		const map = new Map<string, { value: string; label: string }>();
+		(selectedSourceDevices.length ? selectedSourceDevices : sourceDevice ? [sourceDevice] : []).forEach((device) => {
+			getMetricOptionsForDevice(device).forEach((item) => {
+				if (!map.has(item.value)) map.set(item.value, item);
+			});
+		});
+		if (!map.size) {
+			getMetricOptionsForDevice(sourceDevice).forEach((item) => map.set(item.value, item));
+		}
+		return Array.from(map.values());
+	}, [selectedSourceDevices, sourceDevice]);
 	const sourceMetricGuide = useMemo(() => getMetricGuideForDevice(sourceDevice), [sourceDevice]);
 	const linkageTemplates = useMemo(
 		() => getLinkagePythonTemplates(sourceDevice, targetDevice),
@@ -3804,8 +4282,8 @@ function LinkageModal({
 		applyStructuredActionEditorChange(next, targetDeviceId, (name, value) => form.setFieldValue(name as never, value));
 	const deviceOptions = useMemo(() => devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) })), [devices]);
 	const linkagePreview = useMemo(
-		() => buildLinkagePythonPreview(formValues || {}, sourceDevice, targetDevice),
-		[formValues, sourceDevice, targetDevice],
+		() => buildLinkagePythonPreview(formValues || {}, sourceDevice, targetDevice, devices),
+		[devices, formValues, sourceDevice, targetDevice],
 	);
 
 	useEffect(() => {
@@ -3850,6 +4328,76 @@ function LinkageModal({
 	}, [form, linkageTemplates, linkageType, open]);
 
 	useEffect(() => {
+		if (!open) return;
+		if (targetDeviceIds.length && targetDeviceId !== targetDeviceIds[0]) {
+			form.setFieldValue(linkageRuleFields.targetDeviceId as never, targetDeviceIds[0]);
+		}
+		if (!targetDeviceIds.length && targetDeviceId !== undefined) {
+			form.setFieldValue(linkageRuleFields.targetDeviceId as never, undefined);
+		}
+	}, [form, open, targetDeviceId, targetDeviceIds]);
+
+	useEffect(() => {
+		if (!open) return;
+		if (sourceDeviceIds.length && sourceDeviceId !== sourceDeviceIds[0]) {
+			form.setFieldValue(linkageRuleFields.sourceDeviceId as never, sourceDeviceIds[0]);
+		}
+		if (!sourceDeviceIds.length && sourceDeviceId !== undefined) {
+			form.setFieldValue(linkageRuleFields.sourceDeviceId as never, undefined);
+		}
+	}, [form, open, sourceDeviceId, sourceDeviceIds]);
+
+	useEffect(() => {
+		if (!open) return;
+		if (linkageType !== "threshold" && linkageType !== "hybrid") return;
+		const currentConditions = safeArray<RuleConditionFormValue>(form.getFieldValue(linkageRuleFields.conditions as never));
+		if (!sourceDeviceIds.length) return;
+		if (!currentConditions.length) {
+			form.setFieldValue(
+				linkageRuleFields.conditions as never,
+				sourceDeviceIds.map((deviceId, index) => ({
+					sourceDeviceId: deviceId,
+					metric: index === 0 ? sourceMetricOptions[0]?.value || "temperature" : "temperature",
+					operator: ">=",
+					value: 0,
+				})),
+			);
+			return;
+		}
+		const normalizedConditions = currentConditions.map((item, index) => ({
+			...item,
+			sourceDeviceId:
+				typeof item?.sourceDeviceId === "number"
+					? item.sourceDeviceId
+					: sourceDeviceIds[index] ?? sourceDeviceIds[0],
+		}));
+		if (JSON.stringify(normalizedConditions) !== JSON.stringify(currentConditions)) {
+			form.setFieldValue(linkageRuleFields.conditions as never, normalizedConditions);
+		}
+	}, [form, linkageType, open, sourceDeviceIds, sourceMetricOptions]);
+
+	useEffect(() => {
+		if (!open) return;
+		if (!targetDeviceIds.length) return;
+		const normalizeTargets = (rows: CommandRow[]) =>
+			rows.map((item, index) => ({
+				...item,
+				targetDeviceId:
+					typeof item?.targetDeviceId === "number"
+						? item.targetDeviceId
+						: targetDeviceIds[index] ?? targetDeviceIds[0],
+			}));
+		const nextPrimaryActions = normalizeTargets(primaryActions);
+		const nextElseActions = normalizeTargets(elseCommands);
+		if (JSON.stringify(nextPrimaryActions) !== JSON.stringify(primaryActions)) {
+			form.setFieldValue(linkageRuleFields.primaryActions as never, nextPrimaryActions);
+		}
+		if (JSON.stringify(nextElseActions) !== JSON.stringify(elseCommands)) {
+			form.setFieldValue(linkageRuleFields.elseCommands as never, nextElseActions);
+		}
+	}, [elseCommands, form, open, primaryActions, targetDeviceIds]);
+
+	useEffect(() => {
 		if (!open || !targetDeviceId) return;
 		const nextPrimaryActions = normalizeActionRowsForProfile(primaryActions, targetProfile, commandOptions);
 		const nextElseActions = normalizeActionRowsForProfile(elseCommands, targetProfile, commandOptions);
@@ -3877,6 +4425,56 @@ function LinkageModal({
 							priorityFieldName="priority"
 							namePlaceholder="例如：堆体高温时开启排气"
 							descriptionPlaceholder="写清楚触发设备、目标设备和预期动作。"
+							topMeta={
+								<div
+									style={{
+										padding: "12px 14px",
+										background: "#f7f9fc",
+										border: "1px solid #edf1f5",
+										borderRadius: 12,
+									}}
+								>
+									<Row gutter={[12, 12]} align="middle">
+										<Col xs={24} md={12}>
+											<Form.Item
+												label="触发设备"
+												name="sourceDeviceIds"
+												rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择至少一台触发设备" }] : undefined}
+												style={{ marginBottom: 0 }}
+											>
+												<Select
+													mode="multiple"
+													allowClear
+													showSearch
+													maxTagCount="responsive"
+													optionFilterProp="label"
+													style={{ width: "100%" }}
+													options={deviceOptions}
+													placeholder="选择提供条件的设备，可多选"
+												/>
+											</Form.Item>
+										</Col>
+										<Col xs={24} md={12}>
+											<Form.Item
+												label="执行设备"
+												name="targetDeviceIds"
+												rules={[{ required: true, message: "请选择至少一台执行设备" }]}
+												style={{ marginBottom: 0 }}
+											>
+												<Select
+													mode="multiple"
+													showSearch
+													maxTagCount="responsive"
+													optionFilterProp="label"
+													style={{ width: "100%" }}
+													options={deviceOptions}
+													placeholder="选择真正执行动作的设备，可多选"
+												/>
+											</Form.Item>
+										</Col>
+									</Row>
+								</div>
+							}
 						/>
 
 						{linkageType === "python" ? (
@@ -3886,32 +4484,60 @@ function LinkageModal({
 								codeValueName="pythonCode"
 								templates={linkageTemplates}
 								auxActions={<PythonDeviceLookup devices={devices} />}
-								beforeContent={
-									<Alert
-										type="info"
-										showIcon
-										title="脚本说明"
-										description='跨设备脚本建议显式写 device_code；如果同一指标下有多个测点，再补 channel_code，例如 get_latest_value("temperature", "TempIn", device_code="CP500-01")。'
-										style={{ marginBottom: 16 }}
-									/>
-								}
+								scriptHint='跨设备脚本建议显式写 device_code；如果同一指标下有多个测点，再补 channel_code，例如 get_latest_value("temperature", "TempIn", device_code="CP500-01")。'
 							/>
 						) : (
-							<Card size="small" title="触发逻辑" style={{ marginBottom: 16 }}>
-								<Form.Item label="触发设备" name={linkageRuleFields.sourceDeviceId} rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择触发设备" }] : undefined}>
-									<Select allowClear options={deviceOptions} placeholder="选择提供条件的设备" />
-								</Form.Item>
+							<Card size="small" title="触发逻辑" style={{ ...panelCardStyle, marginBottom: 16 }} styles={sectionCardStyles}>
+								<Row gutter={[12, 8]}>
+									{linkageType === "threshold" || linkageType === "hybrid" ? (
+										<Col xs={24} lg={10}>
+											<Form.Item label="条件关系" name={linkageRuleFields.conditionMode} initialValue="all" style={{ marginBottom: 0 }}>
+												<Select options={conditionModeOptions as never} />
+											</Form.Item>
+										</Col>
+									) : null}
+									{targetDeviceIds.length ? (
+										<Col xs={24} lg={14}>
+											<div
+												style={{
+													height: "100%",
+													display: "flex",
+													alignItems: "center",
+													padding: "6px 10px",
+													background: "#f7f9fc",
+													border: "1px solid #edf1f5",
+													borderRadius: 10,
+												}}
+											>
+												<Text type="secondary">
+													已选 {sourceDeviceIds.length || 0} 台触发设备，{targetDeviceIds.length} 台执行设备。
+												</Text>
+											</div>
+										</Col>
+									) : null}
+								</Row>
 
 								{linkageType === "threshold" || linkageType === "hybrid" ? (
-									<ConditionsEditor
-										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
-										listName={linkageRuleFields.conditions}
-										conditionModeName={linkageRuleFields.conditionMode}
-										conditionMode={linkageConditionMode}
-										metricOptions={sourceMetricOptions}
-										getChannelOptions={(metricValue) => getChannelOptionsForMetric(sourceDevice, metricValue)}
-										defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
-									/>
+									<div style={{ marginTop: 12 }}>
+										<ConditionsEditor
+											form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
+											listName={linkageRuleFields.conditions}
+											conditionModeName={linkageRuleFields.conditionMode}
+											conditionMode={linkageConditionMode}
+											metricOptions={sourceMetricOptions}
+											getChannelOptions={(metricValue, rowSourceDeviceId) =>
+												getChannelOptionsForMetric(
+													typeof rowSourceDeviceId === "number"
+														? devices.find((item) => item.device_id === rowSourceDeviceId)
+														: sourceDevice,
+													metricValue,
+												)
+											}
+											defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
+											deviceOptions={deviceOptions.filter((item) => sourceDeviceIds.includes(item.value))}
+											sourceLabel="来源设备"
+										/>
+									</div>
 								) : null}
 
 								{linkageType === "schedule" || linkageType === "hybrid" ? (
@@ -3926,6 +4552,7 @@ function LinkageModal({
 												},
 											},
 										]}
+										style={{ marginTop: 12, marginBottom: 0 }}
 									> 
 										<Input placeholder="例如：0 9 * * *" />
 									</Form.Item>
@@ -3937,10 +4564,23 @@ function LinkageModal({
 							<Card
 								size="small"
 								title="自动检查间隔"
-								style={{ marginBottom: 24 }}
-								styles={{ body: { paddingTop: 18, paddingBottom: 22, background: "#fafafa", borderRadius: 8 } }}
+								style={{ ...panelCardStyle, marginBottom: 24 }}
+								styles={{
+									...sectionCardStyles,
+									body: { ...sectionCardStyles.body, background: "#fafafa" },
+								}}
 							>
-								<Paragraph type="secondary" style={{ marginBottom: 18, lineHeight: 1.65 }}>
+								<Paragraph
+									type="secondary"
+									style={{
+										marginBottom: 18,
+										lineHeight: 1.65,
+										padding: "10px 12px",
+										background: "#fff",
+										border: "1px solid #edf1f5",
+										borderRadius: 10,
+									}}
+								>
 									限制后台自动检查的最短间隔。不填表示不额外限制。
 								</Paragraph>
 								<Row gutter={[24, 12]}>
@@ -3971,17 +4611,16 @@ function LinkageModal({
 								onChange={syncLinkageActionEditor}
 								commandOptions={commandOptions}
 								profile={targetProfile}
+								deviceOptions={deviceOptions.filter((item) => targetDeviceIds.includes(item.value))}
+								defaultTargetDeviceId={targetDeviceId}
+								targetLabel="执行设备"
 								showAdvancedJson={showAdvancedJson}
 								onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
-								targetSelector={
-									<Form.Item label="目标设备" name={linkageRuleFields.targetDeviceId} rules={[{ required: true, message: "请选择目标设备" }]} style={{ marginBottom: 0 }}>
-										<Select options={deviceOptions} placeholder="选择真正执行动作的设备" />
-									</Form.Item>
-								}
+								targetSelector={null}
 								targetHint={
-									targetDevice ? (
+									targetDeviceIds.length ? (
 										<Paragraph type="secondary" style={{ marginBottom: 0 }}>
-											目标设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>。动作选项已自动适配。
+											默认执行设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>。每条动作都可以单独指定执行设备。
 										</Paragraph>
 									) : null
 								}
@@ -4110,28 +4749,32 @@ export default function ScriptsPage() {
 		setEditingLinkage(null);
 	};
 
-	const openSingleRuleEditor = (script: Script | null = null) => {
-		setEditorScope("single");
-		setEditingScript(script);
-		setEditingLinkage(null);
-		setScriptModalOpen(true);
-		setLinkageModalOpen(false);
-	};
-
-	const openLinkageRuleEditor = (script: Script | null = null) => {
-		setEditorScope("linkage");
+	const openRuleEditor = (script: Script | null = null, scope?: RuleScope) => {
+		const nextScope = scope || (script ? (isLinkageScript(script) ? "linkage" : "single") : editorScope);
+		setEditorScope(nextScope);
+		if (nextScope === "single") {
+			setEditingScript(script);
+			setEditingLinkage(null);
+			setScriptModalOpen(true);
+			setLinkageModalOpen(false);
+			return;
+		}
 		setEditingLinkage(script);
 		setEditingScript(null);
 		setLinkageModalOpen(true);
 		setScriptModalOpen(false);
 	};
 
+	const openSingleRuleEditor = (script: Script | null = null) => {
+		openRuleEditor(script, "single");
+	};
+
+	const openLinkageRuleEditor = (script: Script | null = null) => {
+		openRuleEditor(script, "linkage");
+	};
+
 	const switchRuleEditorScope = (scope: RuleScope) => {
-		if (scope === "single") {
-			openSingleRuleEditor(null);
-			return;
-		}
-		openLinkageRuleEditor(null);
+		openRuleEditor(null, scope);
 	};
 
 	const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: async () => (await api.get("/scripts")).data as { data: Script[] } });
@@ -4337,8 +4980,8 @@ export default function ScriptsPage() {
 
 	const statCards = [
 		{ title: "全部规则", value: allScripts.length, color: "#1677ff" },
-		{ title: "本设备", value: singleScripts.length, color: "#52c41a" },
-		{ title: "跨设备", value: linkageScripts.length, color: "#fa8c16" },
+		{ title: "设备内", value: singleScripts.length, color: "#52c41a" },
+		{ title: "设备协同", value: linkageScripts.length, color: "#fa8c16" },
 		{ title: "启用中", value: allScripts.filter((item) => item.is_active).length, color: "#52c41a" },
 	];
 
@@ -4393,13 +5036,7 @@ export default function ScriptsPage() {
 					<Button size="small" onClick={() => setHistoryScript(row)}>记录</Button>
 					<Button
 						size="small"
-						onClick={() => {
-							if (isLinkageScript(row)) {
-								openLinkageRuleEditor(row);
-							} else {
-								openSingleRuleEditor(row);
-							}
-						}}
+						onClick={() => openRuleEditor(row)}
 					>
 						编辑
 					</Button>
@@ -4439,7 +5076,7 @@ export default function ScriptsPage() {
 					</Button>
 					<Button
 						type="primary"
-						onClick={() => openSingleRuleEditor(null)}
+						onClick={() => openRuleEditor(null)}
 					>
 						新建规则
 					</Button>
@@ -4466,14 +5103,14 @@ export default function ScriptsPage() {
 					<Col xs={24} xl={13}>
 						<Title level={5} style={{ marginTop: 0 }}>使用方式</Title>
 						<ul style={{ paddingLeft: 18, marginBottom: 0 }}>
-							<li>本设备规则适合同一台设备内完成判断和执行。</li>
-							<li>跨设备规则适合由一台设备提供条件、另一台设备执行动作。</li>
-							<li>结构化规则适合常规阈值、定时和备用动作；脚本模式适合复杂判断和自定义时间逻辑。</li>
+							<li>统一规则编辑器里，设备内控制和多设备协同使用同一套编辑流程。</li>
+							<li>当条件来源和动作执行落在同一台设备上，它自然就是设备内规则；跨到多台设备时，就是协同规则。</li>
+							<li>结构化规则适合阈值、定时和备用动作；脚本模式适合复杂判断、自定义时间和模型控制。</li>
 							<li>规则的创建、复制、导入、导出、执行和结果排查都在这里完成。</li>
 						</ul>
 					</Col>
 					<Col xs={24} xl={11}>
-						<Alert type="info" showIcon title="建议从简单规则开始" description="先用单条条件加单条动作确认设备响应正常，再逐步叠加多条件、备用动作和跨设备规则。" />
+						<Alert type="info" showIcon title="建议从简单规则开始" description="先用一条条件加一条动作跑通整条链路，再逐步加多条件、多动作和跨设备协同。" />
 					</Col>
 				</Row>
 			</Card>
@@ -4610,34 +5247,62 @@ export default function ScriptsPage() {
 				<Card
 					style={{ ...panelCardStyle, marginBottom: 16 }}
 					size="small"
-					styles={{ body: { ...softCardBodyStyle, padding: 20 } }}
+					styles={{
+						header: {
+							padding: "20px 24px 16px",
+							minHeight: "auto",
+							alignItems: "center",
+							borderBottom: "1px solid #edf1f5",
+							background: "linear-gradient(180deg, #ffffff 0%, #fbfcff 100%)",
+							borderTopLeftRadius: 16,
+							borderTopRightRadius: 16,
+						},
+						body: { ...softCardBodyStyle, padding: "20px 24px 24px" },
+					}}
 					title={
-						editorScope === "single"
-							? editingScript
-								? "编辑本设备规则"
-								: "新建本设备规则"
-							: editingLinkage
-							? "编辑跨设备规则"
-							: "新建跨设备规则"
+						<div style={{ display: "flex", flexDirection: "column", gap: 3, paddingTop: 2 }}>
+							<Text strong style={{ fontSize: 16, lineHeight: 1.35, color: "#1f2937" }}>
+								{editorScope === "single"
+									? editingScript
+										? "规则编辑"
+										: "规则配置"
+									: editingLinkage
+									? "规则编辑"
+									: "规则配置"}
+							</Text>
+							<Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>
+								配置触发条件、执行动作和脚本逻辑。
+							</Text>
+						</div>
 					}
 					extra={
-						<Space wrap>
-							<Text type="secondary">作用范围</Text>
-							<Select
-								style={{ width: 180 }}
+						<Space wrap size={12} align="center">
+							<Segmented
 								value={editorScope}
 								onChange={(value) => switchRuleEditorScope(value as RuleScope)}
 								options={[
-									{ value: "single", label: "本设备规则" },
-									{ value: "linkage", label: "跨设备规则" },
+									{ value: "single", label: "设备内" },
+									{ value: "linkage", label: "多设备协同" },
 								]}
+								size="middle"
 							/>
 							<Button onClick={closeRuleEditor}>关闭编辑器</Button>
 						</Space>
 					}
 				>
-					<Paragraph type="secondary" style={{ marginBottom: 16 }}>
-						先确定规则范围，再填写触发条件和动作。本设备规则适合同一台设备内完成判断和执行；跨设备规则适合一台设备提供条件、另一台设备执行动作。
+					<Paragraph
+						type="secondary"
+						style={{
+							marginTop: 0,
+							marginBottom: 22,
+							lineHeight: 1.7,
+							padding: "10px 14px",
+							background: "#f7f9fc",
+							border: "1px solid #edf1f5",
+							borderRadius: 12,
+						}}
+					>
+						先选设备范围，再填写触发条件、动作和脚本逻辑。
 					</Paragraph>
 					{editorScope === "single" ? (
 						<ScriptModal
@@ -4673,7 +5338,7 @@ export default function ScriptsPage() {
 				title="统一规则列表"
 				style={panelCardStyle}
 				styles={{ body: { ...softCardBodyStyle, padding: 18 } }}
-				extra={<Text type="secondary">本设备和跨设备规则统一在这里查看、筛选和执行。</Text>}
+				extra={<Text type="secondary">设备内控制和多设备协同规则统一在这里查看、筛选和执行。</Text>}
 			>
 				<Table rowKey="id" loading={scriptsQ.isLoading} dataSource={filteredRules} columns={ruleColumns} pagination={{ pageSize: 20 }} scroll={{ x: 1480 }} />
 			</Card>
