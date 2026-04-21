@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
 	Alert,
 	Button,
@@ -23,6 +23,7 @@ import {
 	message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { FormInstance } from "antd/es/form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import Page from "@/components/Page";
@@ -144,6 +145,36 @@ type ModelHealthItem = {
 	healthy?: boolean;
 	status?: string;
 	detail?: string;
+};
+
+type RulePreviewConfig = {
+	scopeSummary: string;
+	type: ScriptType;
+	pythonHint?: string;
+	structuredHint?: string;
+	bullets: string[];
+	preview: string;
+	metricGuideTitle: string;
+	metricGuide: MetricGuideRow[];
+	emptyMetricText: string;
+	unselectedMetricText: string;
+	showMetricGuide?: boolean;
+};
+
+type RuleScopeUiConfig = {
+	namePlaceholder: string;
+	descriptionPlaceholder: string;
+	pythonScriptHint: string;
+	structuredHint: string;
+	pythonHint: string;
+	structuredBullets: string[];
+	pythonBullets: string[];
+	singleFooterHint?: string;
+	singlePythonFooterHint?: string;
+	singleScopeSummary?: string;
+	singlePythonScopeSummary?: string;
+	linkageScopeSummary?: string;
+	linkageActionHint?: string;
 };
 
 type ExecutionFilter = "all" | "manual" | "threshold_check" | "schedule_check" | "failed";
@@ -332,6 +363,66 @@ const conditionModeOptions = [
 	{ value: "all", label: "全部满足" },
 	{ value: "any", label: "任一满足" },
 ] as const;
+
+const scopeLabelMap: Record<RuleScope, string> = {
+	single: "设备内规则",
+	linkage: "多设备协同",
+};
+
+const ruleScopeUiConfig: Record<RuleScope, RuleScopeUiConfig> = {
+	single: {
+		namePlaceholder: "例如：高温开启排风",
+		descriptionPlaceholder: "简要说明这条规则的触发条件和执行动作。",
+		pythonScriptHint: "脚本默认从所属设备读取数据；如需读取其他设备可显式写 device_code，如需下发到其他设备可写 target_device_code。",
+		structuredHint: "结构化规则支持备用动作；条件不满足时可以切换到备用动作，定时与混合模式也会直接体现在预览里。",
+		pythonHint: "脚本模式适合更复杂的判断。可以读取多设备、多通道，也可以把定时判断直接写进脚本。",
+		structuredBullets: [
+			"先选所属设备，再补触发条件和执行动作。",
+			"建议先从单条动作开始，再逐步增加复杂度。",
+			"保存后先手动执行一次，再看执行记录。",
+			"动作列表会跟着设备类型自动变化；CP500 的 heater / pump / aeration 额外支持 auto。",
+			"“监控指标”对应设备语义指标，不是原始通道名。",
+			"如果一个指标下有多个通道，建议再明确选择“监控通道”。",
+		],
+		pythonBullets: [
+			"先选所属设备；不显式写 device_code 时，脚本默认从这台设备读取数据。",
+			"需要下发到其他设备时，直接在代码里写 target_device_code。",
+			"建议先从单条 commands 或 actions 开始，再逐步增加条件和分支。",
+			"保存后先手动执行一次，再看执行记录。",
+			"读取指标时优先用语义 metric；如果一个指标下有多个通道，再补 channel_code。",
+			"多设备读取和定时判断都应直接写在脚本本体里。",
+		],
+		singleFooterHint: "。触发条件和执行动作默认都围绕这台设备。",
+		singlePythonFooterHint: "。脚本默认从这台设备读取数据；如需下发到其他设备，可显式写 target_device_code。",
+		singleScopeSummary: "当前范围：设备内规则。触发条件和执行动作默认都围绕所属设备。",
+		singlePythonScopeSummary: "当前范围：设备内规则。脚本默认围绕所属设备读取数据；如需下发到其他设备，可显式写 target_device_code。",
+	},
+	linkage: {
+		namePlaceholder: "例如：堆体高温时开启排气",
+		descriptionPlaceholder: "简要说明触发设备、执行设备和预期动作。",
+		pythonScriptHint: '多设备协同脚本建议显式写 device_code；如果同一指标下有多个测点，再补 channel_code，例如 get_latest_value("temperature", "TempIn", device_code="CP500-01")。',
+		structuredHint: "结构化协同规则同样支持备用动作；条件不满足时可以切换到备用动作，定时模式也会直接体现在预览里。",
+		pythonHint: "脚本模式可以同时读取多台设备，也可以通过 actions 把动作分发到多台执行设备；定时判断直接写进脚本即可。",
+		structuredBullets: [
+			"先选触发设备，再选执行设备。",
+			"动作命令会跟着执行设备类型自动收窄。",
+			"保存后先手动执行一次，再看执行记录。",
+			"如果执行设备是 CP500，heater / pump / aeration 还会提供 auto。",
+			"这里的“监控指标”对应触发设备的语义指标，不是通道 code。",
+			"如果同一指标下有多个通道，建议明确选择“监控通道”。",
+		],
+		pythonBullets: [
+			"先选触发设备和执行设备，再开始写脚本。",
+			"多设备读取建议显式写 device_code，避免后续维护时混淆。",
+			"需要分发到多台执行设备时，可在 actions 中分别指定 target_device_code。",
+			"保存后先手动执行一次，再看执行记录。",
+			"读取指标时优先用语义 metric；如果一个指标下有多个通道，再补 channel_code。",
+			"时间判断、分支和多设备协同建议直接写在脚本本体里。",
+		],
+		linkageScopeSummary: "当前范围：多设备协同。触发条件由触发设备提供，执行动作发送给执行设备。",
+		linkageActionHint: "。每条动作都可以单独指定执行设备。",
+	},
+};
 
 const fallbackMetricOptions = [
 	{ value: "temperature", label: "温度" },
@@ -1631,31 +1722,6 @@ function stripCommandTemplateMeta(commandTemplate?: Record<string, unknown>) {
 	return template;
 }
 
-function buildCommandRowPayload(row: CommandRow) {
-	if (row.command === "config_update") {
-		const rawText = String(row.configText || "");
-		try {
-			return {
-				command: "config_update",
-				config: parseConfigText(rawText),
-				...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
-			};
-		} catch {
-			return {
-				command: "config_update",
-				config_text: rawText,
-				...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
-			};
-		}
-	}
-	return {
-		command: row.command,
-		action: row.action,
-		...(row.duration !== undefined ? { duration: row.duration } : {}),
-		...(typeof row.targetDeviceId === "number" ? { target_device_id: row.targetDeviceId } : {}),
-	};
-}
-
 function buildStructuredActionDraftFromCommandTemplate(
 	commandTemplate?: Record<string, unknown>,
 	fallbackTargetDeviceId?: number,
@@ -2678,7 +2744,7 @@ function isLinkageScript(script: Script) {
 }
 
 function ruleScopeLabel(script: Script) {
-	return isLinkageScript(script) ? "跨设备" : "本设备";
+	return isLinkageScript(script) ? scopeLabelMap.linkage : scopeLabelMap.single;
 }
 
 function summarizeCommands(commandTemplate?: Record<string, unknown>) {
@@ -3092,6 +3158,143 @@ function RuleBasicCard({
 	);
 }
 
+function StructuredActionHiddenFields({
+	commandTemplateTextName,
+	primaryActionsName,
+	elseCommandsName,
+}: {
+	commandTemplateTextName?: FormFieldName;
+	primaryActionsName: FormFieldName;
+	elseCommandsName: FormFieldName;
+}) {
+	return (
+		<>
+			{commandTemplateTextName ? (
+				<Form.Item name={commandTemplateTextName} hidden>
+					<Input />
+				</Form.Item>
+			) : null}
+			<Form.Item name={primaryActionsName} hidden>
+				<Input />
+			</Form.Item>
+			<Form.Item name={elseCommandsName} hidden>
+				<Input />
+			</Form.Item>
+		</>
+	);
+}
+
+function RuleDeviceMetaPanel({
+	children,
+}: {
+	children: ReactNode;
+}) {
+	return (
+		<div
+			style={{
+				padding: "12px 14px",
+				background: "#f7f9fc",
+				border: "1px solid #edf1f5",
+				borderRadius: 12,
+			}}
+		>
+			{children}
+		</div>
+	);
+}
+
+function SingleRuleDeviceMeta({
+	devices,
+	targetDeviceFieldName,
+}: {
+	devices: Device[];
+	targetDeviceFieldName: FormFieldName;
+}) {
+	return (
+		<RuleDeviceMetaPanel>
+			<Row gutter={[12, 12]} align="middle">
+				<Col xs={24} md={16}>
+					<Form.Item
+						label="所属设备"
+						name={targetDeviceFieldName}
+						rules={[{ required: true, message: "请选择所属设备" }]}
+						style={{ marginBottom: 0 }}
+					>
+						<Select
+							placeholder="选择这条单设备规则挂载的设备"
+							options={devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) }))}
+						/>
+					</Form.Item>
+				</Col>
+				<Col xs={24} md={8}>
+					<div
+						style={{
+							height: "100%",
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "flex-start",
+						}}
+					>
+						<Text type="secondary">触发条件和执行动作默认都围绕所属设备展开。</Text>
+					</div>
+				</Col>
+			</Row>
+		</RuleDeviceMetaPanel>
+	);
+}
+
+function LinkageRuleDeviceMeta({
+	deviceOptions,
+	linkageType,
+}: {
+	deviceOptions: Array<{ value: number; label: string }>;
+	linkageType: ScriptType;
+}) {
+	return (
+		<RuleDeviceMetaPanel>
+			<Row gutter={[12, 12]} align="middle">
+				<Col xs={24} md={12}>
+					<Form.Item
+						label="触发设备"
+						name="sourceDeviceIds"
+						rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择至少一台触发设备" }] : undefined}
+						style={{ marginBottom: 0 }}
+					>
+						<Select
+							mode="multiple"
+							allowClear
+							showSearch
+							maxTagCount="responsive"
+							optionFilterProp="label"
+							style={{ width: "100%" }}
+							options={deviceOptions}
+							placeholder="选择提供条件的设备，可多选"
+						/>
+					</Form.Item>
+				</Col>
+				<Col xs={24} md={12}>
+					<Form.Item
+						label="执行设备"
+						name="targetDeviceIds"
+						rules={[{ required: true, message: "请选择至少一台执行设备" }]}
+						style={{ marginBottom: 0 }}
+					>
+						<Select
+							mode="multiple"
+							showSearch
+							maxTagCount="responsive"
+							optionFilterProp="label"
+							style={{ width: "100%" }}
+							options={deviceOptions}
+							placeholder="选择执行动作的设备，可多选"
+						/>
+					</Form.Item>
+				</Col>
+			</Row>
+		</RuleDeviceMetaPanel>
+	);
+}
+
 function RulePreviewCard({
 	scopeSummary,
 	type,
@@ -3103,6 +3306,7 @@ function RulePreviewCard({
 	metricGuide,
 	emptyMetricText,
 	unselectedMetricText,
+	showMetricGuide = true,
 }: {
 	scopeSummary: string;
 	type: ScriptType;
@@ -3114,6 +3318,7 @@ function RulePreviewCard({
 	metricGuide: MetricGuideRow[];
 	emptyMetricText: string;
 	unselectedMetricText: string;
+	showMetricGuide?: boolean;
 }) {
 	const copyText = async (text: string, successMessage: string) => {
 		try {
@@ -3146,15 +3351,15 @@ function RulePreviewCard({
 			</Paragraph>
 			<Paragraph>
 				{type === "threshold"
-					? "适合按指标阈值触发动作。"
+					? "适合按指标阈值触发执行动作。"
 					: type === "schedule"
-					? "适合固定周期任务，预览里会直接展开时间判断和动作。"
+					? "适合固定周期任务，预览里会直接展开时间判断和动作逻辑。"
 					: type === "hybrid"
-					? "适合把时间条件和指标条件放在同一条规则里。"
-					: "适合更复杂的编排逻辑，比如多参数、多设备和自定义时间判断。"}
+					? "适合把时间条件和指标条件放进同一条规则。"
+					: "适合更复杂的控制逻辑，例如多参数、多设备和自定义时间判断。"}
 			</Paragraph>
 			<Paragraph type="secondary">
-				脚本里优先使用 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标；只有需要精确到测点时，再补 <Text code>channel_code</Text>。
+				优先使用 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标；只有需要精确到测点时，再补 <Text code>channel_code</Text>。
 			</Paragraph>
 			{type === "python" && pythonHint ? <Paragraph type="secondary">{pythonHint}</Paragraph> : null}
 			{type !== "python" && structuredHint ? <Paragraph type="secondary">{structuredHint}</Paragraph> : null}
@@ -3165,10 +3370,10 @@ function RulePreviewCard({
 			</ul>
 			<Divider style={{ margin: "12px 0" }} />
 			<Title level={5} style={{ marginTop: 0 }}>
-				最终 Python 脚本预览
+				Python 预览
 			</Title>
 			<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{preview}</pre>
-			{type === "python" ? null : (
+			{type === "python" || !showMetricGuide ? null : (
 				<>
 			<Title level={5}>{metricGuideTitle}</Title>
 			<Paragraph type="secondary" style={{ marginBottom: 8 }}>
@@ -3221,6 +3426,10 @@ function RulePreviewCard({
 			)}
 		</Card>
 	);
+}
+
+function RulePreviewSidebar(config: RulePreviewConfig) {
+	return <RulePreviewCard {...config} />;
 }
 
 function PythonDeviceLookup({
@@ -3360,7 +3569,6 @@ function PythonDeviceLookup({
 function ConditionsEditor({
 	form,
 	listName,
-	conditionModeName,
 	conditionMode,
 	metricOptions,
 	getChannelOptions,
@@ -3370,7 +3578,6 @@ function ConditionsEditor({
 }: {
 	form: { getFieldValue: (name: unknown) => unknown };
 	listName: FormFieldName;
-	conditionModeName: FormFieldName;
 	conditionMode: "all" | "any";
 	metricOptions: Array<{ value: string; label: string }>;
 	getChannelOptions: (metricValue?: string, sourceDeviceId?: number) => Array<{ value: string; label: string }>;
@@ -3381,7 +3588,7 @@ function ConditionsEditor({
 	return (
 		<>
 			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-				{conditionMode === "any" ? "任一条件满足后执行。" : "全部条件满足后执行。"}
+				{conditionMode === "any" ? "任一条件满足后执行动作。" : "全部条件满足后执行动作。"}
 			</Text>
 			<Form.List name={listName}>
 				{(fields, { add, remove }) => (
@@ -3495,6 +3702,81 @@ function ConditionsEditor({
 	);
 }
 
+function RuleTriggerCard({
+	type,
+	conditionModeName,
+	conditionMode,
+	conditionSummary,
+	conditions,
+	cronName,
+	cronStyle,
+}: {
+	type: ScriptType;
+	conditionModeName: FormFieldName;
+	conditionMode: "all" | "any";
+	conditionSummary?: ReactNode;
+	conditions?: ReactNode;
+	cronName: FormFieldName;
+	cronStyle?: CSSProperties;
+}) {
+	if (type !== "threshold" && type !== "schedule" && type !== "hybrid") {
+		return null;
+	}
+
+	return (
+		<Card size="small" title="触发逻辑" style={{ ...panelCardStyle, marginBottom: 16 }} styles={sectionCardStyles}>
+			{type === "threshold" || type === "hybrid" ? (
+				<Row gutter={[12, 8]} style={{ marginBottom: conditions ? 12 : 0 }}>
+					<Col xs={24} lg={10}>
+						<Form.Item label="条件关系" name={conditionModeName} initialValue="all" style={{ marginBottom: 0 }}>
+							<Select options={conditionModeOptions as never} />
+						</Form.Item>
+					</Col>
+					<Col xs={24} lg={14}>
+						{conditionSummary ?? (
+							<div
+								style={{
+									height: "100%",
+									display: "flex",
+									alignItems: "center",
+									padding: "6px 10px",
+									background: "#f7f9fc",
+									border: "1px solid #edf1f5",
+									borderRadius: 10,
+								}}
+							>
+								<Text type="secondary">
+									{conditionMode === "any" ? "任一条件满足即执行。" : "全部条件满足后执行。"}
+								</Text>
+							</div>
+						)}
+					</Col>
+				</Row>
+			) : null}
+
+			{type === "threshold" || type === "hybrid" ? conditions : null}
+
+			{type === "schedule" || type === "hybrid" ? (
+				<Form.Item
+					label="Cron 表达式"
+					name={cronName}
+					style={cronStyle}
+					rules={[
+						{
+							validator: async (_, value?: string) => {
+								if (!trimCronValue(value)) throw new Error("请输入 Cron 表达式");
+								if (!isCronLike(value)) throw new Error("请输入 5 到 6 段的 Cron 表达式");
+							},
+						},
+					]}
+				>
+					<Input placeholder="例如：0 9 * * *" />
+				</Form.Item>
+			) : null}
+		</Card>
+	);
+}
+
 function PythonLogicCard({
 	codeFieldName,
 	codeLabel,
@@ -3549,7 +3831,7 @@ function PythonLogicCard({
 			styles={sectionCardStyles}
 		>
 			<Space wrap style={{ marginBottom: 12 }}>
-				<Text type="secondary">推荐模板</Text>
+				<Text type="secondary">示例模板</Text>
 				{templates.map((template) => (
 					<Button key={template.key} size="small" onClick={() => form.setFieldValue(codeValueName, template.code)}>
 						{template.label}
@@ -3557,11 +3839,11 @@ function PythonLogicCard({
 				))}
 			</Space>
 			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-				{scriptHint || '脚本里可直接使用 predict、datetime、timedelta、sum、min、max、round、abs、clamp；如需限制检查频率，在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。'}
+				{scriptHint || '脚本里可直接使用 predict、datetime、timedelta、sum、min、max、round、abs、clamp；如需限制自动检查频率，可在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。'}
 			</Text>
 			<Card
 				size="small"
-				title="模型速览"
+				title="模型概览"
 				extra={
 					modelGuideRows.length > 4 ? (
 						<Button size="small" type="link" onClick={() => setShowAllModels((value) => !value)}>
@@ -3574,7 +3856,7 @@ function PythonLogicCard({
 			>
 				<Space orientation="vertical" size={8} style={{ width: "100%" }}>
 					<Text type="secondary">
-						通过 <Text code>predict("model_name", FEATURES)</Text> 调用；执行后可在记录里查看 <Text code>python_meta.model_trace</Text>。
+						通过 <Text code>{'predict("model_name", FEATURES)'}</Text> 调用；执行后可在记录里查看 <Text code>python_meta.model_trace</Text>。
 					</Text>
 					{modelGuideRows.length ? (
 						<Row gutter={[10, 10]}>
@@ -3686,7 +3968,7 @@ function PythonLogicCard({
 }
 
 function StructuredActionCard({
-	title = "执行目标与动作",
+	title = "执行动作",
 	targetSelector,
 	targetHint,
 	mainActionEditor,
@@ -3742,7 +4024,7 @@ function StructuredActionEditorSection({
 }) {
 	return (
 		<StructuredActionCard
-			title="执行目标与动作"
+			title="执行动作"
 			targetSelector={targetSelector}
 			targetHint={targetHint}
 			mainActionEditor={
@@ -3754,7 +4036,7 @@ function StructuredActionEditorSection({
 					deviceOptions={deviceOptions}
 					defaultTargetDeviceId={defaultTargetDeviceId}
 					targetLabel={targetLabel}
-					title="满足条件时动作"
+					title="满足条件时执行"
 					embedded
 				/>
 			}
@@ -3768,23 +4050,23 @@ function StructuredActionEditorSection({
 					defaultTargetDeviceId={defaultTargetDeviceId}
 					targetLabel={targetLabel}
 					fieldKey="else_commands"
-					title="未满足时动作（可选）"
+					title="未满足时执行（可选）"
 					emptyTitle="留空则不执行备用动作。"
-					addLabel="新增 else 动作"
+					addLabel="新增备用动作"
 					embedded
 				/>
 			}
 			extraContent={
 				<Card
 					size="small"
-					title="高级 JSON 视图"
+					title="高级 JSON"
 					style={compactMetricCardStyle}
 					styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
 					extra={
 						<Space>
 							{advancedExtra}
 							<Button size="small" onClick={onToggleAdvancedJson}>
-								{showAdvancedJson ? "收起 JSON" : "展开 JSON"}
+								{showAdvancedJson ? "收起 JSON" : "查看 JSON"}
 							</Button>
 						</Space>
 					}
@@ -3798,12 +4080,177 @@ function StructuredActionEditorSection({
 						/>
 					) : (
 						<Text type="secondary">
-							常规编辑优先使用上面的动作编辑器；只有在需要批量微调或复制复杂动作时，再展开 JSON 视图。
+							常规场景优先使用上面的动作编辑器；只有在需要批量调整或复制复杂动作时，再查看 JSON。
 						</Text>
 					)}
 				</Card>
 			}
 		/>
+	);
+}
+
+function RuleLogicSection({
+	type,
+	pythonCard,
+	triggerCard,
+}: {
+	type: ScriptType;
+	pythonCard: ReactNode;
+	triggerCard: ReactNode;
+}) {
+	return type === "python" ? pythonCard : triggerCard;
+}
+
+function RuleActionSection({
+	type,
+	actionEditor,
+}: {
+	type: ScriptType;
+	actionEditor: ReactNode;
+}) {
+	return type === "python" ? null : actionEditor;
+}
+
+function RuleEditorLayout({
+	open,
+	embedded = false,
+	title,
+	loading,
+	onClose,
+	onSubmit,
+	left,
+	right,
+}: {
+	open: boolean;
+	embedded?: boolean;
+	title: string;
+	loading: boolean;
+	onClose: () => void;
+	onSubmit: () => void;
+	left: ReactNode;
+	right: ReactNode;
+}) {
+	if (!open) return null;
+
+	const content = (
+		<>
+			<Row gutter={[20, 20]}>
+				<Col xs={24} xl={15}>
+					{left}
+				</Col>
+				<Col xs={24} xl={9}>
+					{right}
+				</Col>
+			</Row>
+			<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+				<Space>
+					<Button onClick={onClose}>取消</Button>
+					<Button type="primary" loading={loading} onClick={onSubmit}>
+						保存规则
+					</Button>
+				</Space>
+			</div>
+		</>
+	);
+
+	if (embedded) {
+		return content;
+	}
+
+	return (
+		<Card
+			style={{ marginBottom: 16 }}
+			title={title}
+			extra={
+				<Space>
+					<Button onClick={onClose}>取消</Button>
+					<Button type="primary" loading={loading} onClick={onSubmit}>
+						保存规则
+					</Button>
+				</Space>
+			}
+		>
+			<Row gutter={[20, 20]}>
+				<Col xs={24} xl={15}>
+					{left}
+				</Col>
+				<Col xs={24} xl={9}>
+					{right}
+				</Col>
+			</Row>
+		</Card>
+	);
+}
+
+function AutoCheckIntervalCard({
+	name,
+	label = "最短间隔（秒）",
+	compactHint,
+	extra,
+}: {
+	name: FormFieldName;
+	label?: string;
+	compactHint: string;
+	extra?: string;
+}) {
+	return (
+		<Card
+			size="small"
+			title="自动检查间隔"
+			style={{ ...panelCardStyle, marginBottom: 24 }}
+			styles={sectionCardStyles}
+		>
+			<Row gutter={[16, 12]} align="middle">
+				<Col xs={24} lg={13}>
+					<Text type="secondary">{compactHint}</Text>
+				</Col>
+				<Col xs={24} lg={11}>
+					<Form.Item
+						label={label}
+						name={name}
+						extra={extra}
+						style={{ marginBottom: 0 }}
+						rules={[minCheckIntervalFormRule]}
+					>
+						<InputNumber
+							min={0}
+							max={604800}
+							step={1}
+							style={{ width: "100%" }}
+							placeholder="留空不限制"
+						/>
+					</Form.Item>
+				</Col>
+			</Row>
+		</Card>
+	);
+}
+
+function RuleEditorForm({
+	form,
+	onFinish,
+	hiddenFields,
+	basicCard,
+	logicSection,
+	autoCheckSection,
+	actionSection,
+}: {
+	form: FormInstance;
+	onFinish: (values: unknown) => void;
+	hiddenFields?: ReactNode;
+	basicCard: ReactNode;
+	logicSection: ReactNode;
+	autoCheckSection?: ReactNode;
+	actionSection?: ReactNode;
+}) {
+	return (
+		<Form form={form} layout="vertical" onFinish={onFinish}>
+			{hiddenFields}
+			{basicCard}
+			{logicSection}
+			{autoCheckSection}
+			{actionSection}
+		</Form>
 	);
 }
 
@@ -3825,6 +4272,7 @@ function ScriptModal({
 	embedded?: boolean;
 }) {
 	const [form] = Form.useForm<ScriptFormValues>();
+	const ui = ruleScopeUiConfig.single;
 	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
 	const previousPythonTemplatesRef = useRef<readonly { key: string; label: string; code: string }[]>([]);
@@ -3847,13 +4295,28 @@ function ScriptModal({
 	const pythonTemplates = useMemo(() => getPythonTemplatesForProfile(targetProfile), [targetProfile]);
 	const metricOptions = useMemo(() => getMetricOptionsForDevice(targetDevice), [targetDevice]);
 	const metricGuide = useMemo(() => getMetricGuideForDevice(targetDevice), [targetDevice]);
-	const scriptActionText = useMemo(
-		() => buildRuleActionText({ targetDeviceId, primaryActions, elseCommands }),
-		[targetDeviceId, primaryActions, elseCommands],
-	);
 	const scriptPreview = useMemo(
 		() => buildScriptPythonPreview(formValues || {}, targetDevice),
 		[formValues, targetDevice],
+	);
+	const previewConfig = useMemo<RulePreviewConfig>(
+		() => ({
+			scopeSummary:
+				currentType === "python"
+					? ui.singlePythonScopeSummary || ""
+					: ui.singleScopeSummary || "",
+			type: currentType,
+			pythonHint: ui.pythonHint,
+			structuredHint: ui.structuredHint,
+			bullets: currentType === "python" ? ui.pythonBullets : ui.structuredBullets,
+			preview: scriptPreview,
+			metricGuideTitle: "所属设备可用指标",
+			metricGuide,
+			emptyMetricText: targetDevice ? "所属设备还没有通道信息，暂时使用通用指标。" : "先选择所属设备，再查看这台设备的常用指标。",
+			unselectedMetricText: "先选择所属设备，再查看这台设备的常用指标。",
+			showMetricGuide: false,
+		}),
+		[currentType, metricGuide, scriptPreview, targetDevice, ui],
 	);
 
 	useEffect(() => {
@@ -3927,269 +4390,123 @@ function ScriptModal({
 		}
 	}, [currentType, form, open, pythonTemplates, targetProfile, targetDeviceId]);
 
-	const content = (
-		<Row gutter={[20, 20]}>
-				<Col xs={24} xl={15}>
-					<Form
-						form={form}
-						layout="vertical"
-						onFinish={(values) => {
-							try {
-								onSubmit(toScriptPayload(values));
-							} catch (error) {
-								message.error(error instanceof Error ? error.message : "保存失败");
-							}
-						}}
-					>
-						<Form.Item name={singleRuleFields.commandTemplateText!} hidden>
-							<Input />
-						</Form.Item>
-						<Form.Item name={singleRuleFields.primaryActions} hidden>
-							<Input />
-						</Form.Item>
-						<Form.Item name={singleRuleFields.elseCommands} hidden>
-							<Input />
-						</Form.Item>
-						<RuleBasicCard
-							typeFieldName={singleRuleFields.type}
-							isActiveFieldName="is_active"
-							priorityFieldName="priority"
-							namePlaceholder="例如：高温开启排风"
-							descriptionPlaceholder="写清楚这条规则的触发条件和预期动作。"
-							topMeta={
-								<div
-									style={{
-										padding: "12px 14px",
-										background: "#f7f9fc",
-										border: "1px solid #edf1f5",
-										borderRadius: 12,
-									}}
-								>
-									<Row gutter={[12, 12]} align="middle">
-										<Col xs={24} md={16}>
-											<Form.Item
-												label="所属设备"
-												name={singleRuleFields.targetDeviceId}
-												rules={[{ required: true, message: "请选择所属设备" }]}
-												style={{ marginBottom: 0 }}
-											>
-												<Select
-													placeholder="选择这条单设备规则挂载的设备"
-													options={devices.map((device) => ({ value: device.device_id, label: deviceLabel(device) }))}
-												/>
-											</Form.Item>
-										</Col>
-										<Col xs={24} md={8}>
-											<div
-												style={{
-													height: "100%",
-													display: "flex",
-													alignItems: "center",
-													justifyContent: "flex-start",
-												}}
-											>
-												<Text type="secondary">
-													条件读取和动作执行默认围绕所属设备展开。
-												</Text>
-											</div>
-										</Col>
-									</Row>
-								</div>
-							}
-							footerHint={
-								targetDevice ? (
-									<Paragraph type="secondary" style={{ marginBottom: 0 }}>
-										所属设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>
-										{currentType === "python"
-											? "。脚本默认从这台设备读数；如需跨设备下发，可显式写 target_device_code。"
-											: "。条件读取和动作执行默认都围绕这台设备。"}
-									</Paragraph>
-								) : null
-							}
+	const left = (
+		<RuleEditorForm
+			form={form}
+			onFinish={(values) => {
+				try {
+					onSubmit(toScriptPayload(values as ScriptFormValues));
+				} catch (error) {
+					message.error(error instanceof Error ? error.message : "保存失败");
+				}
+			}}
+			hiddenFields={
+				<StructuredActionHiddenFields
+					commandTemplateTextName={singleRuleFields.commandTemplateText}
+					primaryActionsName={singleRuleFields.primaryActions}
+					elseCommandsName={singleRuleFields.elseCommands}
+				/>
+			}
+			basicCard={
+				<RuleBasicCard
+					typeFieldName={singleRuleFields.type}
+					isActiveFieldName="is_active"
+					priorityFieldName="priority"
+					namePlaceholder={ui.namePlaceholder}
+					descriptionPlaceholder={ui.descriptionPlaceholder}
+					topMeta={<SingleRuleDeviceMeta devices={devices} targetDeviceFieldName={singleRuleFields.targetDeviceId} />}
+					footerHint={
+						targetDevice ? (
+							<Paragraph type="secondary" style={{ marginBottom: 0 }}>
+								所属设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>
+								{currentType === "python"
+									? ui.singlePythonFooterHint
+									: ui.singleFooterHint}
+							</Paragraph>
+						) : null
+					}
+				/>
+			}
+			logicSection={
+				<RuleLogicSection
+					type={currentType}
+					pythonCard={
+						<PythonLogicCard
+							codeFieldName={singleRuleFields.pythonCode}
+							codeLabel="Python 脚本"
+							codeValueName="python_code"
+							templates={pythonTemplates}
+							auxActions={<PythonDeviceLookup devices={devices} />}
+							scriptHint={ui.pythonScriptHint}
 						/>
-
-						{currentType === "threshold" || currentType === "schedule" || currentType === "hybrid" ? (
-							<Card size="small" title="触发逻辑" style={{ ...panelCardStyle, marginBottom: 16 }} styles={sectionCardStyles}>
-								{currentType === "threshold" || currentType === "hybrid" ? (
-									<ConditionsEditor
-										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
-										listName={singleRuleFields.conditions}
-										conditionModeName={singleRuleFields.conditionMode}
-										conditionMode={conditionMode}
-										metricOptions={metricOptions}
-										getChannelOptions={(metricValue) => getChannelOptionsForMetric(targetDevice, metricValue)}
-										defaultMetric={metricOptions[0]?.value || "temperature"}
-									/>
-								) : null}
-
-								{currentType === "schedule" || currentType === "hybrid" ? (
-									<Form.Item
-										label="Cron 表达式"
-										name={singleRuleFields.cron}
-										style={{ marginBottom: currentType === "schedule" ? 0 : undefined }}
-										rules={[
-											{
-												validator: async (_, value?: string) => {
-													if (!trimCronValue(value)) throw new Error("请输入 Cron 表达式");
-													if (!isCronLike(value)) throw new Error("请输入 5 到 6 段的 Cron 表达式");
-												},
-											},
-										]}
-									>
-										<Input placeholder="例如：0 9 * * *" />
-									</Form.Item>
-								) : null}
-							</Card>
-						) : null}
-
-						{currentType === "python" ? (
-							<PythonLogicCard
-								codeFieldName={singleRuleFields.pythonCode}
-								codeLabel="Python 脚本"
-								codeValueName="python_code"
-								templates={pythonTemplates}
-								auxActions={<PythonDeviceLookup devices={devices} />}
-								scriptHint='脚本默认从所属设备读取数据；如需跨设备读取可显式写 device_code，如需跨设备下发可写 target_device_code。'
-							/>
-						) : null}
-
-						{currentType === "threshold" || currentType === "hybrid" || currentType === "schedule" ? (
-							<Card
-								size="small"
-								title="自动检查间隔"
-								style={{ ...panelCardStyle, marginBottom: 24 }}
-								styles={{
-									...sectionCardStyles,
-									body: { ...sectionCardStyles.body, background: "#fafafa" },
-								}}
-							>
-								<Paragraph
-									type="secondary"
-									style={{
-										marginBottom: 18,
-										lineHeight: 1.65,
-										padding: "10px 12px",
-										background: "#fff",
-										border: "1px solid #edf1f5",
-										borderRadius: 10,
-									}}
-								>
-									让后台<strong>不要比这里填的秒数更频繁</strong>地自动检查这条规则。不填表示不额外限制。
-								</Paragraph>
-								<Row gutter={[24, 12]}>
-									<Col xs={24} sm={18} md={12} lg={10}>
-										<Form.Item
-											label="最短间隔（秒）"
-											name={["threshold_config", "min_check_interval_seconds"]}
-										extra="例如数据大约每分钟才更新，可填 60。"
-											style={{ marginBottom: 0 }}
-											rules={[minCheckIntervalFormRule]}
-										>
-											<InputNumber
-												min={0}
-												max={604800}
-												step={1}
-												style={{ width: "100%", maxWidth: 320 }}
-												placeholder="留空不限制"
-											/>
-										</Form.Item>
-									</Col>
-								</Row>
-							</Card>
-						) : null}
-
-						{currentType !== "python" ? (
-							<StructuredActionEditorSection
-								actionText={commandText}
-								onChange={(next) =>
-									applyStructuredActionEditorChange(
-										next,
-										targetDeviceId,
-										(name, value) => form.setFieldValue(name as never, value),
-										singleRuleFields.commandTemplateText!,
-									)
-								}
-								commandOptions={commandOptions}
-								profile={targetProfile}
-								showAdvancedJson={showAdvancedJson}
-								onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
-							/>
-						) : null}
-					</Form>
-				</Col>
-
-				<Col xs={24} xl={9}>
-					<RulePreviewCard
-						scopeSummary={
-							currentType === "python"
-								? "当前范围：本设备脚本。读取指标默认围绕所属设备；如需跨设备下发，可在代码里显式写 target_device_code。"
-								: "当前范围：本设备规则。条件读取和动作执行默认都围绕所属设备。"
-						}
-						type={currentType}
-						pythonHint="Python 模式适合更复杂的判断。可以读取多设备、多通道，也可以把定时判断直接写进脚本。"
-						structuredHint="结构化规则支持备用动作；条件不满足时可以切到 else 动作，定时与混合模式也会直接体现在预览里。"
-						bullets={
-							currentType === "python"
-								? [
-										"先选所属设备；不显式写 device_code 时，脚本默认就从这台设备读取数据。",
-										"需要下发到别的设备时，直接在代码里写 target_device_code。",
-										"建议先从单条 commands 或 actions 开始，再逐步增加条件和分支。",
-										"保存后先手动执行一次，再看执行记录。",
-										"读取指标时优先用语义 metric；如果一个指标下有多个通道，再补 channel_code。",
-										"多设备读取和定时判断都应直接写在脚本本体里。",
-								  ]
-								: [
-										"先选所属设备，再补触发条件和动作。",
-										"建议先从单条动作开始，再逐步增加复杂度。",
-										"保存后先手动执行一次，再看执行记录。",
-										"动作列表会跟着设备类型自动变化；CP500 的 heater / pump / aeration 额外支持 auto。",
-										"“监控指标”对应设备语义指标，不是原始通道名。",
-										"如果一个指标下有多个通道，建议再明确选择“监控通道”。",
-								  ]
-						}
-						preview={scriptPreview}
-						metricGuideTitle="所属设备可用指标"
-						metricGuide={metricGuide}
-						emptyMetricText={targetDevice ? "所属设备还没有通道信息，暂时使用通用指标。" : "先选择所属设备，再查看这台设备的常用指标。"}
-						unselectedMetricText="先选择所属设备，再查看这台设备的常用指标。"
+					}
+					triggerCard={
+						<RuleTriggerCard
+							type={currentType}
+							conditionModeName={singleRuleFields.conditionMode}
+							conditionMode={conditionMode}
+							conditions={
+								<ConditionsEditor
+									form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
+									listName={singleRuleFields.conditions}
+									conditionMode={conditionMode}
+									metricOptions={metricOptions}
+									getChannelOptions={(metricValue) => getChannelOptionsForMetric(targetDevice, metricValue)}
+									defaultMetric={metricOptions[0]?.value || "temperature"}
+								/>
+							}
+							cronName={singleRuleFields.cron}
+							cronStyle={{ marginBottom: currentType === "schedule" ? 0 : undefined }}
+						/>
+					}
+				/>
+			}
+			autoCheckSection={
+				currentType === "threshold" || currentType === "hybrid" || currentType === "schedule" ? (
+					<AutoCheckIntervalCard
+						name={["threshold_config", "min_check_interval_seconds"]}
+						compactHint="限制后台自动检查的最短频率。数据更新较慢时，建议填写接近上报周期的秒数。"
+						extra="例如 60"
 					/>
-				</Col>
-			</Row>
+				) : null
+			}
+			actionSection={
+				<RuleActionSection
+					type={currentType}
+					actionEditor={
+						<StructuredActionEditorSection
+							actionText={commandText}
+							onChange={(next) =>
+								applyStructuredActionEditorChange(
+									next,
+									targetDeviceId,
+									(name, value) => form.setFieldValue(name as never, value),
+									singleRuleFields.commandTemplateText!,
+								)
+							}
+							commandOptions={commandOptions}
+							profile={targetProfile}
+							showAdvancedJson={showAdvancedJson}
+							onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
+						/>
+					}
+				/>
+			}
+		/>
 	);
-
-	if (!open) return null;
-
-	if (embedded) {
-		return (
-			<>
-				{content}
-				<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-					<Space>
-						<Button onClick={onClose}>取消</Button>
-						<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
-							{script ? "保存规则" : "创建规则"}
-						</Button>
-					</Space>
-				</div>
-			</>
-		);
-	}
+	const right = <RulePreviewSidebar {...previewConfig} />;
 
 	return (
-		<Card
-			style={{ marginBottom: 16 }}
+		<RuleEditorLayout
+			open={open}
+			embedded={embedded}
 			title={script ? "编辑单设备规则" : "新建单设备规则"}
-			extra={
-				<Space>
-					<Button onClick={onClose}>取消</Button>
-					<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
-						{script ? "保存规则" : "创建规则"}
-					</Button>
-				</Space>
-			}
-		>
-			{content}
-		</Card>
+			loading={loading}
+			onClose={onClose}
+			onSubmit={submitWithDraftFlush}
+			left={left}
+			right={right}
+		/>
 	);
 }
 
@@ -4211,6 +4528,7 @@ function LinkageModal({
 	embedded?: boolean;
 }) {
 	const [form] = Form.useForm<LinkageFormValues>();
+	const ui = ruleScopeUiConfig.linkage;
 	const [showAdvancedJson, setShowAdvancedJson] = useState(false);
 	const previousTypeRef = useRef<ScriptType | null>(null);
 	const previousLinkageTemplatesRef = useRef<readonly { key: string; label: string; code: string }[]>([]);
@@ -4284,6 +4602,22 @@ function LinkageModal({
 	const linkagePreview = useMemo(
 		() => buildLinkagePythonPreview(formValues || {}, sourceDevice, targetDevice, devices),
 		[devices, formValues, sourceDevice, targetDevice],
+	);
+	const previewConfig = useMemo<RulePreviewConfig>(
+		() => ({
+			scopeSummary: ui.linkageScopeSummary || "",
+			type: linkageType,
+			pythonHint: ui.pythonHint,
+			structuredHint: ui.structuredHint,
+			bullets: linkageType === "python" ? ui.pythonBullets : ui.structuredBullets,
+			preview: linkagePreview,
+			metricGuideTitle: "触发设备可用指标",
+			metricGuide: sourceMetricGuide,
+			emptyMetricText: sourceDevice ? "当前触发设备还没有通道信息，暂时使用通用指标。" : "先选择触发设备，再查看可用指标。",
+			unselectedMetricText: "先选择触发设备，再查看可用指标。",
+			showMetricGuide: false,
+		}),
+		[linkagePreview, linkageType, sourceDevice, sourceMetricGuide, ui],
 	);
 
 	useEffect(() => {
@@ -4409,283 +4743,147 @@ function LinkageModal({
 		}
 	}, [commandOptions, elseCommands, form, open, primaryActions, targetDeviceId, targetProfile]);
 
-	const content = (
-		<Row gutter={[20, 20]}>
-				<Col xs={24} xl={15}>
-					<Form form={form} layout="vertical" onFinish={(values) => { try { onSubmit(toLinkagePayload(values)); } catch (error) { message.error(error instanceof Error ? error.message : "保存失败"); } }}>
-						<Form.Item name={linkageRuleFields.primaryActions} hidden>
-							<Input />
-						</Form.Item>
-						<Form.Item name={linkageRuleFields.elseCommands} hidden>
-							<Input />
-						</Form.Item>
-						<RuleBasicCard
-							typeFieldName={linkageRuleFields.type}
-							isActiveFieldName="is_active"
-							priorityFieldName="priority"
-							namePlaceholder="例如：堆体高温时开启排气"
-							descriptionPlaceholder="写清楚触发设备、目标设备和预期动作。"
-							topMeta={
-								<div
-									style={{
-										padding: "12px 14px",
-										background: "#f7f9fc",
-										border: "1px solid #edf1f5",
-										borderRadius: 12,
-									}}
-								>
-									<Row gutter={[12, 12]} align="middle">
-										<Col xs={24} md={12}>
-											<Form.Item
-												label="触发设备"
-												name="sourceDeviceIds"
-												rules={linkageType === "threshold" || linkageType === "hybrid" ? [{ required: true, message: "请选择至少一台触发设备" }] : undefined}
-												style={{ marginBottom: 0 }}
-											>
-												<Select
-													mode="multiple"
-													allowClear
-													showSearch
-													maxTagCount="responsive"
-													optionFilterProp="label"
-													style={{ width: "100%" }}
-													options={deviceOptions}
-													placeholder="选择提供条件的设备，可多选"
-												/>
-											</Form.Item>
-										</Col>
-										<Col xs={24} md={12}>
-											<Form.Item
-												label="执行设备"
-												name="targetDeviceIds"
-												rules={[{ required: true, message: "请选择至少一台执行设备" }]}
-												style={{ marginBottom: 0 }}
-											>
-												<Select
-													mode="multiple"
-													showSearch
-													maxTagCount="responsive"
-													optionFilterProp="label"
-													style={{ width: "100%" }}
-													options={deviceOptions}
-													placeholder="选择真正执行动作的设备，可多选"
-												/>
-											</Form.Item>
-										</Col>
-									</Row>
+	const left = (
+		<RuleEditorForm
+			form={form}
+			onFinish={(values) => {
+				try {
+					onSubmit(toLinkagePayload(values as LinkageFormValues));
+				} catch (error) {
+					message.error(error instanceof Error ? error.message : "保存失败");
+				}
+			}}
+			hiddenFields={
+				<StructuredActionHiddenFields
+					primaryActionsName={linkageRuleFields.primaryActions}
+					elseCommandsName={linkageRuleFields.elseCommands}
+				/>
+			}
+			basicCard={
+				<RuleBasicCard
+					typeFieldName={linkageRuleFields.type}
+					isActiveFieldName="is_active"
+					priorityFieldName="priority"
+					namePlaceholder={ui.namePlaceholder}
+					descriptionPlaceholder={ui.descriptionPlaceholder}
+					topMeta={<LinkageRuleDeviceMeta deviceOptions={deviceOptions} linkageType={linkageType} />}
+				/>
+			}
+			logicSection={
+				<RuleLogicSection
+					type={linkageType}
+					pythonCard={
+						<PythonLogicCard
+							codeFieldName={linkageRuleFields.pythonCode}
+							codeLabel="Python 脚本"
+							codeValueName="pythonCode"
+							templates={linkageTemplates}
+							auxActions={<PythonDeviceLookup devices={devices} />}
+							scriptHint={ui.pythonScriptHint}
+						/>
+					}
+					triggerCard={
+						<RuleTriggerCard
+							type={linkageType}
+							conditionModeName={linkageRuleFields.conditionMode}
+							conditionMode={linkageConditionMode}
+							conditionSummary={
+								targetDeviceIds.length ? (
+									<div
+										style={{
+											height: "100%",
+											display: "flex",
+											alignItems: "center",
+											padding: "6px 10px",
+											background: "#f7f9fc",
+											border: "1px solid #edf1f5",
+											borderRadius: 10,
+										}}
+									>
+										<Text type="secondary">
+											已选 {sourceDeviceIds.length || 0} 台触发设备，{targetDeviceIds.length} 台执行设备。
+										</Text>
+									</div>
+								) : undefined
+							}
+							conditions={
+								<div style={{ marginTop: 12 }}>
+									<ConditionsEditor
+										form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
+										listName={linkageRuleFields.conditions}
+										conditionMode={linkageConditionMode}
+										metricOptions={sourceMetricOptions}
+										getChannelOptions={(metricValue, rowSourceDeviceId) =>
+											getChannelOptionsForMetric(
+												typeof rowSourceDeviceId === "number"
+													? devices.find((item) => item.device_id === rowSourceDeviceId)
+													: sourceDevice,
+												metricValue,
+											)
+										}
+										defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
+										deviceOptions={deviceOptions.filter((item) => sourceDeviceIds.includes(item.value))}
+										sourceLabel="来源设备"
+									/>
 								</div>
 							}
+							cronName={linkageRuleFields.cron}
+							cronStyle={{ marginTop: 12, marginBottom: 0 }}
 						/>
-
-						{linkageType === "python" ? (
-							<PythonLogicCard
-								codeFieldName={linkageRuleFields.pythonCode}
-								codeLabel="Python 脚本"
-								codeValueName="pythonCode"
-								templates={linkageTemplates}
-								auxActions={<PythonDeviceLookup devices={devices} />}
-								scriptHint='跨设备脚本建议显式写 device_code；如果同一指标下有多个测点，再补 channel_code，例如 get_latest_value("temperature", "TempIn", device_code="CP500-01")。'
-							/>
-						) : (
-							<Card size="small" title="触发逻辑" style={{ ...panelCardStyle, marginBottom: 16 }} styles={sectionCardStyles}>
-								<Row gutter={[12, 8]}>
-									{linkageType === "threshold" || linkageType === "hybrid" ? (
-										<Col xs={24} lg={10}>
-											<Form.Item label="条件关系" name={linkageRuleFields.conditionMode} initialValue="all" style={{ marginBottom: 0 }}>
-												<Select options={conditionModeOptions as never} />
-											</Form.Item>
-										</Col>
-									) : null}
-									{targetDeviceIds.length ? (
-										<Col xs={24} lg={14}>
-											<div
-												style={{
-													height: "100%",
-													display: "flex",
-													alignItems: "center",
-													padding: "6px 10px",
-													background: "#f7f9fc",
-													border: "1px solid #edf1f5",
-													borderRadius: 10,
-												}}
-											>
-												<Text type="secondary">
-													已选 {sourceDeviceIds.length || 0} 台触发设备，{targetDeviceIds.length} 台执行设备。
-												</Text>
-											</div>
-										</Col>
-									) : null}
-								</Row>
-
-								{linkageType === "threshold" || linkageType === "hybrid" ? (
-									<div style={{ marginTop: 12 }}>
-										<ConditionsEditor
-											form={form as unknown as { getFieldValue: (name: unknown) => unknown }}
-											listName={linkageRuleFields.conditions}
-											conditionModeName={linkageRuleFields.conditionMode}
-											conditionMode={linkageConditionMode}
-											metricOptions={sourceMetricOptions}
-											getChannelOptions={(metricValue, rowSourceDeviceId) =>
-												getChannelOptionsForMetric(
-													typeof rowSourceDeviceId === "number"
-														? devices.find((item) => item.device_id === rowSourceDeviceId)
-														: sourceDevice,
-													metricValue,
-												)
-											}
-											defaultMetric={sourceMetricOptions[0]?.value || "temperature"}
-											deviceOptions={deviceOptions.filter((item) => sourceDeviceIds.includes(item.value))}
-											sourceLabel="来源设备"
-										/>
-									</div>
-								) : null}
-
-								{linkageType === "schedule" || linkageType === "hybrid" ? (
-									<Form.Item
-										label="Cron 表达式"
-										name={linkageRuleFields.cron}
-										rules={[
-											{
-												validator: async (_, value?: string) => {
-													if (!trimCronValue(value)) throw new Error("请输入 Cron 表达式");
-													if (!isCronLike(value)) throw new Error("请输入 5 到 6 段的 Cron 表达式");
-												},
-											},
-										]}
-										style={{ marginTop: 12, marginBottom: 0 }}
-									> 
-										<Input placeholder="例如：0 9 * * *" />
-									</Form.Item>
-								) : null}
-							</Card>
-						)}
-
-						{linkageType === "threshold" || linkageType === "hybrid" || linkageType === "schedule" ? (
-							<Card
-								size="small"
-								title="自动检查间隔"
-								style={{ ...panelCardStyle, marginBottom: 24 }}
-								styles={{
-									...sectionCardStyles,
-									body: { ...sectionCardStyles.body, background: "#fafafa" },
-								}}
-							>
-								<Paragraph
-									type="secondary"
-									style={{
-										marginBottom: 18,
-										lineHeight: 1.65,
-										padding: "10px 12px",
-										background: "#fff",
-										border: "1px solid #edf1f5",
-										borderRadius: 10,
-									}}
-								>
-									限制后台自动检查的最短间隔。不填表示不额外限制。
-								</Paragraph>
-								<Row gutter={[24, 12]}>
-									<Col xs={24} sm={18} md={12} lg={10}>
-										<Form.Item
-											label="最短间隔（秒）"
-											name="min_check_interval_seconds"
-											extra="例如数据大约每分钟才更新，可填 60。"
-											style={{ marginBottom: 0 }}
-											rules={[minCheckIntervalFormRule]}
-										>
-											<InputNumber
-												min={0}
-												max={604800}
-												step={1}
-												style={{ width: "100%", maxWidth: 320 }}
-												placeholder="留空不限制"
-											/>
-										</Form.Item>
-									</Col>
-								</Row>
-							</Card>
-						) : null}
-
-						{linkageType !== "python" ? (
-							<StructuredActionEditorSection
-								actionText={linkageActionText}
-								onChange={syncLinkageActionEditor}
-								commandOptions={commandOptions}
-								profile={targetProfile}
-								deviceOptions={deviceOptions.filter((item) => targetDeviceIds.includes(item.value))}
-								defaultTargetDeviceId={targetDeviceId}
-								targetLabel="执行设备"
-								showAdvancedJson={showAdvancedJson}
-								onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
-								targetSelector={null}
-								targetHint={
-									targetDeviceIds.length ? (
-										<Paragraph type="secondary" style={{ marginBottom: 0 }}>
-											默认执行设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>。每条动作都可以单独指定执行设备。
-										</Paragraph>
-									) : null
-								}
-							/>
-						) : null}
-					</Form>
-				</Col>
-
-				<Col xs={24} xl={9}>
-					<RulePreviewCard
-						scopeSummary="当前范围：跨设备规则。条件由触发设备提供，动作发送给目标设备。"
-						type={linkageType}
-						pythonHint="Python 联动可以同时读取多台设备，也可以通过 actions 把动作分发到多台目标设备；定时判断直接写进脚本即可。"
-						structuredHint="联动规则同样支持备用动作；条件不满足时可切到 else 动作，定时模式也会直接体现在预览里。"
-						bullets={[
-							"先选触发设备，再选目标设备。",
-							"动作命令会跟着目标设备类型自动收窄。",
-							"保存后先手动执行一次，再看执行记录。",
-							"如果目标设备是 CP500，heater / pump / aeration 还会提供 auto。",
-							"联动里的“监控指标”对应触发设备的语义指标，不是通道 code。",
-							"如果同一指标下有多个通道，建议明确选择“监控通道”。",
-						]}
-						preview={linkagePreview}
-						metricGuideTitle="触发设备可用指标"
-						metricGuide={sourceMetricGuide}
-						emptyMetricText={sourceDevice ? "当前触发设备还没有通道信息，暂时使用通用指标。" : "先选择触发设备，再查看可用指标。"}
-						unselectedMetricText="先选择触发设备，再查看可用指标。"
+					}
+				/>
+			}
+			autoCheckSection={
+				linkageType === "threshold" || linkageType === "hybrid" || linkageType === "schedule" ? (
+					<AutoCheckIntervalCard
+						name="min_check_interval_seconds"
+						compactHint="限制后台自动检查的最短频率。不填表示不额外限制；多设备协同建议与最慢的数据上报周期对齐。"
+						extra="例如 60"
 					/>
-				</Col>
-			</Row>
+				) : null
+			}
+			actionSection={
+				<RuleActionSection
+					type={linkageType}
+					actionEditor={
+						<StructuredActionEditorSection
+							actionText={linkageActionText}
+							onChange={syncLinkageActionEditor}
+							commandOptions={commandOptions}
+							profile={targetProfile}
+							deviceOptions={deviceOptions.filter((item) => targetDeviceIds.includes(item.value))}
+							defaultTargetDeviceId={targetDeviceId}
+							targetLabel="执行设备"
+							showAdvancedJson={showAdvancedJson}
+							onToggleAdvancedJson={() => setShowAdvancedJson((value) => !value)}
+							targetSelector={null}
+							targetHint={
+								targetDeviceIds.length ? (
+									<Paragraph type="secondary" style={{ marginBottom: 0 }}>
+										默认执行设备：<Tag color="blue">{getProfileLabel(targetProfile)}</Tag>
+										{ui.linkageActionHint}
+									</Paragraph>
+								) : null
+							}
+						/>
+					}
+				/>
+			}
+		/>
 	);
-
-	if (!open) return null;
-
-	if (embedded) {
-		return (
-			<>
-				{content}
-				<div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-					<Space>
-						<Button onClick={onClose}>取消</Button>
-						<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
-							{script ? "保存规则" : "创建规则"}
-						</Button>
-					</Space>
-				</div>
-			</>
-		);
-	}
+	const right = <RulePreviewSidebar {...previewConfig} />;
 
 	return (
-		<Card
-			style={{ marginBottom: 16 }}
+		<RuleEditorLayout
+			open={open}
+			embedded={embedded}
 			title={script ? "编辑设备联动规则" : "新建设备联动规则"}
-			extra={
-				<Space>
-					<Button onClick={onClose}>取消</Button>
-					<Button type="primary" loading={loading} onClick={submitWithDraftFlush}>
-						{script ? "保存规则" : "创建规则"}
-					</Button>
-				</Space>
-			}
-		>
-			{content}
-		</Card>
+			loading={loading}
+			onClose={onClose}
+			onSubmit={submitWithDraftFlush}
+			left={left}
+			right={right}
+		/>
 	);
 }
 function ExecutionHistoryModal({
@@ -4727,50 +4925,133 @@ function ExecutionHistoryModal({
 	);
 }
 
+function UnifiedRuleEditor({
+	open,
+	scope,
+	script,
+	devices,
+	loadingSingle,
+	loadingLinkage,
+	onClose,
+	onScopeChange,
+	onSubmitSingle,
+	onSubmitLinkage,
+}: {
+	open: boolean;
+	scope: RuleScope;
+	script: Script | null;
+	devices: Device[];
+	loadingSingle: boolean;
+	loadingLinkage: boolean;
+	onClose: () => void;
+	onScopeChange: (scope: RuleScope) => void;
+	onSubmitSingle: (values: ReturnType<typeof toScriptPayload>) => void;
+	onSubmitLinkage: (values: ReturnType<typeof toLinkagePayload>) => void;
+}) {
+	if (!open) return null;
+
+	return (
+		<Card
+			style={{ ...panelCardStyle, marginBottom: 16 }}
+			size="small"
+			styles={{
+				header: {
+					padding: "20px 24px 16px",
+					minHeight: "auto",
+					alignItems: "center",
+					borderBottom: "1px solid #edf1f5",
+					background: "linear-gradient(180deg, #ffffff 0%, #fbfcff 100%)",
+					borderTopLeftRadius: 16,
+					borderTopRightRadius: 16,
+				},
+				body: { ...softCardBodyStyle, padding: "20px 24px 24px" },
+			}}
+			title={
+				<div style={{ display: "flex", flexDirection: "column", gap: 3, paddingTop: 2 }}>
+					<Text strong style={{ fontSize: 16, lineHeight: 1.35, color: "#1f2937" }}>
+						{script ? "规则编辑" : "规则配置"}
+					</Text>
+					<Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>
+						同一套流程支持设备内规则和多设备协同。
+					</Text>
+				</div>
+			}
+			extra={
+				<Space wrap size={12} align="center">
+					<Segmented
+						value={scope}
+						onChange={(value) => onScopeChange(value as RuleScope)}
+						options={[
+							{ value: "single", label: scopeLabelMap.single },
+							{ value: "linkage", label: scopeLabelMap.linkage },
+						]}
+						size="middle"
+					/>
+					<Button onClick={onClose}>关闭编辑器</Button>
+				</Space>
+			}
+		>
+			<Paragraph
+				type="secondary"
+				style={{
+					marginTop: 0,
+					marginBottom: 22,
+					lineHeight: 1.7,
+					padding: "10px 14px",
+					background: "#f7f9fc",
+					border: "1px solid #edf1f5",
+					borderRadius: 12,
+				}}
+			>
+				先选规则范围，再填写触发条件、执行动作和脚本逻辑；当条件来源和动作执行落在同一台设备上时，这条规则会自然表现为设备内规则。
+			</Paragraph>
+			{scope === "single" ? (
+				<ScriptModal
+					open={open}
+					script={script}
+					devices={devices}
+					loading={loadingSingle}
+					embedded
+					onClose={onClose}
+					onSubmit={onSubmitSingle}
+				/>
+			) : (
+				<LinkageModal
+					open={open}
+					script={script}
+					devices={devices}
+					loading={loadingLinkage}
+					embedded
+					onClose={onClose}
+					onSubmit={onSubmitLinkage}
+				/>
+			)}
+		</Card>
+	);
+}
+
 export default function ScriptsPage() {
 	const queryClient = useQueryClient();
-	const [scriptModalOpen, setScriptModalOpen] = useState(false);
-	const [linkageModalOpen, setLinkageModalOpen] = useState(false);
+	const [editorOpen, setEditorOpen] = useState(false);
 	const [editorScope, setEditorScope] = useState<RuleScope>("single");
 	const [importModalOpen, setImportModalOpen] = useState(false);
 	const [importText, setImportText] = useState("");
-	const [editingScript, setEditingScript] = useState<Script | null>(null);
-	const [editingLinkage, setEditingLinkage] = useState<Script | null>(null);
+	const [editingRule, setEditingRule] = useState<Script | null>(null);
 	const [historyScript, setHistoryScript] = useState<Script | null>(null);
 	const [executionFilter, setExecutionFilter] = useState<ExecutionFilter>("all");
 	const [ruleStatusFilter, setRuleStatusFilter] = useState<RuleStatusFilter>("all");
 	const [ruleDeviceFilter, setRuleDeviceFilter] = useState<number | undefined>(undefined);
-	const editorOpen = scriptModalOpen || linkageModalOpen;
 
 	const closeRuleEditor = () => {
-		setScriptModalOpen(false);
-		setLinkageModalOpen(false);
-		setEditingScript(null);
-		setEditingLinkage(null);
+		setEditorOpen(false);
+		setEditingRule(null);
 	};
 
 	const openRuleEditor = (script: Script | null = null, scope?: RuleScope) => {
 		const nextScope = scope || (script ? (isLinkageScript(script) ? "linkage" : "single") : editorScope);
 		setEditorScope(nextScope);
-		if (nextScope === "single") {
-			setEditingScript(script);
-			setEditingLinkage(null);
-			setScriptModalOpen(true);
-			setLinkageModalOpen(false);
-			return;
-		}
-		setEditingLinkage(script);
-		setEditingScript(null);
-		setLinkageModalOpen(true);
-		setScriptModalOpen(false);
-	};
-
-	const openSingleRuleEditor = (script: Script | null = null) => {
-		openRuleEditor(script, "single");
-	};
-
-	const openLinkageRuleEditor = (script: Script | null = null) => {
-		openRuleEditor(script, "linkage");
+		setEditingRule(script);
+		setEditorOpen(true);
 	};
 
 	const switchRuleEditorScope = (scope: RuleScope) => {
@@ -4801,7 +5082,7 @@ export default function ScriptsPage() {
 	});
 
 	const updateScript = useMutation({
-		mutationFn: async (data: ReturnType<typeof toScriptPayload>) => api.patch(`/scripts/${editingScript?.id}`, data),
+		mutationFn: async (data: ReturnType<typeof toScriptPayload>) => api.patch(`/scripts/${editingRule?.id}`, data),
 		onSuccess: () => {
 			message.success("规则更新成功");
 			closeRuleEditor();
@@ -4821,7 +5102,7 @@ export default function ScriptsPage() {
 	});
 
 	const updateLinkage = useMutation({
-		mutationFn: async (data: ReturnType<typeof toLinkagePayload>) => api.patch(`/scripts/${editingLinkage?.id}`, data),
+		mutationFn: async (data: ReturnType<typeof toLinkagePayload>) => api.patch(`/scripts/${editingRule?.id}`, data),
 		onSuccess: () => {
 			message.success("规则更新成功");
 			closeRuleEditor();
@@ -4980,8 +5261,8 @@ export default function ScriptsPage() {
 
 	const statCards = [
 		{ title: "全部规则", value: allScripts.length, color: "#1677ff" },
-		{ title: "设备内", value: singleScripts.length, color: "#52c41a" },
-		{ title: "设备协同", value: linkageScripts.length, color: "#fa8c16" },
+		{ title: scopeLabelMap.single, value: singleScripts.length, color: "#52c41a" },
+		{ title: scopeLabelMap.linkage, value: linkageScripts.length, color: "#fa8c16" },
 		{ title: "启用中", value: allScripts.filter((item) => item.is_active).length, color: "#52c41a" },
 	];
 
@@ -5010,11 +5291,11 @@ export default function ScriptsPage() {
 			},
 		},
 		{
-			title: "动作目标",
+			title: "执行设备",
 			width: 210,
 			render: (_, row) => {
 				if (!isLinkageScript(row)) {
-					return <Text type="secondary">默认同所属设备</Text>;
+					return <Text type="secondary">默认与所属设备一致</Text>;
 				}
 				const commandTemplate = (row.command_template || {}) as Record<string, unknown>;
 				const targetDeviceId =
@@ -5066,13 +5347,13 @@ export default function ScriptsPage() {
 			title="控制脚本"
 			extra={
 				<Space wrap>
-					<Button onClick={exportAllScripts}>导出规则</Button>
-					<Button onClick={() => setImportModalOpen(true)}>导入规则</Button>
+					<Button onClick={exportAllScripts}>导出</Button>
+					<Button onClick={() => setImportModalOpen(true)}>导入</Button>
 					<Button loading={checkThresholds.isPending} onClick={() => checkThresholds.mutate()}>
-						检查阈值
+						检查阈值规则
 					</Button>
 					<Button loading={checkSchedules.isPending} onClick={() => checkSchedules.mutate()}>
-						检查定时
+						检查定时规则
 					</Button>
 					<Button
 						type="primary"
@@ -5101,16 +5382,16 @@ export default function ScriptsPage() {
 			<Card style={{ ...panelCardStyle, marginBottom: 16 }} styles={{ body: { ...softCardBodyStyle, padding: 20 } }}>
 				<Row gutter={[16, 16]}>
 					<Col xs={24} xl={13}>
-						<Title level={5} style={{ marginTop: 0 }}>使用方式</Title>
+						<Title level={5} style={{ marginTop: 0 }}>页面说明</Title>
 						<ul style={{ paddingLeft: 18, marginBottom: 0 }}>
-							<li>统一规则编辑器里，设备内控制和多设备协同使用同一套编辑流程。</li>
-							<li>当条件来源和动作执行落在同一台设备上，它自然就是设备内规则；跨到多台设备时，就是协同规则。</li>
+							<li>设备内规则和多设备协同使用同一套编辑流程。</li>
+							<li>当条件来源和执行动作落在同一台设备上时，这条规则自然就是设备内规则。</li>
 							<li>结构化规则适合阈值、定时和备用动作；脚本模式适合复杂判断、自定义时间和模型控制。</li>
-							<li>规则的创建、复制、导入、导出、执行和结果排查都在这里完成。</li>
+							<li>规则的新建、复制、导入、导出、执行和结果排查都在这里完成。</li>
 						</ul>
 					</Col>
 					<Col xs={24} xl={11}>
-						<Alert type="info" showIcon title="建议从简单规则开始" description="先用一条条件加一条动作跑通整条链路，再逐步加多条件、多动作和跨设备协同。" />
+						<Alert type="info" showIcon title="使用建议" description="建议先用一条条件加一条动作跑通整条链路，再逐步增加多条件、多动作和多设备协同。" />
 					</Col>
 				</Row>
 			</Card>
@@ -5118,20 +5399,20 @@ export default function ScriptsPage() {
 			<Card size="small" style={{ ...panelCardStyle, marginBottom: 16 }} styles={{ body: { ...softCardBodyStyle, padding: 18 } }}>
 				<Row gutter={[12, 12]} align="middle">
 					<Col xs={24} md={8} xl={6}>
-						<Text type="secondary">规则状态</Text>
+						<Text type="secondary">状态</Text>
 						<Select
 							style={{ width: "100%", marginTop: 6 }}
 							value={ruleStatusFilter}
 							onChange={(value) => setRuleStatusFilter(value)}
 							options={[
-								{ value: "all", label: "全部状态" },
+								{ value: "all", label: "全部" },
 								{ value: "active", label: "只看启用" },
 								{ value: "inactive", label: "只看停用" },
 							]}
 						/>
 					</Col>
 					<Col xs={24} md={10} xl={8}>
-						<Text type="secondary">按设备筛选</Text>
+						<Text type="secondary">设备筛选</Text>
 						<Select
 							allowClear
 							style={{ width: "100%", marginTop: 6 }}
@@ -5142,7 +5423,7 @@ export default function ScriptsPage() {
 						/>
 					</Col>
 					<Col xs={24} md={6} xl={4}>
-						<Text type="secondary">筛选结果</Text>
+						<Text type="secondary">结果</Text>
 						<Paragraph style={{ margin: "6px 0 0" }}>
 							{filteredRules.length} 条规则
 						</Paragraph>
@@ -5153,7 +5434,7 @@ export default function ScriptsPage() {
 			<Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
 				<Col xs={24} xl={15}>
 					<Card
-						title="最近执行"
+						title="最近执行记录"
 						size="small"
 						style={panelCardStyle}
 						styles={{ body: { ...softCardBodyStyle, padding: 18 } }}
@@ -5221,21 +5502,21 @@ export default function ScriptsPage() {
 							<Col span={12}>
 								<Card size="small" style={compactMetricCardStyle}>
 									<Text type="secondary">阈值规则</Text>
-									<Paragraph style={{ margin: "8px 0 0" }}>支持手动检查，也支持后台自动检查。</Paragraph>
+									<Paragraph style={{ margin: "8px 0 0" }}>支持手动检查，也支持后台自动执行。</Paragraph>
 								</Card>
 							</Col>
 							<Col span={12}>
 								<Card size="small" style={compactMetricCardStyle}>
 									<Text type="secondary">定时规则</Text>
-									<Paragraph style={{ margin: "8px 0 0" }}>结构化定时规则支持后台周期执行。</Paragraph>
+									<Paragraph style={{ margin: "8px 0 0" }}>结构化定时规则支持后台按周期执行。</Paragraph>
 								</Card>
 							</Col>
 							<Col span={24}>
 								<Alert
 									type="info"
 									showIcon
-									title="运行提示"
-									description="如果这里长期没有新记录，优先检查 auto_control_worker 是否已启动；脚本模式里的时间逻辑由脚本本体自行控制。"
+									title="运行说明"
+									description="如果这里长期没有新记录，优先检查 auto_control_worker 是否已启动；脚本模式中的时间逻辑由脚本本体自行控制。"
 								/>
 							</Col>
 						</Row>
@@ -5243,102 +5524,30 @@ export default function ScriptsPage() {
 				</Col>
 			</Row>
 
-			{editorOpen ? (
-				<Card
-					style={{ ...panelCardStyle, marginBottom: 16 }}
-					size="small"
-					styles={{
-						header: {
-							padding: "20px 24px 16px",
-							minHeight: "auto",
-							alignItems: "center",
-							borderBottom: "1px solid #edf1f5",
-							background: "linear-gradient(180deg, #ffffff 0%, #fbfcff 100%)",
-							borderTopLeftRadius: 16,
-							borderTopRightRadius: 16,
-						},
-						body: { ...softCardBodyStyle, padding: "20px 24px 24px" },
-					}}
-					title={
-						<div style={{ display: "flex", flexDirection: "column", gap: 3, paddingTop: 2 }}>
-							<Text strong style={{ fontSize: 16, lineHeight: 1.35, color: "#1f2937" }}>
-								{editorScope === "single"
-									? editingScript
-										? "规则编辑"
-										: "规则配置"
-									: editingLinkage
-									? "规则编辑"
-									: "规则配置"}
-							</Text>
-							<Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>
-								配置触发条件、执行动作和脚本逻辑。
-							</Text>
-						</div>
-					}
-					extra={
-						<Space wrap size={12} align="center">
-							<Segmented
-								value={editorScope}
-								onChange={(value) => switchRuleEditorScope(value as RuleScope)}
-								options={[
-									{ value: "single", label: "设备内" },
-									{ value: "linkage", label: "多设备协同" },
-								]}
-								size="middle"
-							/>
-							<Button onClick={closeRuleEditor}>关闭编辑器</Button>
-						</Space>
-					}
-				>
-					<Paragraph
-						type="secondary"
-						style={{
-							marginTop: 0,
-							marginBottom: 22,
-							lineHeight: 1.7,
-							padding: "10px 14px",
-							background: "#f7f9fc",
-							border: "1px solid #edf1f5",
-							borderRadius: 12,
-						}}
-					>
-						先选设备范围，再填写触发条件、动作和脚本逻辑。
-					</Paragraph>
-					{editorScope === "single" ? (
-						<ScriptModal
-							open={scriptModalOpen}
-							script={editingScript}
-							devices={devicesList}
-							loading={createScript.isPending || updateScript.isPending}
-							embedded
-							onClose={closeRuleEditor}
-							onSubmit={(values) => {
-								if (editingScript) updateScript.mutate(values);
-								else createScript.mutate(values);
-							}}
-						/>
-					) : (
-						<LinkageModal
-							open={linkageModalOpen}
-							script={editingLinkage}
-							devices={devicesList}
-							loading={createLinkage.isPending || updateLinkage.isPending}
-							embedded
-							onClose={closeRuleEditor}
-							onSubmit={(values) => {
-								if (editingLinkage) updateLinkage.mutate(values);
-								else createLinkage.mutate(values);
-							}}
-						/>
-					)}
-				</Card>
-			) : null}
+			<UnifiedRuleEditor
+				open={editorOpen}
+				scope={editorScope}
+				script={editingRule}
+				devices={devicesList}
+				loadingSingle={createScript.isPending || updateScript.isPending}
+				loadingLinkage={createLinkage.isPending || updateLinkage.isPending}
+				onClose={closeRuleEditor}
+				onScopeChange={switchRuleEditorScope}
+				onSubmitSingle={(values) => {
+					if (editingRule) updateScript.mutate(values);
+					else createScript.mutate(values);
+				}}
+				onSubmitLinkage={(values) => {
+					if (editingRule) updateLinkage.mutate(values);
+					else createLinkage.mutate(values);
+				}}
+			/>
 
 			<Card
-				title="统一规则列表"
+				title="规则列表"
 				style={panelCardStyle}
 				styles={{ body: { ...softCardBodyStyle, padding: 18 } }}
-				extra={<Text type="secondary">设备内控制和多设备协同规则统一在这里查看、筛选和执行。</Text>}
+				extra={<Text type="secondary">所有规则都在这里统一查看、筛选和执行。</Text>}
 			>
 				<Table rowKey="id" loading={scriptsQ.isLoading} dataSource={filteredRules} columns={ruleColumns} pagination={{ pageSize: 20 }} scroll={{ x: 1480 }} />
 			</Card>
@@ -5351,7 +5560,7 @@ export default function ScriptsPage() {
 				onCancel={() => setImportModalOpen(false)}
 				onOk={importScriptsBatch}
 				confirmLoading={importScript.isPending}
-				okText="开始导入"
+				okText="导入"
 				width={760}
 				destroyOnHidden
 			>
@@ -5360,13 +5569,13 @@ export default function ScriptsPage() {
 						type="info"
 						showIcon
 						title="导入说明"
-						description="支持导入单条规则 JSON，也支持一次粘贴规则数组批量导入。导入后的内容会新增为规则，不会覆盖现有规则。"
+						description="支持导入单条规则 JSON，也支持一次粘贴规则数组批量导入。导入后会新增规则，不会覆盖现有内容。"
 					/>
 					<Input.TextArea
 						rows={16}
 						value={importText}
 						onChange={(event) => setImportText(event.target.value)}
-						placeholder='粘贴从“导出规则”得到的 JSON，或一条单独的规则 JSON'
+						placeholder='粘贴从“导出”得到的 JSON，或一条单独的规则 JSON'
 						style={{ fontFamily: "Consolas, monospace", fontSize: 12 }}
 					/>
 				</Space>
