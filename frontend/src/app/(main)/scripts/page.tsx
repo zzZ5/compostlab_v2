@@ -12,6 +12,7 @@ import {
 	Input,
 	InputNumber,
 	Modal,
+	Popconfirm,
 	Row,
 	Segmented,
 	Select,
@@ -112,10 +113,12 @@ type Script = {
 type ScriptExecution = {
 	execution_id: number;
 	script_name?: string;
+	device_id?: number;
 	device_code: string;
 	status: string;
 	status_display: string;
 	trigger_reason: string;
+	commands?: Array<Record<string, unknown>>;
 	result?: Record<string, unknown> | null;
 	error_message?: string | null;
 	started_at?: string;
@@ -145,6 +148,13 @@ type ModelHealthItem = {
 	healthy?: boolean;
 	status?: string;
 	detail?: string;
+};
+
+type PythonExecutionMeta = {
+	model_trace?: Array<Record<string, unknown>>;
+	features_snapshot?: Record<string, unknown>;
+	runtime_state?: Record<string, unknown>;
+	runtime_writes?: Record<string, unknown>;
 };
 
 type RulePreviewConfig = {
@@ -375,7 +385,7 @@ const ruleScopeUiConfig: Record<RuleScope, RuleScopeUiConfig> = {
 		descriptionPlaceholder: "简要说明这条规则的触发条件和执行动作。",
 		pythonScriptHint: "脚本默认从所属设备读取数据；如需读取其他设备可显式写 device_code，如需下发到其他设备可写 target_device_code。",
 		structuredHint: "结构化规则支持备用动作；条件不满足时可以切换到备用动作，定时与混合模式也会直接体现在预览里。",
-		pythonHint: "脚本模式适合更复杂的判断。可以读取多设备、多通道，也可以把定时判断直接写进脚本。",
+		pythonHint: "脚本模式适合更复杂的判断。可以读取多设备、多通道，也可以把定时判断和持久变量直接写进脚本。",
 		structuredBullets: [
 			"先选所属设备，再补触发条件和执行动作。",
 			"建议先从单条动作开始，再逐步增加复杂度。",
@@ -402,7 +412,7 @@ const ruleScopeUiConfig: Record<RuleScope, RuleScopeUiConfig> = {
 		descriptionPlaceholder: "简要说明触发设备、执行设备和预期动作。",
 		pythonScriptHint: '多设备协同脚本建议显式写 device_code；如果同一指标下有多个测点，再补 channel_code，例如 get_latest_value("temperature", "TempIn", device_code="CP500-01")。',
 		structuredHint: "结构化协同规则同样支持备用动作；条件不满足时可以切换到备用动作，定时模式也会直接体现在预览里。",
-		pythonHint: "脚本模式可以同时读取多台设备，也可以通过 actions 把动作分发到多台执行设备；定时判断直接写进脚本即可。",
+		pythonHint: "脚本模式可以同时读取多台设备，也可以通过 actions 把动作分发到多台执行设备；定时判断和持久变量都直接写进脚本即可。",
 		structuredBullets: [
 			"先选触发设备，再选执行设备。",
 			"动作命令会跟着执行设备类型自动收窄。",
@@ -659,6 +669,59 @@ elif decision == "off":
     commands.append({"command": "heater", "action": "off"})`;
 }
 
+function buildPersistentCounterExample(profile: DeviceProfile) {
+	const primaryCommand = getPrimaryCommandForProfile(profile);
+	return `MIN_CHECK_INTERVAL_SECONDS = 60
+
+# 按“脚本 + 当前设备”持久化变量。
+run_count = incr_var("run_count", 1)
+high_temp_streak = get_var("high_temp_streak", 0)
+${buildLatestMetricRead("temperature", profile, "temp")}
+
+if temp is not None and temp >= 70:
+    high_temp_streak = high_temp_streak + 1
+else:
+    high_temp_streak = 0
+
+set_var("high_temp_streak", high_temp_streak)
+commands = []
+
+if run_count % 5 == 0:
+    commands.append({"command": ${JSON.stringify(primaryCommand)}, "action": "on", "duration": 60000})
+elif high_temp_streak >= 3:
+    commands.append({"command": ${JSON.stringify(primaryCommand)}, "action": "on", "duration": 180000})
+else:
+    commands.append({"command": ${JSON.stringify(primaryCommand)}, "action": "off"})`;
+}
+
+function buildLinkagePersistentCounterExample(
+	sourceDevice?: Device | null,
+	targetDevice?: Device | null,
+) {
+	const sourceProfile = inferDeviceProfile(sourceDevice);
+	const targetProfile = inferDeviceProfile(targetDevice);
+	const sourceCode = getDeviceCodeOrExample(sourceDevice, sourceProfile);
+	const targetCode = getDeviceCodeOrExample(targetDevice, targetProfile);
+	const primaryCommand = getPrimaryCommandForProfile(targetProfile);
+	return `MIN_CHECK_INTERVAL_SECONDS = 60
+
+# 计数器同样按“脚本 + 当前触发设备”持久化。
+trigger_count = incr_var("trigger_count", 1)
+${buildLatestMetricRead("temperature", sourceProfile, "source_temp", { deviceCode: sourceCode })}
+actions = []
+
+if source_temp is not None and source_temp >= 75 and trigger_count % 3 == 0:
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "on", "duration": 180000}]
+    })
+else:
+    actions.append({
+        "target_device_code": "${targetCode}",
+        "commands": [{"command": "${primaryCommand}", "action": "off"}]
+    })`;
+}
+
 function getDefaultLinkagePythonExample(
 	profile: DeviceProfile,
 	sourceDevice?: Device | null,
@@ -789,6 +852,11 @@ if o2_value is not None and o2_value <= 8:
     commands.append({"command": "pump", "action": "on", "duration": 120000})`,
 	},
 	{
+		key: "single-persistent-counter",
+		label: "持久变量计数",
+		code: buildPersistentCounterExample("generic"),
+	},
+	{
 		key: "single-model-aeration-v1",
 		label: "算法模型控制（aeration_v1）",
 		code: buildSingleModelPythonExample("generic", "aeration_v1", { command: "fan", maxDuration: 300000 }),
@@ -861,6 +929,11 @@ elif decision == "off":
     })`,
 	},
 	{
+		key: "linkage-persistent-counter",
+		label: "联动持久变量计数",
+		code: buildLinkagePersistentCounterExample(),
+	},
+	{
 		key: "linkage-time-window",
 		label: "按时间联动",
 		code: `now = datetime.now()
@@ -905,11 +978,13 @@ else:
 const singleTemplatePriority = [
 	"single-threshold",
 	"single-multi-command",
+	"single-persistent-counter",
 	"single-model-cp500-demo-v1",
 ] as const;
 
 const linkageTemplatePriority = [
 	"basic-linkage",
+	"linkage-persistent-counter",
 	"linkage-model-cp500-demo-v1",
 	"multi-device-orchestration",
 ] as const;
@@ -983,6 +1058,12 @@ elif decision == "off":
         "target_device_code": "${targetCode}",
         "commands": [{"command": "${primaryCommand}", "action": "off"}]
     })`,
+			};
+		}
+		if (template.key === "linkage-persistent-counter") {
+			return {
+				...template,
+				code: buildLinkagePersistentCounterExample(sourceDevice, targetDevice),
 			};
 		}
 		if (template.key === "multi-device-orchestration") {
@@ -1068,6 +1149,12 @@ if temp is not None and temp >= 70:
 
 if o2_value is not None and o2_value <= 8:
     commands.append({"command": "${secondaryCommand}", "action": "on", "duration": 120000})`,
+				};
+			}
+			if (template.key === "single-persistent-counter") {
+				return {
+					...template,
+					code: buildPersistentCounterExample(profile),
 				};
 			}
 			if (template.key === "single-model-aeration-v1") {
@@ -3332,46 +3419,84 @@ function RulePreviewCard({
 	const metricCallSnippet = (metric: string) => `get_latest_value("${metric}")`;
 	const channelCallSnippet = (metric: string, channelCode: string) =>
 		`get_latest_value("${metric}", "${channelCode}")`;
+	const typeSummary =
+		type === "threshold"
+			? "适合按指标阈值触发执行动作。"
+			: type === "schedule"
+			? "适合固定周期任务，预览里会直接展开时间判断和动作逻辑。"
+			: type === "hybrid"
+			? "适合把时间条件和指标条件放进同一条规则。"
+			: "适合更复杂的控制逻辑，例如多参数、多设备、自定义时间与持久变量。";
 
 	return (
 		<Card size="small" title="规则说明与预览" style={panelCardStyle} styles={sectionCardStyles}>
-			<Tag color={typeColor[type]}>{typeLabel(type)}</Tag>
-			<Paragraph
-				type="secondary"
-				style={{
-					marginTop: 12,
-					marginBottom: 12,
-					padding: "10px 12px",
-					background: "#f7f9fc",
-					border: "1px solid #edf1f5",
-					borderRadius: 10,
-				}}
-			>
-				{scopeSummary}
-			</Paragraph>
-			<Paragraph>
-				{type === "threshold"
-					? "适合按指标阈值触发执行动作。"
-					: type === "schedule"
-					? "适合固定周期任务，预览里会直接展开时间判断和动作逻辑。"
-					: type === "hybrid"
-					? "适合把时间条件和指标条件放进同一条规则。"
-					: "适合更复杂的控制逻辑，例如多参数、多设备和自定义时间判断。"}
-			</Paragraph>
-			<Paragraph type="secondary">
-				优先使用 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标；只有需要精确到测点时，再补 <Text code>channel_code</Text>。
-			</Paragraph>
-			{type === "python" && pythonHint ? <Paragraph type="secondary">{pythonHint}</Paragraph> : null}
-			{type !== "python" && structuredHint ? <Paragraph type="secondary">{structuredHint}</Paragraph> : null}
-			<ul style={{ paddingLeft: 18, marginBottom: 12 }}>
-				{bullets.map((item) => (
-					<li key={item}>{item}</li>
-				))}
-			</ul>
+			<Space orientation="vertical" size={12} style={{ width: "100%" }}>
+				<Space wrap size={8}>
+					<Tag color={typeColor[type]}>{typeLabel(type)}</Tag>
+					<Tag>{type === "python" ? "脚本控制" : "结构化规则"}</Tag>
+				</Space>
+				<div
+					style={{
+						padding: "12px 14px",
+						background: "#f7f9fc",
+						border: "1px solid #edf1f5",
+						borderRadius: 12,
+					}}
+				>
+					<Text strong style={{ display: "block", marginBottom: 4 }}>
+						当前范围
+					</Text>
+					<Text type="secondary">{scopeSummary}</Text>
+				</div>
+				<Row gutter={[12, 12]}>
+					<Col span={24}>
+						<Card
+							size="small"
+							title="使用定位"
+							style={compactMetricCardStyle}
+							styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+						>
+							<Space orientation="vertical" size={6} style={{ width: "100%" }}>
+								<Text>{typeSummary}</Text>
+								<Text type="secondary">
+									优先使用 <Text code>temperature</Text>、<Text code>humidity</Text>、<Text code>o2</Text>、<Text code>co2</Text> 这类语义指标；只有需要精确到测点时，再补 <Text code>channel_code</Text>。
+								</Text>
+								{type === "python" && pythonHint ? <Text type="secondary">{pythonHint}</Text> : null}
+								{type !== "python" && structuredHint ? <Text type="secondary">{structuredHint}</Text> : null}
+							</Space>
+						</Card>
+					</Col>
+					<Col span={24}>
+						<Card
+							size="small"
+							title="使用提醒"
+							style={compactMetricCardStyle}
+							styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+						>
+							<ul style={{ paddingLeft: 18, marginBottom: 0 }}>
+								{bullets.map((item) => (
+									<li key={item} style={{ marginBottom: 6 }}>
+										{item}
+									</li>
+								))}
+							</ul>
+						</Card>
+					</Col>
+				</Row>
+				{type === "python" ? <PythonRuntimeVariableGuide /> : null}
+			</Space>
 			<Divider style={{ margin: "12px 0" }} />
-			<Title level={5} style={{ marginTop: 0 }}>
-				Python 预览
-			</Title>
+			<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+				<Title level={5} style={{ marginTop: 0, marginBottom: 0 }}>
+					Python 预览
+				</Title>
+				<Button size="small" onClick={() => copyText(preview, "已复制 Python 预览")}>
+					复制预览
+				</Button>
+			</div>
+			<Text type="secondary" style={{ display: "block", marginTop: 8, marginBottom: 10 }}>
+				预览会尽量贴近最终执行逻辑，适合在保存前快速确认条件、动作和变量写法。
+			</Text>
 			<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 12 }}>{preview}</pre>
 			{type === "python" || !showMetricGuide ? null : (
 				<>
@@ -3430,6 +3555,66 @@ function RulePreviewCard({
 
 function RulePreviewSidebar(config: RulePreviewConfig) {
 	return <RulePreviewCard {...config} />;
+}
+
+function getPythonExecutionMeta(row: ScriptExecution): PythonExecutionMeta | null {
+	const meta = row.result?.python_meta;
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+	return meta as PythonExecutionMeta;
+}
+
+function prettyJson(value: unknown) {
+	try {
+		return JSON.stringify(value ?? {}, null, 2);
+	} catch {
+		return String(value ?? "");
+	}
+}
+
+function PythonRuntimeVariableGuide() {
+	return (
+		<Card
+			size="small"
+			title="运行变量"
+			style={{ ...compactMetricCardStyle, marginBottom: 12 }}
+			styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+		>
+			<Space orientation="vertical" size={8} style={{ width: "100%" }}>
+				<Text type="secondary">
+					脚本持久变量按 <Text code>脚本 + 设备</Text> 保存，适合计数器、阶段标志、冷却状态等跨次运行信息。
+				</Text>
+				<Space orientation="vertical" size={4} style={{ width: "100%" }}>
+					<Text>
+						<Text code>get_var(name, default=None)</Text>：读取变量
+					</Text>
+					<Text>
+						<Text code>set_var(name, value)</Text>：写入变量
+					</Text>
+					<Text>
+						<Text code>incr_var(name, step=1, default=0)</Text>：递增变量
+					</Text>
+					<Text>
+						<Text code>del_var(name)</Text>：删除变量
+					</Text>
+					<Text>
+						<Text code>get_vars()</Text>：查看当前全部变量
+					</Text>
+				</Space>
+				<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+{`run_count = incr_var("run_count", 1)
+cooldown = get_var("cooldown", 0)
+
+if cooldown > 0:
+    set_var("cooldown", cooldown - 1)
+else:
+    set_var("cooldown", 3)`}
+				</pre>
+				<Text type="secondary">
+					变量可在执行记录中查看，也可以在那里按设备或整条脚本清空。
+				</Text>
+			</Space>
+		</Card>
+	);
 }
 
 function PythonDeviceLookup({
@@ -3839,7 +4024,7 @@ function PythonLogicCard({
 				))}
 			</Space>
 			<Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-				{scriptHint || '脚本里可直接使用 predict、datetime、timedelta、sum、min、max、round、abs、clamp；如需限制自动检查频率，可在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。'}
+				{scriptHint || "脚本里可直接使用 predict、datetime、timedelta、sum、min、max、round、abs、clamp、get_var、set_var、incr_var、del_var、get_vars；如需限制自动检查频率，可在顶部写 MIN_CHECK_INTERVAL_SECONDS = 60。"}
 			</Text>
 			<Card
 				size="small"
@@ -4895,12 +5080,148 @@ function ExecutionHistoryModal({
 	script: Script | null;
 	onClose: () => void;
 }) {
+	const queryClient = useQueryClient();
 	const executionsQ = useQuery({
 		queryKey: ["script-executions", script?.id],
 		enabled: open && !!script?.id,
 		queryFn: async () =>
 			(await api.get(`/scripts/${script?.id}/executions`, { params: { limit: 20 } })).data as { data: ScriptExecution[] },
 	});
+	const clearRuntimeState = useMutation({
+		mutationFn: async (deviceId?: number) =>
+			(
+				await api.delete(`/scripts/${script?.id}/runtime-state`, {
+					params: typeof deviceId === "number" ? { device_id: deviceId } : undefined,
+				})
+			).data as { deleted_count?: number; device_id?: number | null },
+		onSuccess: (data, deviceId) => {
+			queryClient.invalidateQueries({ queryKey: ["script-executions", script?.id] });
+			message.success(
+				typeof deviceId === "number"
+					? `已清空该设备的运行变量${typeof data?.deleted_count === "number" ? `（${data.deleted_count} 条）` : ""}`
+					: `已清空这条脚本的全部运行变量${typeof data?.deleted_count === "number" ? `（${data.deleted_count} 条）` : ""}`,
+			);
+		},
+		onError: (error: unknown) => {
+			const detail =
+				typeof error === "object" &&
+				error &&
+				"response" in error &&
+				typeof (error as { response?: { data?: { detail?: string } } }).response?.data?.detail === "string"
+					? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+					: "清空运行变量失败";
+			message.error(detail || "清空运行变量失败");
+		},
+	});
+	const renderExecutionDetail = (row: ScriptExecution) => {
+		const pythonMeta = getPythonExecutionMeta(row);
+		const runtimeState = pythonMeta?.runtime_state;
+		const runtimeWrites = pythonMeta?.runtime_writes;
+		const modelTrace = Array.isArray(pythonMeta?.model_trace) ? pythonMeta?.model_trace : [];
+		const featuresSnapshot = pythonMeta?.features_snapshot;
+		const hasRuntimeState =
+			runtimeState && typeof runtimeState === "object" && !Array.isArray(runtimeState) && Object.keys(runtimeState).length > 0;
+		const hasRuntimeWrites =
+			runtimeWrites && typeof runtimeWrites === "object" && !Array.isArray(runtimeWrites) && Object.keys(runtimeWrites).length > 0;
+		const hasPythonMeta = hasRuntimeState || hasRuntimeWrites || modelTrace.length > 0 || !!featuresSnapshot;
+		const hasResult = row.result && typeof row.result === "object" && Object.keys(row.result).length > 0;
+
+		if (!hasPythonMeta && !hasResult && (!row.commands || !row.commands.length)) {
+			return <Text type="secondary">这次执行没有额外详情。</Text>;
+		}
+
+		return (
+			<Space orientation="vertical" size={12} style={{ width: "100%" }}>
+				{row.device_id ? (
+					<div style={{ display: "flex", justifyContent: "flex-end" }}>
+						<Popconfirm
+							title="清空该设备运行变量"
+							description="这会清空当前脚本在该设备上的持久变量。"
+							okText="清空"
+							cancelText="取消"
+							onConfirm={() => clearRuntimeState.mutate(row.device_id)}
+						>
+							<Button size="small" danger loading={clearRuntimeState.isPending && clearRuntimeState.variables === row.device_id}>
+								清空本设备变量
+							</Button>
+						</Popconfirm>
+					</div>
+				) : null}
+				{hasRuntimeWrites ? (
+					<Card
+						size="small"
+						title="变量写入"
+						style={compactMetricCardStyle}
+						styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+					>
+						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+							{prettyJson(runtimeWrites)}
+						</pre>
+					</Card>
+				) : null}
+				{hasRuntimeState ? (
+					<Card
+						size="small"
+						title="当前变量状态"
+						style={compactMetricCardStyle}
+						styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+					>
+						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+							{prettyJson(runtimeState)}
+						</pre>
+					</Card>
+				) : null}
+				{featuresSnapshot ? (
+					<Card
+						size="small"
+						title="本次特征快照"
+						style={compactMetricCardStyle}
+						styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+					>
+						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+							{prettyJson(featuresSnapshot)}
+						</pre>
+					</Card>
+				) : null}
+				{modelTrace.length ? (
+					<Card
+						size="small"
+						title="模型调用轨迹"
+						style={compactMetricCardStyle}
+						styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+					>
+						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+							{prettyJson(modelTrace)}
+						</pre>
+					</Card>
+				) : null}
+				{row.commands?.length ? (
+					<Card
+						size="small"
+						title="实际下发命令"
+						style={compactMetricCardStyle}
+						styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+					>
+						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+							{prettyJson(row.commands)}
+						</pre>
+					</Card>
+				) : null}
+				{hasResult ? (
+					<Card
+						size="small"
+						title="完整执行结果"
+						style={compactMetricCardStyle}
+						styles={{ body: { background: "#fbfcfe", borderRadius: 14 } }}
+					>
+						<pre style={{ background: "#f6f8fa", borderRadius: 8, padding: 12, fontSize: 12, overflowX: "auto", marginBottom: 0 }}>
+							{prettyJson(row.result)}
+						</pre>
+					</Card>
+				) : null}
+			</Space>
+		);
+	};
 
 	const columns: ColumnsType<ScriptExecution> = [
 		{ title: "设备", dataIndex: "device_code", width: 160 },
@@ -4919,8 +5240,49 @@ function ExecutionHistoryModal({
 	];
 
 	return (
-		<Modal open={open} title={script ? `执行记录：${script.name}` : "执行记录"} footer={null} onCancel={onClose} width={900} destroyOnHidden>
-			<Table rowKey="execution_id" loading={executionsQ.isLoading} dataSource={executionsQ.data?.data || []} columns={columns} pagination={false} locale={{ emptyText: "暂无执行记录" }} scroll={{ x: 760 }} />
+		<Modal
+			open={open}
+			title={
+				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, paddingRight: 24 }}>
+					<span>{script ? `执行记录：${script.name}` : "执行记录"}</span>
+					<Space size={8}>
+						<Text type="secondary">变量按“脚本 + 设备”持久化，可在这里清空。</Text>
+						<Popconfirm
+							title="清空整条脚本运行变量"
+							description="这会清空当前脚本在全部设备上的持久变量。"
+							okText="清空"
+							cancelText="取消"
+							onConfirm={() => clearRuntimeState.mutate(undefined)}
+						>
+							<Button size="small" danger loading={clearRuntimeState.isPending && clearRuntimeState.variables === undefined}>
+								清空全部变量
+							</Button>
+						</Popconfirm>
+					</Space>
+				</div>
+			}
+			footer={null}
+			onCancel={onClose}
+			width={960}
+			destroyOnHidden
+		>
+			<Table
+				rowKey="execution_id"
+				loading={executionsQ.isLoading}
+				dataSource={executionsQ.data?.data || []}
+				columns={columns}
+				pagination={false}
+				locale={{ emptyText: "暂无执行记录" }}
+				scroll={{ x: 760 }}
+				expandable={{
+					expandedRowRender: renderExecutionDetail,
+					rowExpandable: (row) =>
+						!!(
+							row.commands?.length ||
+							(row.result && Object.keys(row.result).length)
+						),
+				}}
+			/>
 		</Modal>
 	);
 }
@@ -5386,7 +5748,8 @@ export default function ScriptsPage() {
 						<ul style={{ paddingLeft: 18, marginBottom: 0 }}>
 							<li>设备内规则和多设备协同使用同一套编辑流程。</li>
 							<li>当条件来源和执行动作落在同一台设备上时，这条规则自然就是设备内规则。</li>
-							<li>结构化规则适合阈值、定时和备用动作；脚本模式适合复杂判断、自定义时间和模型控制。</li>
+							<li>结构化规则适合阈值、定时和备用动作；脚本模式适合复杂判断、自定义时间、模型控制和持久变量。</li>
+							<li>脚本持久变量按“脚本 + 设备”保存，适合计数器、阶段标志和冷却状态；可在执行记录中查看和清空。</li>
 							<li>规则的新建、复制、导入、导出、执行和结果排查都在这里完成。</li>
 						</ul>
 					</Col>

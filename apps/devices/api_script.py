@@ -19,7 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 from apps.accounts.models import AuditLog
 from apps.accounts.utils import log_audit
 from apps.api.mixins import BasicAuthMixin, JsonBodyMixin
-from apps.devices.models import Device, ScriptExecution, ScriptTemplate
+from apps.devices.models import Device, ScriptExecution, ScriptRuntimeState, ScriptTemplate
 from apps.devices.services.script_executor import (
     ScheduleMonitor,
     ScriptExecutor,
@@ -221,6 +221,17 @@ def _execution_to_dict(execution: ScriptExecution) -> dict:
         "completed_at": _dt_local_str(execution.completed_at),
         "created_by": execution.created_by.username if execution.created_by else None,
         "created_at": _dt_local_str(execution.created_at),
+    }
+
+
+def _runtime_state_to_dict(state: ScriptRuntimeState) -> dict:
+    return {
+        "id": state.id,
+        "script_id": state.script_id,
+        "device_id": state.device_id,
+        "device_code": state.device.code,
+        "state": state.state,
+        "updated_at": _dt_local_str(state.updated_at),
     }
 
 
@@ -675,6 +686,64 @@ class ScriptExecutionDetailView(BasicAuthMixin, ResourcePermissionMixin, View):
         except ScriptExecution.DoesNotExist:
             return JsonResponse({"detail": "Execution not found."}, status=404)
         return JsonResponse(_execution_to_dict(execution), status=200)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ScriptRuntimeStateView(BasicAuthMixin, ReadOrWritePermissionMixin, JsonBodyMixin, View):
+    resource_type = ResourceType.SCRIPT
+
+    def get(self, request, script_id: int):
+        try:
+            script = ScriptTemplate.objects.get(id=script_id)
+        except ScriptTemplate.DoesNotExist:
+            return JsonResponse({"detail": "Script template not found."}, status=404)
+
+        qs = (
+            ScriptRuntimeState.objects.filter(script=script)
+            .select_related("device")
+            .order_by("device__code")
+        )
+        device_id = request.GET.get("device_id")
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+
+        items = [_runtime_state_to_dict(item) for item in qs]
+        return JsonResponse({"count": len(items), "data": items}, status=200)
+
+    def delete(self, request, script_id: int):
+        try:
+            script = ScriptTemplate.objects.get(id=script_id)
+        except ScriptTemplate.DoesNotExist:
+            return JsonResponse({"detail": "Script template not found."}, status=404)
+
+        qs = ScriptRuntimeState.objects.filter(script=script)
+        device_id = request.GET.get("device_id")
+        target_desc = "all devices"
+        if device_id:
+            qs = qs.filter(device_id=device_id)
+            target_desc = f"device_id={device_id}"
+
+        count = qs.count()
+        qs.delete()
+
+        log_audit(
+            request.user,
+            AuditLog.Action.SCRIPT_UPDATE,
+            resource_type="script_template",
+            resource_id=script.id,
+            description=f"清空脚本运行变量：{script.name} ({target_desc})",
+            request=request,
+        )
+
+        return JsonResponse(
+            {
+                "detail": "runtime state cleared",
+                "script_id": script.id,
+                "deleted_count": count,
+                "device_id": int(device_id) if device_id else None,
+            },
+            status=200,
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

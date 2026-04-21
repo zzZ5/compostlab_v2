@@ -188,6 +188,16 @@ urlpatterns = [
         name="script_execution_list_create",
     ),
     path(
+        "scripts/<int:script_id>/runtime-state",
+        method_router(
+            {
+                "GET": script_views.ScriptRuntimeStateView,
+                "DELETE": script_views.ScriptRuntimeStateView,
+            }
+        ),
+        name="script_runtime_state",
+    ),
+    path(
         "script-executions",
         script_views.ScriptExecutionGlobalListView.as_view(),
         name="script_execution_global_list",

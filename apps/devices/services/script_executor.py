@@ -9,9 +9,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from django.conf import settings
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q
 
-from apps.devices.models import Device, ScriptTemplate, ScriptExecution
+from apps.devices.models import Device, ScriptTemplate, ScriptExecution, ScriptRuntimeState
 from apps.devices.services.mqtt_pub import publish_json, MqttPublishError
 from apps.telemetry.models import TelemetryKV
 
@@ -130,6 +131,103 @@ class ScriptExecutor:
     def __init__(self):
         self.result_cache = {}
         self.model_cache: Dict[str, Any] = {}
+
+    def _get_or_create_runtime_state(
+        self, script: ScriptTemplate, device: Device
+    ) -> ScriptRuntimeState:
+        state_obj = (
+            ScriptRuntimeState.objects.select_for_update()
+            .filter(script=script, device=device)
+            .first()
+        )
+        if state_obj:
+            return state_obj
+        return ScriptRuntimeState.objects.create(script=script, device=device, state={})
+
+    def _normalize_runtime_value(self, value: Any) -> Any:
+        try:
+            json.dumps(value)
+        except TypeError as exc:
+            raise ValueError(
+                "runtime variable must be JSON-serializable"
+            ) from exc
+        return deepcopy(value)
+
+    def _build_runtime_state_helpers(
+        self, script: ScriptTemplate, device: Device
+    ) -> Dict[str, Any]:
+        with transaction.atomic():
+            state_obj = self._get_or_create_runtime_state(script, device)
+            state_data = (
+                deepcopy(state_obj.state)
+                if isinstance(state_obj.state, dict)
+                else {}
+            )
+
+        touched_keys: Dict[str, Any] = {}
+
+        def _key(name: Any) -> str:
+            text = str(name or "").strip()
+            if not text:
+                raise ValueError("runtime variable name is required")
+            return text
+
+        def _save_state() -> None:
+            if not touched_keys:
+                return
+            with transaction.atomic():
+                current = self._get_or_create_runtime_state(script, device)
+                next_state = deepcopy(current.state) if isinstance(current.state, dict) else {}
+                next_state.update(deepcopy(state_data))
+                current.state = next_state
+                current.save(update_fields=["state", "updated_at"])
+
+        def _get_var(name: Any, default: Any = None) -> Any:
+            return deepcopy(state_data.get(_key(name), default))
+
+        def _set_var(name: Any, value: Any) -> Any:
+            k = _key(name)
+            normalized = self._normalize_runtime_value(value)
+            state_data[k] = normalized
+            touched_keys[k] = deepcopy(normalized)
+            _save_state()
+            return deepcopy(normalized)
+
+        def _del_var(name: Any) -> None:
+            k = _key(name)
+            if k in state_data:
+                state_data.pop(k, None)
+                touched_keys[k] = None
+                with transaction.atomic():
+                    current = self._get_or_create_runtime_state(script, device)
+                    next_state = deepcopy(current.state) if isinstance(current.state, dict) else {}
+                    next_state.pop(k, None)
+                    current.state = next_state
+                    current.save(update_fields=["state", "updated_at"])
+
+        def _incr_var(name: Any, step: Any = 1, default: Any = 0) -> Any:
+            k = _key(name)
+            current = state_data.get(k, default)
+            try:
+                next_value = current + step
+            except Exception as exc:
+                raise ValueError(
+                    f"runtime variable '{k}' does not support increment"
+                ) from exc
+            return _set_var(k, next_value)
+
+        def _get_vars() -> Dict[str, Any]:
+            return deepcopy(state_data)
+
+        return {
+            "get_var": _get_var,
+            "set_var": _set_var,
+            "del_var": _del_var,
+            "incr_var": _incr_var,
+            "get_vars": _get_vars,
+            "state_snapshot": lambda: deepcopy(state_data),
+            "state_writes": lambda: deepcopy(touched_keys),
+        }
 
     def _resolve_source_device(self, script: ScriptTemplate, fallback_device: Device) -> Device:
         source_device_id = None
@@ -391,6 +489,7 @@ class ScriptExecutor:
         try:
             model_trace: List[Dict[str, Any]] = []
             features_trace: Dict[str, Any] = {}
+            runtime_helpers = self._build_runtime_state_helpers(script, device)
 
             def _predict(model_name: str, features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                 prediction = self._predict_rule_model(model_name, features or {})
@@ -455,6 +554,11 @@ class ScriptExecutor:
                 "datetime": datetime,
                 "timedelta": timedelta,
                 "FEATURES": features_trace,
+                "get_var": runtime_helpers["get_var"],
+                "set_var": runtime_helpers["set_var"],
+                "del_var": runtime_helpers["del_var"],
+                "incr_var": runtime_helpers["incr_var"],
+                "get_vars": runtime_helpers["get_vars"],
             }
 
             exec_result = {}
@@ -466,6 +570,8 @@ class ScriptExecutor:
                     "_meta": {
                         "model_trace": model_trace,
                         "features_snapshot": exec_result.get("FEATURES", features_trace),
+                        "runtime_state": runtime_helpers["state_snapshot"](),
+                        "runtime_writes": runtime_helpers["state_writes"](),
                     },
                 }
             if "commands" in exec_result:
@@ -474,6 +580,8 @@ class ScriptExecutor:
                     "_meta": {
                         "model_trace": model_trace,
                         "features_snapshot": exec_result.get("FEATURES", features_trace),
+                        "runtime_state": runtime_helpers["state_snapshot"](),
+                        "runtime_writes": runtime_helpers["state_writes"](),
                     },
                 }
             logger.warning(f"Python script {script.name} did not return 'commands' or 'actions'")

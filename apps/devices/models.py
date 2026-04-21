@@ -385,3 +385,44 @@ class ScriptExecution(models.Model):
 
     def __str__(self) -> str:
         return f"{self.script.name} -> {self.device.code} ({self.status})"
+
+
+class ScriptRuntimeState(models.Model):
+    """
+    Python 脚本运行时状态
+    按“脚本 + 设备”持久化少量 JSON 变量，用于计数器、阶段标志、冷却状态等。
+    """
+
+    script = models.ForeignKey(
+        ScriptTemplate,
+        on_delete=models.CASCADE,
+        related_name="runtime_states",
+        help_text="所属脚本",
+    )
+    device = models.ForeignKey(
+        Device,
+        on_delete=models.CASCADE,
+        related_name="script_runtime_states",
+        help_text="状态绑定设备",
+    )
+    state = models.JSONField(default=dict, blank=True, help_text="脚本持久变量")
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "devices_scriptruntimestate"
+        ordering = ["script_id", "device_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["script", "device"],
+                name="uq_script_runtime_state_script_device",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["script", "device"]),
+            models.Index(fields=["device", "updated_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.script.name} @ {self.device.code}"
