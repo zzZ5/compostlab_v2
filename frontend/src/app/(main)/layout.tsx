@@ -120,6 +120,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     }
   }
 
+  function onSiderCollapse(nextCollapsed: boolean) {
+    if (isMobile) return;
+    setCollapsed(nextCollapsed);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("compostlab:siderCollapsed", nextCollapsed ? "1" : "0");
+    }
+  }
+
   function closeMobileDrawer() {
     setMobileDrawerOpen(false);
   }
@@ -139,6 +147,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         collapsed={isMobile ? false : collapsed}
         collapsedWidth={isMobile ? 0 : 80}
         breakpoint="md"
+        onCollapse={onSiderCollapse}
         style={isMobile ? {
           borderRight: "1px solid #e8e8e8",
           position: "fixed",

@@ -32,10 +32,11 @@ import { useDeleteDevice } from "@/features/devices/mutations";
 
 import { getErrorMessage } from "@/lib/errors";
 
-import { getOnlineState, onlineTag } from "@/lib/status";
+import { onlineTag } from "@/lib/status";
 import { evalO2, evalTemp } from "@/lib/alerts";
 import { MetricKey, metricLabel, detectChannelMetric } from "@/lib/metrics";
 import { groupChannelsByMetric } from "@/lib/channelGroups";
+import { getDeviceAlertSummary } from "@/lib/deviceRules";
 
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
@@ -112,6 +113,33 @@ function overallSev(tempSev: any, o2Sev: any): "danger" | "warn" | "ok" | "none"
 	return r === 3 ? "danger" : r === 2 ? "warn" : r === 1 ? "ok" : "none";
 }
 
+function getProfileOnlineState(lastSeen: string | null | undefined, profile: DeviceProfile): "online" | "idle" | "offline" | "unknown" {
+	if (!lastSeen) return "unknown";
+	const parsed = new Date(String(lastSeen).replace(" ", "T"));
+	if (Number.isNaN(parsed.getTime())) return "unknown";
+
+	const diffMin = (Date.now() - parsed.getTime()) / 60000;
+
+	if (profile === "mmcgs") {
+		if (diffMin <= 30) return "online";
+		if (diffMin <= 180) return "idle";
+		return "offline";
+	}
+	if (profile === "cp500-v3") {
+		if (diffMin <= 20) return "online";
+		if (diffMin <= 120) return "idle";
+		return "offline";
+	}
+	if (profile === "smart-compost") {
+		if (diffMin <= 20) return "online";
+		if (diffMin <= 90) return "idle";
+		return "offline";
+	}
+	if (diffMin <= 15) return "online";
+	if (diffMin <= 60) return "idle";
+	return "offline";
+}
+
 function latestNumber(ch: any): number | null {
 	const v = ch?.latest?.value;
 	if (typeof v === "number") return v;
@@ -137,6 +165,93 @@ function minLatest(chs: any[]): number | null {
 		best = best === null ? v : Math.min(best, v);
 	}
 	return best;
+}
+
+function getLastSeenMs(lastSeen?: string | null): number | null {
+	if (!lastSeen) return null;
+	const parsed = new Date(String(lastSeen).replace(" ", "T"));
+	return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+function pickLatestLastSeen(devices: any[]): string | null {
+	let best: { ms: number; value: string } | null = null;
+	for (const device of devices || []) {
+		const lastSeen = typeof device?.last_seen_at === "string" ? device.last_seen_at : null;
+		const ms = getLastSeenMs(lastSeen);
+		if (lastSeen && ms !== null && (!best || ms > best.ms)) {
+			best = { ms, value: lastSeen };
+		}
+	}
+	return best?.value ?? null;
+}
+
+function findChannelsByCodes(channels: any[], codes: string[]): any[] {
+	const wanted = new Set(codes.map((code) => code.toLowerCase()));
+	return (channels || []).filter((channel) => wanted.has(String(channel?.code || "").toLowerCase()));
+}
+
+function getAlertSourceChannels(device: any) {
+	const channels = device?.channels || [];
+	const profile = inferDeviceProfile(device);
+	const allTempChannels = channels.filter((channel: any) => detectChannelMetric(channel) === "temperature");
+	const allO2Channels = channels.filter((channel: any) => detectChannelMetric(channel) === "o2");
+
+	if (profile === "cp500-v3") {
+		const tempChannels = findChannelsByCodes(channels, ["TempIn"]);
+		return {
+			tempChannels: tempChannels.length ? tempChannels : allTempChannels,
+			o2Channels: [],
+		};
+	}
+
+	if (profile === "smart-compost") {
+		const tempChannels = findChannelsByCodes(channels, ["AirTemp", "RoomTemp"]);
+		const o2Channels = findChannelsByCodes(channels, ["O2"]);
+		return {
+			tempChannels: tempChannels.length ? tempChannels : allTempChannels,
+			o2Channels: o2Channels.length ? o2Channels : allO2Channels,
+		};
+	}
+
+	if (profile === "mmcgs") {
+		const tempChannels = channels.filter((channel: any) => {
+			const code = String(channel?.code || "").toLowerCase();
+			const metric = detectChannelMetric(channel);
+			return metric === "temperature" && (code === "airtemp" || code === "temp");
+		});
+		const o2Channels = channels.filter((channel: any) => {
+			const code = String(channel?.code || "").toLowerCase();
+			return detectChannelMetric(channel) === "o2" || code === "o2";
+		});
+		return {
+			tempChannels: tempChannels.length ? tempChannels : allTempChannels,
+			o2Channels: o2Channels.length ? o2Channels : allO2Channels,
+		};
+	}
+
+	return { tempChannels: allTempChannels, o2Channels: allO2Channels };
+}
+
+function getAlertSummary(device: any) {
+	const { tempChannels, o2Channels } = getAlertSourceChannels(device);
+	const maxTemp = maxLatest(tempChannels);
+	const minO2 = minLatest(o2Channels);
+	const profile = inferDeviceProfile(device);
+	const hasTempSignal = tempChannels.length > 0;
+	const hasO2Signal = o2Channels.length > 0;
+	const tempAlert = hasTempSignal ? evalTemp(maxTemp) : { sev: "none" as const, tip: "无温度数据" };
+	const o2Alert = hasO2Signal ? evalO2(minO2) : { sev: "none" as const, tip: "无氧气数据" };
+
+	let overall: "danger" | "warn" | "ok" | "none" = "none";
+	if (profile === "cp500-v3") {
+		overall = tempAlert.sev;
+	} else if (profile === "smart-compost" || profile === "mmcgs") {
+		overall = overallSev(tempAlert.sev, o2Alert.sev);
+	} else if (hasTempSignal || hasO2Signal) {
+		overall = overallSev(tempAlert.sev, o2Alert.sev);
+	}
+
+	return { tempAlert, o2Alert, overall };
 }
 
 export default function DevicesPage() {
@@ -230,18 +345,11 @@ export default function DevicesPage() {
 
 		return devices
 			.filter((d) => {
-				const state = getOnlineState(d.last_seen_at);
+				const state = getProfileOnlineState(d.last_seen_at, inferDeviceProfile(d));
 				if (statusFilter !== "all" && state !== statusFilter) return false;
 
-				const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
-				const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
-				const tempV = maxLatest(tempChs);
-				const o2V = minLatest(o2Chs);
-
-				const tA = evalTemp(tempV);
-				const oA = evalO2(o2V);
-				const ov = overallSev(tA.sev, oA.sev);
-				if (alertFilter !== "all" && ov !== alertFilter) return false;
+				const alertSummary = getDeviceAlertSummary(d);
+				if (alertFilter !== "all" && alertSummary.overall !== alertFilter) return false;
 
 				if (!qq) return true;
 				const hay = `${d.name || ""} ${d.code || ""}`.toLowerCase();
@@ -273,6 +381,8 @@ export default function DevicesPage() {
 				.sort((a, b) => (getMmcgsPointIndex(a.code) || 0) - (getMmcgsPointIndex(b.code) || 0));
 			return {
 				...controller,
+				last_seen_at: pickLatestLastSeen(group),
+				channels: group.flatMap((item) => item.channels || []),
 				mmcgs_points: points,
 				mmcgs_controller_code: getMmcgsControllerCode(controller.code),
 			};
@@ -312,7 +422,7 @@ export default function DevicesPage() {
 				key: "status",
 				width: 140,
 				render: (_: any, d: any) => {
-					const st = onlineTag(getOnlineState(d.last_seen_at));
+					const st = onlineTag(getProfileOnlineState(d.last_seen_at, inferDeviceProfile(d)));
 					return <Tag color={st.color}>{st.text}</Tag>;
 				},
 			},
@@ -330,17 +440,10 @@ export default function DevicesPage() {
 				key: "alerts",
 				width: 160,
 				render: (_: any, d: any) => {
-					const tempChs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "temperature");
-					const o2Chs = (d.channels || []).filter((ch: any) => detectChannelMetric(ch) === "o2");
-					const tempV = maxLatest(tempChs);
-					const o2V = minLatest(o2Chs);
+					const { tempAlert: tA, o2Alert: oA, overall } = getDeviceAlertSummary(d);
 
-					const tA = evalTemp(tempV);
-					const oA = evalO2(o2V);
-					const ov = overallSev(tA.sev, oA.sev);
-
-					const color = ov === "danger" ? "red" : ov === "warn" ? "orange" : ov === "ok" ? "green" : "default";
-					const text = ov === "danger" ? "Danger" : ov === "warn" ? "Warn" : ov === "ok" ? "OK" : "No Data";
+					const color = overall === "danger" ? "red" : overall === "warn" ? "orange" : overall === "ok" ? "green" : "default";
+					const text = overall === "danger" ? "Danger" : overall === "warn" ? "Warn" : overall === "ok" ? "OK" : "No Data";
 
 					return (
 						<Space>
@@ -473,7 +576,7 @@ export default function DevicesPage() {
 			{isMobile ? (
 				<Row gutter={[12, 12]}>
 					{displayDevices.map((d) => {
-						const st = onlineTag(getOnlineState(d.last_seen_at));
+						const st = onlineTag(getProfileOnlineState(d.last_seen_at, inferDeviceProfile(d)));
 						const profile = inferDeviceProfile(d);
 
 						const metricGroups = groupChannelsByMetric(d.channels || []);
