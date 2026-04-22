@@ -668,22 +668,22 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 	);
 
 	return (
-		<Popover
-			content={hoverContent}
-			trigger="hover"
-			mouseEnterDelay={0.12}
-			placement="topLeft"
-			overlayStyle={{ maxWidth: isMobile ? 300 : 320 }}
+		<div
+			style={{
+				display: "grid",
+				gap: 8,
+			}}
 		>
-			<div
-				style={{
-					cursor: "pointer",
-					display: "grid",
-					gap: 8,
-				}}
+			<Popover
+				content={hoverContent}
+				trigger="hover"
+				mouseEnterDelay={0.12}
+				placement="topLeft"
+				overlayStyle={{ maxWidth: isMobile ? 300 : 320 }}
 			>
 				<div
 					style={{
+						cursor: "pointer",
 						borderRadius: 16,
 						padding: "18px 10px 14px",
 						background: "radial-gradient(circle at 50% 18%, #ffffff 0%, #f7f9fb 58%, #f1f4f7 100%)",
@@ -691,7 +691,18 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 						display: "flex",
 						justifyContent: "center",
 						boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92)",
+						transition: "border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease",
 						...contentBlockStyle,
+					}}
+					onMouseEnter={(event) => {
+						event.currentTarget.style.borderColor = "#b7d6f7";
+						event.currentTarget.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.92), 0 8px 22px rgba(34, 92, 146, 0.08)";
+						event.currentTarget.style.transform = "translateY(-1px)";
+					}}
+					onMouseLeave={(event) => {
+						event.currentTarget.style.borderColor = "#e9edf2";
+						event.currentTarget.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.92)";
+						event.currentTarget.style.transform = "translateY(0)";
 					}}
 				>
 					<svg viewBox="0 0 224 228" width="262" height="248" aria-hidden="true">
@@ -829,48 +840,48 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 						) : null}
 					</svg>
 				</div>
-				<div
-					style={{
-						display: "grid",
-						gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-						gap: 0,
-						overflow: "hidden",
-						borderRadius: 12,
-						...contentBlockStyle,
-						...infoCardStyle,
-					}}
-				>
-					{summaryItems.map((item, index) => (
-						<div
-							key={item.label}
-							style={{
-								padding: "8px 10px",
-								minWidth: 0,
-								borderLeft: index === 0 ? "none" : "1px solid #e9edf2",
-							}}
-						>
-							<div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-								<div
-									style={{
-										width: 8,
-										height: 8,
-										borderRadius: "50%",
-										background: item.color,
-										flex: "0 0 auto",
-									}}
-								/>
-								<Text type="secondary" style={{ fontSize: 10.5, lineHeight: 1.2, color: "#6b7785" }}>
-									{item.label}
-								</Text>
-							</div>
-							<Text strong style={{ fontSize: 12.5, color: "#1f2d3d", lineHeight: 1.2 }}>
-								{item.value}
+			</Popover>
+			<div
+				style={{
+					display: "grid",
+					gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+					gap: 0,
+					overflow: "hidden",
+					borderRadius: 12,
+					...contentBlockStyle,
+					...infoCardStyle,
+				}}
+			>
+				{summaryItems.map((item, index) => (
+					<div
+						key={item.label}
+						style={{
+							padding: "8px 10px",
+							minWidth: 0,
+							borderLeft: index === 0 ? "none" : "1px solid #e9edf2",
+						}}
+					>
+						<div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+							<div
+								style={{
+									width: 8,
+									height: 8,
+									borderRadius: "50%",
+									background: item.color,
+									flex: "0 0 auto",
+								}}
+							/>
+							<Text type="secondary" style={{ fontSize: 10.5, lineHeight: 1.2, color: "#6b7785" }}>
+								{item.label}
 							</Text>
 						</div>
-					))}
-				</div>
+						<Text strong style={{ fontSize: 12.5, color: "#1f2d3d", lineHeight: 1.2 }}>
+							{item.value}
+						</Text>
+					</div>
+				))}
 			</div>
-		</Popover>
+		</div>
 	);
 }
 
