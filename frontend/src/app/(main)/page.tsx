@@ -500,18 +500,97 @@ function channelSwitchState(device: DashboardDevice, codes: string[]): boolean |
 	return null;
 }
 
-function cp500TempColor(temp: number | null) {
-	if (temp === null) return "#d9d9d9";
-	if (temp >= 75) return "#ff7875";
-	if (temp >= 65) return "#ffa940";
-	if (temp >= 50) return "#73d13d";
-	return "#91caff";
+type Cp500TempTier = "unknown" | "cool" | "mild" | "active" | "warm" | "hot";
+
+function cp500TempTier(temp: number | null): Cp500TempTier {
+	if (temp === null) return "unknown";
+	if (temp >= 75) return "hot";
+	if (temp >= 65) return "warm";
+	if (temp >= 50) return "active";
+	if (temp >= 35) return "mild";
+	return "cool";
 }
 
-function statusDot(active: boolean | null) {
-	if (active === true) return "#52c41a";
-	if (active === false) return "#d9d9d9";
-	return "#bfbfbf";
+function cp500TempColor(temp: number | null) {
+	const tier = cp500TempTier(temp);
+	if (tier === "unknown") return "#d9d9d9";
+	if (tier === "cool") return "#9ad8a4";
+	if (tier === "mild") return "#4dbf71";
+	if (tier === "active") return "#8acb42";
+	if (tier === "warm") return "#e0b144";
+	return "#de6f5d";
+}
+
+function cp500MixColor(hex: string, target: string, amount: number) {
+	const normalize = (value: string) => value.replace("#", "");
+	const source = normalize(hex);
+	const goal = normalize(target);
+	const parse = (value: string, index: number) => Number.parseInt(value.slice(index, index + 2), 16);
+	const mixChannel = (start: number, end: number) => Math.round(start + (end - start) * amount);
+	const sr = parse(source, 0);
+	const sg = parse(source, 2);
+	const sb = parse(source, 4);
+	const tr = parse(goal, 0);
+	const tg = parse(goal, 2);
+	const tb = parse(goal, 4);
+	const toHex = (value: number) => value.toString(16).padStart(2, "0");
+	return `#${toHex(mixChannel(sr, tr))}${toHex(mixChannel(sg, tg))}${toHex(mixChannel(sb, tb))}`;
+}
+
+function cp500PaletteFromTemp(temp: number | null) {
+	const base = cp500TempColor(temp);
+	if (temp === null) {
+		return {
+			accent: "#d3ddd5",
+			bodyTop: "#cce0d0",
+			bodyBottom: "#aec7b5",
+			bodyCap: "#bfd5c5",
+			jacketTop: "#e1efe3",
+			jacketBottom: "#cbe0cf",
+			waterFill: "#b7dfc3",
+			waterSurface: "#d3edd9",
+			waterGlow: "#e8f5eb",
+		};
+	}
+	return {
+		accent: cp500MixColor(base, "ffffff", 0.18),
+		bodyTop: cp500MixColor(base, "ffffff", 0.26),
+		bodyBottom: cp500MixColor(base, "000000", 0.14),
+		bodyCap: cp500MixColor(base, "ffffff", 0.4),
+		jacketTop: cp500MixColor(base, "ffffff", 0.72),
+		jacketBottom: cp500MixColor(base, "ffffff", 0.44),
+		waterFill: cp500MixColor(base, "ffffff", 0.22),
+		waterSurface: cp500MixColor(base, "ffffff", 0.46),
+		waterGlow: cp500MixColor(base, "ffffff", 0.72),
+	};
+}
+
+function cp500ShellColor(temp: number | null) {
+	return cp500PaletteFromTemp(temp).accent;
+}
+
+function cp500WaterPalette(temp: number | null) {
+	const palette = cp500PaletteFromTemp(temp);
+	return { fill: palette.waterFill, surface: palette.waterSurface, glow: palette.waterGlow };
+}
+
+function cp500BodyPalette(temp: number | null) {
+	const palette = cp500PaletteFromTemp(temp);
+	return { top: palette.bodyTop, bottom: palette.bodyBottom, cap: palette.bodyCap };
+}
+
+function cp500JacketPalette(temp: number | null) {
+	const palette = cp500PaletteFromTemp(temp);
+	return { top: palette.jacketTop, bottom: palette.jacketBottom };
+}
+
+function cp500ActuatorColor(kind: "aeration" | "heater" | "pump", active: boolean | null) {
+	if (active !== true) {
+		return active === false ? "#d6dee6" : "#bcc8d2";
+	}
+	if (kind === "aeration") return "#4fba74";
+	if (kind === "heater") return "#d87d69";
+	return "#66be84";
 }
 
 function switchText(active: boolean | null) {
@@ -543,11 +622,14 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 	const heaterOn = channelSwitchState(device, ["Heater"]);
 	const pumpOn = channelSwitchState(device, ["Pump"]);
 	const bodyColor = cp500TempColor(reactorTemp);
+	const bodyPalette = cp500BodyPalette(reactorTemp);
+	const jacketPalette = cp500JacketPalette(tankTemp ?? shellAvgTemp);
 	const tankColor = cp500TempColor(tankTemp);
-	const shellColor1 = cp500TempColor(shellTemp1);
-	const shellColor2 = cp500TempColor(shellTemp2);
-	const shellColor3 = cp500TempColor(shellTemp3);
-	const tankWaterColor = tankTemp === null ? "#b9d9ff" : tankColor;
+	const tankWaterPalette = cp500WaterPalette(tankTemp);
+	const shellColor1 = cp500ShellColor(shellTemp1);
+	const shellColor2 = cp500ShellColor(shellTemp2);
+	const shellColor3 = cp500ShellColor(shellTemp3);
+	const shellAccent = cp500ShellColor(shellAvgTemp ?? tankTemp);
 	const uiText = {
 		summaryShell: "\u7b52\u58c1\u5747\u6e29",
 		summaryDelta: "\u6c34\u6d74\u6e29\u5dee",
@@ -575,12 +657,12 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 		{
 			label: uiText.summaryShell,
 			value: shellAvgTemp === null ? "-" : `${shellAvgTemp.toFixed(1)}${tempUnit}`,
-			color: cp500TempColor(shellAvgTemp),
+			color: cp500ShellColor(shellAvgTemp),
 		},
 		{
 			label: uiText.summaryDelta,
 			value: waterDelta === null ? "-" : `${waterDelta >= 0 ? "+" : ""}${waterDelta.toFixed(1)}${tempUnit}`,
-			color: tankColor,
+			color: shellAccent,
 		},
 		{
 			label: uiText.summaryActive,
@@ -652,7 +734,20 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 								textAlign: "center",
 							}}
 						>
-							<div style={{ width: 7, height: 7, borderRadius: "50%", background: statusDot(item.active), margin: "0 auto 5px" }} />
+							<div
+								style={{
+									width: 7,
+									height: 7,
+									borderRadius: "50%",
+									background:
+										item.label === (getChannelDisplayName(aerationChannel) || "Aeration")
+											? cp500ActuatorColor("aeration", item.active)
+											: item.label === (getChannelDisplayName(heaterChannel) || "Heater")
+												? cp500ActuatorColor("heater", item.active)
+												: cp500ActuatorColor("pump", item.active),
+									margin: "0 auto 5px",
+								}}
+							/>
 							<Text type="secondary" style={{ fontSize: 10, display: "block", lineHeight: 1.2 }}>{item.label}</Text>
 							<Text strong style={{ fontSize: 10.5 }}>{switchText(item.active)}</Text>
 						</div>
@@ -695,8 +790,8 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 						...contentBlockStyle,
 					}}
 					onMouseEnter={(event) => {
-						event.currentTarget.style.borderColor = "#b7d6f7";
-						event.currentTarget.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.92), 0 8px 22px rgba(34, 92, 146, 0.08)";
+						event.currentTarget.style.borderColor = "#b8dce7";
+						event.currentTarget.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.92), 0 8px 22px rgba(62, 142, 186, 0.12)";
 						event.currentTarget.style.transform = "translateY(-1px)";
 					}}
 					onMouseLeave={(event) => {
@@ -724,12 +819,12 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 								<stop offset="100%" stopColor="#eef2f6" />
 							</linearGradient>
 							<linearGradient id={`cp500-core-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-								<stop offset="0%" stopColor={bodyColor} />
-								<stop offset="100%" stopColor={bodyColor} stopOpacity="0.76" />
+								<stop offset="0%" stopColor={bodyPalette.top} />
+								<stop offset="100%" stopColor={bodyPalette.bottom} />
 							</linearGradient>
 							<linearGradient id={`cp500-water-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-								<stop offset="0%" stopColor="#d8efff" />
-								<stop offset="100%" stopColor="#a9d4ff" />
+								<stop offset="0%" stopColor={jacketPalette.top} />
+								<stop offset="100%" stopColor={jacketPalette.bottom} />
 							</linearGradient>
 							<linearGradient id={`cp500-tank-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
 								<stop offset="0%" stopColor="#ffffff" />
@@ -745,7 +840,7 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 							<rect x="50" y="46" width="68" height="96" rx="30" fill={`url(#cp500-shell-${device.device_id})`} stroke="#cfd4dc" strokeWidth="2" />
 							<rect x="53" y="51" width="62" height="87" rx="26" fill={`url(#cp500-water-${device.device_id})`} opacity="0.93" />
 							<rect x="61" y="58" width="46" height="72" rx="19" fill={`url(#cp500-core-${device.device_id})`} />
-							<ellipse cx="84" cy="58" rx="23" ry="6.8" fill={bodyColor} opacity="0.88" />
+							<ellipse cx="84" cy="58" rx="23" ry="6.8" fill={bodyPalette.cap} opacity="0.92" />
 						</g>
 						<text x="84" y="88" textAnchor="middle" fontSize="10.5" fill="rgba(255,255,255,0.84)" fontWeight="600">{tempItems[0]?.label || "TempIn"}</text>
 						<text x="84" y="113" textAnchor="middle" fontSize="16" fill="#ffffff" fontWeight="700">{reactorTemp === null ? "-" : `${reactorTemp.toFixed(1)}${tempUnit}`}</text>
@@ -770,36 +865,38 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 							<ellipse cx="136" cy="218" rx="18" ry="5.5" fill="#edf1f5" stroke="#cfd4dc" strokeWidth="1.6" />
 							<rect
 								x="122"
-								y="189"
+								y="183"
 								width="28"
-								height="14"
-								rx="6.2"
-								fill={tankWaterColor}
-								opacity={heaterOn ? 0.52 : 0.42}
+								height="31"
+								rx="6.4"
+								fill={tankWaterPalette.fill}
+								opacity={heaterOn ? 0.56 : 0.46}
 								style={heaterOn ? { animation: "cp500-water-pulse 1.8s ease-in-out infinite" } : undefined}
 							/>
-							<ellipse cx="136" cy="189" rx="14" ry="3.8" fill={tankWaterColor} opacity={heaterOn ? 0.72 : 0.58} />
+							<ellipse cx="136" cy="183" rx="14" ry="3.8" fill={tankWaterPalette.surface} opacity={heaterOn ? 0.78 : 0.64} />
+							<ellipse cx="136" cy="194" rx="10.5" ry="2.7" fill={tankWaterPalette.glow} opacity={heaterOn ? 0.3 : 0.22} />
 							<path d="M127.8 179 C129.4 191, 129.4 205, 127.8 216" fill="none" stroke="rgba(255,255,255,0.76)" strokeWidth="1.5" strokeLinecap="round" />
 						</g>
 						<rect x="126" y="221" width="20" height="3.2" rx="1.6" fill="#dfe4ea" />
 						<text x="136" y="183" textAnchor="middle" fontSize="8.5" fill="#7f8a96">{tempItems[4]?.label || "TankTemp"}</text>
 						<text x="136" y="202" textAnchor="middle" fontSize="12.5" fill="#2f3943" fontWeight="700">{tankTemp === null ? "-" : `${tankTemp.toFixed(1)}${tempUnit}`}</text>
-						<circle cx="175" cy="180" r="6" fill={statusDot(heaterOn)} stroke="#ffffff" strokeWidth="1.5" />
-						<circle cx="175" cy="202" r="6" fill={statusDot(pumpOn)} stroke="#ffffff" strokeWidth="1.5" />
+						<circle cx="175" cy="180" r="6" fill={cp500ActuatorColor("heater", heaterOn)} stroke="#ffffff" strokeWidth="1.5" />
+						<circle cx="175" cy="202" r="6" fill={cp500ActuatorColor("pump", pumpOn)} stroke="#ffffff" strokeWidth="1.5" />
 						<text x="187" y="183" fontSize="8.2" fill="#7f8a96">{statusItems[1]?.label || "Heater"}</text>
 						<text x="187" y="205" fontSize="8.2" fill="#7f8a96">{statusItems[2]?.label || "Pump"}</text>
-						<circle cx="20" cy="132" r="6" fill={statusDot(aerationOn)} stroke="#ffffff" strokeWidth="1.5" />
+						<circle cx="20" cy="132" r="6" fill={cp500ActuatorColor("aeration", aerationOn)} stroke="#ffffff" strokeWidth="1.5" />
 						<text x="20" y="148" textAnchor="middle" fontSize="8.5" fill="#7f8a96">{statusItems[0]?.label || "Aeration"}</text>
-						<path d="M26 132 C44 132, 56 136, 66 136" fill="none" stroke="#55b96d" strokeWidth="2.4" strokeLinecap="round" />
-						<path d="M66 136 C74 136, 78 132, 84 128" fill="none" stroke="#55b96d" strokeWidth="2.4" strokeLinecap="round" />
-						<path d="M175 202 C192 202, 194 164, 161 145" fill="none" stroke="#7eb7ff" strokeWidth="2.2" strokeLinecap="round" />
-						<path d="M161 145 C144 136, 130 130, 112 123" fill="none" stroke="#7eb7ff" strokeWidth="2.2" strokeLinecap="round" />
+						<path d="M26 132 C44 132, 56 136, 66 136" fill="none" stroke="#64b788" strokeWidth="2.4" strokeLinecap="round" />
+						<path d="M66 136 C74 136, 78 132, 84 128" fill="none" stroke="#64b788" strokeWidth="2.4" strokeLinecap="round" />
+						<path d="M175 202 C193 202, 194 165, 165 150" fill="none" stroke={shellAccent} strokeWidth="2.2" strokeLinecap="round" />
+						<path d="M165 150 C148 141, 131 132, 113 123" fill="none" stroke={shellAccent} strokeWidth="2.2" strokeLinecap="round" />
+						<path d="M114 136 C132 150, 152 163, 171 195" fill="none" stroke={shellAccent} strokeWidth="1.7" strokeLinecap="round" opacity="0.82" />
 						{aerationOn ? (
 							<>
 								<path
 									d="M26 132 C44 132, 56 136, 66 136"
 									fill="none"
-									stroke="#baf2c8"
+									stroke="#d5f0df"
 									strokeWidth="2"
 									strokeLinecap="round"
 									strokeDasharray="3 6"
@@ -808,7 +905,7 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 								<path
 									d="M66 136 C74 136, 78 132, 84 128"
 									fill="none"
-									stroke="#baf2c8"
+									stroke="#d5f0df"
 									strokeWidth="2"
 									strokeLinecap="round"
 									strokeDasharray="3 6"
@@ -819,22 +916,31 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 						{pumpOn ? (
 							<>
 								<path
-									d="M175 202 C192 202, 194 164, 161 145"
+									d="M175 202 C193 202, 194 165, 165 150"
 									fill="none"
-									stroke="#d7ecff"
+									stroke="#ddf4e1"
 									strokeWidth="2"
 									strokeLinecap="round"
 									strokeDasharray="3 6"
 									style={{ animation: "cp500-flow-dash 0.95s linear infinite" }}
 								/>
 								<path
-									d="M161 145 C144 136, 130 130, 112 123"
+									d="M165 150 C148 141, 131 132, 113 123"
 									fill="none"
-									stroke="#d7ecff"
+									stroke="#ddf4e1"
 									strokeWidth="2"
 									strokeLinecap="round"
 									strokeDasharray="3 6"
 									style={{ animation: "cp500-flow-dash 0.95s linear infinite" }}
+								/>
+								<path
+									d="M114 136 C132 150, 152 163, 171 195"
+									fill="none"
+									stroke="#ddf4e1"
+									strokeWidth="1.6"
+									strokeLinecap="round"
+									strokeDasharray="3 6"
+									style={{ animation: "cp500-flow-dash 1.05s linear infinite" }}
 								/>
 							</>
 						) : null}
