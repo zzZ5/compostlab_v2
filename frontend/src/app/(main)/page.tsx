@@ -670,7 +670,7 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 	return (
 		<Popover
 			content={hoverContent}
-			trigger={isMobile ? ["click"] : ["hover", "click"]}
+			trigger="hover"
 			mouseEnterDelay={0.12}
 			placement="topLeft"
 			overlayStyle={{ maxWidth: isMobile ? 300 : 320 }}
@@ -1462,7 +1462,7 @@ export default function DashboardPage() {
 
 					return (
 						<Col key={`${device.device_id}-${device.code || ""}`} xs={24} md={12} lg={6}>
-							{device.dashboard_is_mmcgs_group ? cardBody : <Link href={`/devices/${device.device_id}`} style={{ display: "block" }}>{cardBody}</Link>}
+							{device.dashboard_is_mmcgs_group || device.dashboard_profile === "cp500-v3" ? cardBody : <Link href={`/devices/${device.device_id}`} style={{ display: "block" }}>{cardBody}</Link>}
 						</Col>
 					);
 				})}
