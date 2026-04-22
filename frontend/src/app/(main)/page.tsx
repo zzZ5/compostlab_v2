@@ -482,6 +482,398 @@ function getDeviceSummaryItems(device: DashboardDevice, alerts: ReturnType<typeo
 	];
 }
 
+function channelNumber(device: DashboardDevice, codes: string[]): number | null {
+	const channel = getChannelByCodes(device, codes);
+	const raw = channel?.latest?.value;
+	if (typeof raw === "number") return raw;
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function channelSwitchState(device: DashboardDevice, codes: string[]): boolean | null {
+	const channel = getChannelByCodes(device, codes);
+	if (!channel?.latest) return null;
+	const raw = channel.latest.value;
+	const normalized = typeof raw === "string" ? raw.trim().toLowerCase() : raw;
+	if (normalized === 1 || normalized === "1" || normalized === true || normalized === "true" || normalized === "on") return true;
+	if (normalized === 0 || normalized === "0" || normalized === false || normalized === "false" || normalized === "off") return false;
+	return null;
+}
+
+function cp500TempColor(temp: number | null) {
+	if (temp === null) return "#d9d9d9";
+	if (temp >= 75) return "#ff7875";
+	if (temp >= 65) return "#ffa940";
+	if (temp >= 50) return "#73d13d";
+	return "#91caff";
+}
+
+function statusDot(active: boolean | null) {
+	if (active === true) return "#52c41a";
+	if (active === false) return "#d9d9d9";
+	return "#bfbfbf";
+}
+
+function switchText(active: boolean | null) {
+	if (active === true) return "开启";
+	if (active === false) return "关闭";
+	return "-";
+}
+
+function Cp500SiloMini({ device }: { device: DashboardDevice }) {
+	const screens = useBreakpoint();
+	const isMobile = !screens.md;
+	const reactorChannel = getChannelByCodes(device, ["TempIn"]);
+	const shellChannel1 = getChannelByCodes(device, ["TempOut1"]);
+	const shellChannel2 = getChannelByCodes(device, ["TempOut2"]);
+	const shellChannel3 = getChannelByCodes(device, ["TempOut3"]);
+	const tankChannel = getChannelByCodes(device, ["TankTemp"]);
+	const aerationChannel = getChannelByCodes(device, ["Aeration"]);
+	const heaterChannel = getChannelByCodes(device, ["Heater"]);
+	const pumpChannel = getChannelByCodes(device, ["Pump"]);
+	const reactorTemp = channelNumber(device, ["TempIn"]);
+	const shellTemp1 = channelNumber(device, ["TempOut1"]);
+	const shellTemp2 = channelNumber(device, ["TempOut2"]);
+	const shellTemp3 = channelNumber(device, ["TempOut3"]);
+	const tankTemp = channelNumber(device, ["TankTemp"]);
+	const shellTemps = [shellTemp1, shellTemp2, shellTemp3].filter((value): value is number => value !== null && value !== undefined && !Number.isNaN(value));
+	const shellAvgTemp = shellTemps.length ? shellTemps.reduce((sum, value) => sum + value, 0) / shellTemps.length : null;
+	const waterDelta = reactorTemp === null || tankTemp === null ? null : tankTemp - reactorTemp;
+	const aerationOn = channelSwitchState(device, ["Aeration"]);
+	const heaterOn = channelSwitchState(device, ["Heater"]);
+	const pumpOn = channelSwitchState(device, ["Pump"]);
+	const bodyColor = cp500TempColor(reactorTemp);
+	const tankColor = cp500TempColor(tankTemp);
+	const shellColor1 = cp500TempColor(shellTemp1);
+	const shellColor2 = cp500TempColor(shellTemp2);
+	const shellColor3 = cp500TempColor(shellTemp3);
+	const tankWaterColor = tankTemp === null ? "#b9d9ff" : tankColor;
+	const uiText = {
+		summaryShell: "\u7b52\u58c1\u5747\u6e29",
+		summaryDelta: "\u6c34\u6d74\u6e29\u5dee",
+		summaryActive: "\u8fd0\u884c\u5355\u5143",
+		hoverTemps: "\u6e29\u5ea6\u70b9\u4f4d",
+		hoverStatus: "\u6267\u884c\u72b6\u6001",
+		hoverNote:
+			"\u52a0\u70ed\u4f5c\u7528\u4e8e\u6c34\u7bb1\uff0c\u5faa\u73af\u6c34\u6cf5\u5c06\u70ed\u6c34\u9001\u5165\u5939\u5c42\uff0c\u66dd\u6c14\u4ece\u6876\u5e95\u8fdb\u5165\u5806\u4f53\u3002",
+	} as const;
+	const statusItems = [
+		{ label: getChannelDisplayName(aerationChannel) || "Aeration", active: aerationOn },
+		{ label: getChannelDisplayName(heaterChannel) || "Heater", active: heaterOn },
+		{ label: getChannelDisplayName(pumpChannel) || "Pump", active: pumpOn },
+	];
+	const activeStatusCount = statusItems.filter((item) => item.active === true).length;
+	const tempItems = [
+		{ label: getChannelDisplayName(reactorChannel) || "TempIn", value: reactorTemp },
+		{ label: getChannelDisplayName(shellChannel1) || "TempOut1", value: shellTemp1 },
+		{ label: getChannelDisplayName(shellChannel2) || "TempOut2", value: shellTemp2 },
+		{ label: getChannelDisplayName(shellChannel3) || "TempOut3", value: shellTemp3 },
+		{ label: getChannelDisplayName(tankChannel) || "TankTemp", value: tankTemp },
+	];
+	const tempUnit = String(reactorChannel?.unit || shellChannel1?.unit || shellChannel2?.unit || shellChannel3?.unit || tankChannel?.unit || "\u2103");
+	const summaryItems = [
+		{
+			label: uiText.summaryShell,
+			value: shellAvgTemp === null ? "-" : `${shellAvgTemp.toFixed(1)}${tempUnit}`,
+			color: cp500TempColor(shellAvgTemp),
+		},
+		{
+			label: uiText.summaryDelta,
+			value: waterDelta === null ? "-" : `${waterDelta >= 0 ? "+" : ""}${waterDelta.toFixed(1)}${tempUnit}`,
+			color: tankColor,
+		},
+		{
+			label: uiText.summaryActive,
+			value: `${activeStatusCount}/3`,
+			color: activeStatusCount ? "#52c41a" : "#b8c0cc",
+		},
+	];
+	const infoCardStyle = {
+		background: "linear-gradient(180deg, #fbfcfd 0%, #f7f9fb 100%)",
+		border: "1px solid #e9edf2",
+		boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92)",
+	};
+	const detailCardStyle = {
+		borderRadius: 12,
+		padding: "10px 11px",
+		...infoCardStyle,
+	} satisfies React.CSSProperties;
+	const contentBlockStyle = {
+		width: "100%",
+		maxWidth: 324,
+		margin: "0 auto",
+	} satisfies React.CSSProperties;
+	const hoverContent = (
+		<div
+			style={{
+				minWidth: 228,
+				maxWidth: isMobile ? 286 : 300,
+				display: "grid",
+				gap: 8,
+			}}
+		>
+			<div style={detailCardStyle}>
+				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+					<Text strong style={{ fontSize: 12 }}>{uiText.hoverTemps}</Text>
+					<Text type="secondary" style={{ fontSize: 10.5 }}>{`${tempItems.length} pts`}</Text>
+				</div>
+				<div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5 }}>
+					{tempItems.map((item) => (
+						<div
+							key={item.label}
+							style={{
+								padding: "5px 7px",
+								borderRadius: 9,
+								background: "#ffffff",
+								border: "1px solid #edf0f3",
+								minWidth: 0,
+							}}
+						>
+							<Text type="secondary" style={{ fontSize: 10, display: "block", lineHeight: 1.2 }}>{item.label}</Text>
+							<Text strong style={{ fontSize: 11.5 }}>{item.value === null ? "-" : `${item.value.toFixed(1)}${tempUnit}`}</Text>
+						</div>
+					))}
+				</div>
+			</div>
+			<div style={detailCardStyle}>
+				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+					<Text strong style={{ fontSize: 12 }}>{uiText.hoverStatus}</Text>
+					<Text type="secondary" style={{ fontSize: 10.5 }}>{`${activeStatusCount}/3 on`}</Text>
+				</div>
+				<div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 5 }}>
+					{statusItems.map((item) => (
+						<div
+							key={item.label}
+							style={{
+								padding: "5px 6px",
+								borderRadius: 9,
+								background: "#ffffff",
+								border: "1px solid #edf0f3",
+								textAlign: "center",
+							}}
+						>
+							<div style={{ width: 7, height: 7, borderRadius: "50%", background: statusDot(item.active), margin: "0 auto 5px" }} />
+							<Text type="secondary" style={{ fontSize: 10, display: "block", lineHeight: 1.2 }}>{item.label}</Text>
+							<Text strong style={{ fontSize: 10.5 }}>{switchText(item.active)}</Text>
+						</div>
+					))}
+				</div>
+			</div>
+			<div style={{ padding: "0 2px" }}>
+				<Text type="secondary" style={{ fontSize: 10.5, lineHeight: 1.45 }}>
+					{uiText.hoverNote}
+				</Text>
+			</div>
+		</div>
+	);
+
+	return (
+		<Popover
+			content={hoverContent}
+			trigger={isMobile ? ["click"] : ["hover", "click"]}
+			mouseEnterDelay={0.12}
+			placement="topLeft"
+			overlayStyle={{ maxWidth: isMobile ? 300 : 320 }}
+		>
+			<div
+				style={{
+					cursor: "pointer",
+					display: "grid",
+					gap: 8,
+				}}
+			>
+				<div
+					style={{
+						borderRadius: 16,
+						padding: "18px 10px 14px",
+						background: "radial-gradient(circle at 50% 18%, #ffffff 0%, #f7f9fb 58%, #f1f4f7 100%)",
+						border: "1px solid #e9edf2",
+						display: "flex",
+						justifyContent: "center",
+						boxShadow: "inset 0 1px 0 rgba(255,255,255,0.92)",
+						...contentBlockStyle,
+					}}
+				>
+					<svg viewBox="0 0 224 228" width="262" height="248" aria-hidden="true">
+						<style>
+							{`
+								@keyframes cp500-flow-dash {
+									from { stroke-dashoffset: 0; }
+									to { stroke-dashoffset: -18; }
+								}
+								@keyframes cp500-water-pulse {
+									0%, 100% { opacity: 0.42; }
+									50% { opacity: 0.62; }
+								}
+							`}
+						</style>
+						<defs>
+							<linearGradient id={`cp500-shell-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+								<stop offset="0%" stopColor="#ffffff" />
+								<stop offset="100%" stopColor="#eef2f6" />
+							</linearGradient>
+							<linearGradient id={`cp500-core-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+								<stop offset="0%" stopColor={bodyColor} />
+								<stop offset="100%" stopColor={bodyColor} stopOpacity="0.76" />
+							</linearGradient>
+							<linearGradient id={`cp500-water-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+								<stop offset="0%" stopColor="#d8efff" />
+								<stop offset="100%" stopColor="#a9d4ff" />
+							</linearGradient>
+							<linearGradient id={`cp500-tank-${device.device_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+								<stop offset="0%" stopColor="#ffffff" />
+								<stop offset="55%" stopColor="#f3f6fa" />
+								<stop offset="100%" stopColor="#e6ebf1" />
+							</linearGradient>
+							<filter id={`cp500-shadow-${device.device_id}`} x="-20%" y="-20%" width="140%" height="160%">
+								<feDropShadow dx="0" dy="5" stdDeviation="6" floodColor="#d9e0e7" floodOpacity="0.55" />
+							</filter>
+						</defs>
+						<g filter={`url(#cp500-shadow-${device.device_id})`}>
+							<ellipse cx="84" cy="46" rx="34" ry="10" fill="#f8fafc" stroke="#cfd4dc" strokeWidth="2" />
+							<rect x="50" y="46" width="68" height="96" rx="30" fill={`url(#cp500-shell-${device.device_id})`} stroke="#cfd4dc" strokeWidth="2" />
+							<rect x="53" y="51" width="62" height="87" rx="26" fill={`url(#cp500-water-${device.device_id})`} opacity="0.93" />
+							<rect x="61" y="58" width="46" height="72" rx="19" fill={`url(#cp500-core-${device.device_id})`} />
+							<ellipse cx="84" cy="58" rx="23" ry="6.8" fill={bodyColor} opacity="0.88" />
+						</g>
+						<text x="84" y="88" textAnchor="middle" fontSize="10.5" fill="rgba(255,255,255,0.84)" fontWeight="600">{tempItems[0]?.label || "TempIn"}</text>
+						<text x="84" y="113" textAnchor="middle" fontSize="16" fill="#ffffff" fontWeight="700">{reactorTemp === null ? "-" : `${reactorTemp.toFixed(1)}${tempUnit}`}</text>
+						<line x1="108" y1="72" x2="126" y2="72" stroke="#d4dae1" strokeWidth="1.6" />
+						<line x1="108" y1="94" x2="126" y2="94" stroke="#d4dae1" strokeWidth="1.6" />
+						<line x1="108" y1="116" x2="126" y2="116" stroke="#d4dae1" strokeWidth="1.6" />
+						<circle cx="109" cy="72" r="3.2" fill={shellColor1} stroke="#ffffff" strokeWidth="1.2" />
+						<circle cx="109" cy="94" r="3.2" fill={shellColor2} stroke="#ffffff" strokeWidth="1.2" />
+						<circle cx="109" cy="116" r="3.2" fill={shellColor3} stroke="#ffffff" strokeWidth="1.2" />
+						<circle cx="132" cy="72" r="4.8" fill={shellColor1} stroke="#ffffff" strokeWidth="1.4" />
+						<circle cx="132" cy="94" r="4.8" fill={shellColor2} stroke="#ffffff" strokeWidth="1.4" />
+						<circle cx="132" cy="116" r="4.8" fill={shellColor3} stroke="#ffffff" strokeWidth="1.4" />
+						<text x="146" y="70" fontSize="8.5" fill="#7f8a96">{tempItems[1]?.label || "TempOut1"}</text>
+						<text x="146" y="84" fontSize="12" fill="#2f3943" fontWeight="700">{shellTemp1 === null ? "-" : `${shellTemp1.toFixed(1)}${tempUnit}`}</text>
+						<text x="146" y="98" fontSize="8.5" fill="#7f8a96">{tempItems[2]?.label || "TempOut2"}</text>
+						<text x="146" y="112" fontSize="12" fill="#2f3943" fontWeight="700">{shellTemp2 === null ? "-" : `${shellTemp2.toFixed(1)}${tempUnit}`}</text>
+						<text x="146" y="126" fontSize="8.5" fill="#7f8a96">{tempItems[3]?.label || "TempOut3"}</text>
+						<text x="146" y="140" fontSize="12" fill="#2f3943" fontWeight="700">{shellTemp3 === null ? "-" : `${shellTemp3.toFixed(1)}${tempUnit}`}</text>
+						<g filter={`url(#cp500-shadow-${device.device_id})`}>
+							<ellipse cx="136" cy="175" rx="18" ry="5.5" fill="#ffffff" stroke="#cfd4dc" strokeWidth="1.6" />
+							<rect x="118" y="175" width="36" height="43" rx="12" fill={`url(#cp500-tank-${device.device_id})`} stroke="#cfd4dc" strokeWidth="1.6" />
+							<ellipse cx="136" cy="218" rx="18" ry="5.5" fill="#edf1f5" stroke="#cfd4dc" strokeWidth="1.6" />
+							<rect
+								x="122"
+								y="189"
+								width="28"
+								height="14"
+								rx="6.2"
+								fill={tankWaterColor}
+								opacity={heaterOn ? 0.52 : 0.42}
+								style={heaterOn ? { animation: "cp500-water-pulse 1.8s ease-in-out infinite" } : undefined}
+							/>
+							<ellipse cx="136" cy="189" rx="14" ry="3.8" fill={tankWaterColor} opacity={heaterOn ? 0.72 : 0.58} />
+							<path d="M127.8 179 C129.4 191, 129.4 205, 127.8 216" fill="none" stroke="rgba(255,255,255,0.76)" strokeWidth="1.5" strokeLinecap="round" />
+						</g>
+						<rect x="126" y="221" width="20" height="3.2" rx="1.6" fill="#dfe4ea" />
+						<text x="136" y="183" textAnchor="middle" fontSize="8.5" fill="#7f8a96">{tempItems[4]?.label || "TankTemp"}</text>
+						<text x="136" y="202" textAnchor="middle" fontSize="12.5" fill="#2f3943" fontWeight="700">{tankTemp === null ? "-" : `${tankTemp.toFixed(1)}${tempUnit}`}</text>
+						<circle cx="175" cy="180" r="6" fill={statusDot(heaterOn)} stroke="#ffffff" strokeWidth="1.5" />
+						<circle cx="175" cy="202" r="6" fill={statusDot(pumpOn)} stroke="#ffffff" strokeWidth="1.5" />
+						<text x="187" y="183" fontSize="8.2" fill="#7f8a96">{statusItems[1]?.label || "Heater"}</text>
+						<text x="187" y="205" fontSize="8.2" fill="#7f8a96">{statusItems[2]?.label || "Pump"}</text>
+						<circle cx="20" cy="132" r="6" fill={statusDot(aerationOn)} stroke="#ffffff" strokeWidth="1.5" />
+						<text x="20" y="148" textAnchor="middle" fontSize="8.5" fill="#7f8a96">{statusItems[0]?.label || "Aeration"}</text>
+						<path d="M26 132 C44 132, 56 136, 66 136" fill="none" stroke="#55b96d" strokeWidth="2.4" strokeLinecap="round" />
+						<path d="M66 136 C74 136, 78 132, 84 128" fill="none" stroke="#55b96d" strokeWidth="2.4" strokeLinecap="round" />
+						<path d="M175 202 C192 202, 194 164, 161 145" fill="none" stroke="#7eb7ff" strokeWidth="2.2" strokeLinecap="round" />
+						<path d="M161 145 C144 136, 130 130, 112 123" fill="none" stroke="#7eb7ff" strokeWidth="2.2" strokeLinecap="round" />
+						{aerationOn ? (
+							<>
+								<path
+									d="M26 132 C44 132, 56 136, 66 136"
+									fill="none"
+									stroke="#baf2c8"
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeDasharray="3 6"
+									style={{ animation: "cp500-flow-dash 0.9s linear infinite" }}
+								/>
+								<path
+									d="M66 136 C74 136, 78 132, 84 128"
+									fill="none"
+									stroke="#baf2c8"
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeDasharray="3 6"
+									style={{ animation: "cp500-flow-dash 0.9s linear infinite" }}
+								/>
+							</>
+						) : null}
+						{pumpOn ? (
+							<>
+								<path
+									d="M175 202 C192 202, 194 164, 161 145"
+									fill="none"
+									stroke="#d7ecff"
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeDasharray="3 6"
+									style={{ animation: "cp500-flow-dash 0.95s linear infinite" }}
+								/>
+								<path
+									d="M161 145 C144 136, 130 130, 112 123"
+									fill="none"
+									stroke="#d7ecff"
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeDasharray="3 6"
+									style={{ animation: "cp500-flow-dash 0.95s linear infinite" }}
+								/>
+							</>
+						) : null}
+					</svg>
+				</div>
+				<div
+					style={{
+						display: "grid",
+						gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+						gap: 0,
+						overflow: "hidden",
+						borderRadius: 12,
+						...contentBlockStyle,
+						...infoCardStyle,
+					}}
+				>
+					{summaryItems.map((item, index) => (
+						<div
+							key={item.label}
+							style={{
+								padding: "8px 10px",
+								minWidth: 0,
+								borderLeft: index === 0 ? "none" : "1px solid #e9edf2",
+							}}
+						>
+							<div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+								<div
+									style={{
+										width: 8,
+										height: 8,
+										borderRadius: "50%",
+										background: item.color,
+										flex: "0 0 auto",
+									}}
+								/>
+								<Text type="secondary" style={{ fontSize: 10.5, lineHeight: 1.2, color: "#6b7785" }}>
+									{item.label}
+								</Text>
+							</div>
+							<Text strong style={{ fontSize: 12.5, color: "#1f2d3d", lineHeight: 1.2 }}>
+								{item.value}
+							</Text>
+						</div>
+					))}
+				</div>
+			</div>
+		</Popover>
+	);
+}
+
 function formatSummaryMetricValue(value: number | null, suffix: string): string {
 	if (value === null || value === undefined || Number.isNaN(value)) return "-";
 	return `${Number(value).toFixed(1)}${suffix}`;
@@ -728,7 +1120,8 @@ export default function DashboardPage() {
 										</Space>
 									</div>
 
-									<div style={{ marginBottom: 8 }}>
+									<div style={{ marginBottom: device.dashboard_profile === "cp500-v3" ? 4 : 8 }}>
+										{device.dashboard_profile === "cp500-v3" && !device.dashboard_is_mmcgs_group ? <Cp500SiloMini device={device} /> : null}
 										{device.dashboard_is_mmcgs_group ? (
 											<div
 												style={{
@@ -763,7 +1156,7 @@ export default function DashboardPage() {
 													</Text>
 												</div>
 											</div>
-										) : metrics.length ? (
+										) : device.dashboard_profile !== "cp500-v3" && metrics.length ? (
 											<div
 												style={{
 													display: "grid",
@@ -783,9 +1176,7 @@ export default function DashboardPage() {
 													</div>
 												))}
 											</div>
-										) : (
-											<Tag style={{ fontSize: 11, padding: "0 4px" }}>未分类</Tag>
-										)}
+										) : null}
 									</div>
 
 									{device.dashboard_is_mmcgs_group && device.dashboard_points?.length ? (
@@ -1003,7 +1394,7 @@ export default function DashboardPage() {
 									) : null}
 
 									<div style={{ marginTop: 8 }}>
-										{!device.dashboard_is_mmcgs_group && metricGroups.length ? (
+										{!device.dashboard_is_mmcgs_group && device.dashboard_profile !== "cp500-v3" && metricGroups.length ? (
 											<div>
 												{metricGroups.map((group, index) => (
 													<div key={group.key}>
@@ -1054,7 +1445,7 @@ export default function DashboardPage() {
 													</div>
 												))}
 											</div>
-										) : !device.dashboard_is_mmcgs_group ? (
+										) : !device.dashboard_is_mmcgs_group && device.dashboard_profile !== "cp500-v3" ? (
 											<Text type="secondary">暂无通道数据</Text>
 										) : null}
 									</div>
