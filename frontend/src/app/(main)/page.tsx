@@ -11,6 +11,11 @@ import { useRuns } from "@/features/runs/queries";
 import { api } from "@/lib/api";
 import { evalO2, evalTemp, sevToColor } from "@/lib/alerts";
 import { groupChannelsByMetric, sortChannels } from "@/lib/channelGroups";
+import {
+	getDeviceAlertSummary as resolveDeviceAlertSummary,
+	getProfileOnlineState as resolveProfileOnlineState,
+	inferDeviceProfile as resolveDeviceProfile,
+} from "@/lib/deviceRules";
 import { detectChannelMetric, getChannelDisplayName, metricLabel, type MetricKey } from "@/lib/metrics";
 import { onlineTag } from "@/lib/status";
 
@@ -116,7 +121,7 @@ function buildDashboardDevices(devices: any[]): DashboardDevice[] {
 			normalDevices.push({
 				...device,
 				dashboard_members: [device],
-				dashboard_profile: inferDeviceProfile(device),
+				dashboard_profile: resolveDeviceProfile(device),
 				dashboard_is_mmcgs_group: false,
 			});
 			continue;
@@ -536,10 +541,10 @@ export default function DashboardPage() {
 		return dashboardDevices.filter((device) => {
 			if (!matchesRunFilter(device, runFilter, runs, windowsMap)) return false;
 
-			const state = getProfileOnlineState(device.last_seen_at, device.dashboard_profile);
+			const state = resolveProfileOnlineState(device.last_seen_at, device.dashboard_profile);
 			if (statusFilter !== "all" && state !== statusFilter) return false;
 
-			const alerts = getAlertSummary(device);
+			const alerts = resolveDeviceAlertSummary(device);
 			if (alertFilter !== "all" && alerts.overall !== alertFilter) return false;
 
 			if (!keyword) return true;
@@ -560,8 +565,8 @@ export default function DashboardPage() {
 		let danger = 0;
 
 		for (const device of dashboardDevices) {
-			if (getProfileOnlineState(device.last_seen_at, device.dashboard_profile) === "online") online += 1;
-			if (getAlertSummary(device).overall === "danger") danger += 1;
+			if (resolveProfileOnlineState(device.last_seen_at, device.dashboard_profile) === "online") online += 1;
+			if (resolveDeviceAlertSummary(device).overall === "danger") danger += 1;
 		}
 
 		return {
@@ -671,8 +676,8 @@ export default function DashboardPage() {
 
 			<Row gutter={[8, 8]}>
 				{filtered.map((device) => {
-					const stateTag = onlineTag(getProfileOnlineState(device.last_seen_at, device.dashboard_profile));
-					const alerts = getAlertSummary(device);
+					const stateTag = onlineTag(resolveProfileOnlineState(device.last_seen_at, device.dashboard_profile));
+					const alerts = resolveDeviceAlertSummary(device);
 					const overallTagColor =
 						alerts.overall === "danger" ? "red" : alerts.overall === "warn" ? "orange" : alerts.overall === "ok" ? "green" : "default";
 					const overallText =
@@ -680,7 +685,7 @@ export default function DashboardPage() {
 					const metricGroups = device.dashboard_is_mmcgs_group ? [] : groupChannelsByMetric(device.channels || []);
 					const metrics = metricGroups.map((group) => group.key).filter((key) => key !== "unknown") as MetricKey[];
 					const onlinePointCount =
-						device.dashboard_points?.filter((point: any) => getProfileOnlineState(point?.last_seen_at, "mmcgs") === "online").length || 0;
+						device.dashboard_points?.filter((point: any) => resolveProfileOnlineState(point?.last_seen_at, "mmcgs") === "online").length || 0;
 					const cardTone = overallTone(alerts.overall);
 					const profile = profileBadge(device.dashboard_profile);
 					const summaryItems = getDeviceSummaryItems(device, alerts);
@@ -794,7 +799,7 @@ export default function DashboardPage() {
 											>
 												{device.dashboard_points.map((point: any) => {
 													const pointIndex = getMmcgsPointIndex(point?.code);
-													const pointState = onlineTag(getProfileOnlineState(point?.last_seen_at, "mmcgs"));
+													const pointState = onlineTag(resolveProfileOnlineState(point?.last_seen_at, "mmcgs"));
 													const summaryItems = getPointSummaryItems(point);
 													const detailItems = getPointDetailItems(point);
 													const pointTitle = point.name || point.code || `P${pointIndex ?? "?"}`;

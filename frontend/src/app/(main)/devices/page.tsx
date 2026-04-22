@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -36,7 +36,7 @@ import { onlineTag } from "@/lib/status";
 import { evalO2, evalTemp } from "@/lib/alerts";
 import { MetricKey, metricLabel, detectChannelMetric } from "@/lib/metrics";
 import { groupChannelsByMetric } from "@/lib/channelGroups";
-import { getDeviceAlertSummary } from "@/lib/deviceRules";
+import { getDeviceAlertSummary, getProfileOnlineState as resolveProfileOnlineState } from "@/lib/deviceRules";
 
 const { Text } = Typography;
 const { useBreakpoint } = Grid;
@@ -182,7 +182,7 @@ function pickLatestLastSeen(devices: any[]): string | null {
 			best = { ms, value: lastSeen };
 		}
 	}
-	return best?.value ?? null;
+	return best?.value || null;
 }
 
 function findChannelsByCodes(channels: any[], codes: string[]): any[] {
@@ -300,7 +300,7 @@ export default function DevicesPage() {
 				note: (values.note || "").trim(),
 				is_active: !!values.is_active,
 			};
-			// meta: 空对象时发送null来清空服务器端的meta
+			// meta: 绌哄璞℃椂鍙戦€乶ull鏉ユ竻绌烘湇鍔″櫒绔殑meta
 			if (values.meta !== undefined) {
 				if (!values.meta || Object.keys(values.meta).length === 0) {
 					body.meta = null;
@@ -345,7 +345,7 @@ export default function DevicesPage() {
 
 		return devices
 			.filter((d) => {
-				const state = getProfileOnlineState(d.last_seen_at, inferDeviceProfile(d));
+				const state = resolveProfileOnlineState(d.last_seen_at, inferDeviceProfile(d));
 				if (statusFilter !== "all" && state !== statusFilter) return false;
 
 				const alertSummary = getDeviceAlertSummary(d);
@@ -355,7 +355,7 @@ export default function DevicesPage() {
 				const hay = `${d.name || ""} ${d.code || ""}`.toLowerCase();
 				return hay.includes(qq);
 			})
-			.sort((a, b) => b.device_id - a.device_id); // 按device_id降序排列，新设备在前
+			.sort((a, b) => b.device_id - a.device_id); // 鎸塪evice_id闄嶅簭鎺掑垪锛屾柊璁惧鍦ㄥ墠
 	}, [devices, q, statusFilter, alertFilter]);
 
 	const displayDevices = useMemo(() => {
@@ -422,7 +422,7 @@ export default function DevicesPage() {
 				key: "status",
 				width: 140,
 				render: (_: any, d: any) => {
-					const st = onlineTag(getProfileOnlineState(d.last_seen_at, inferDeviceProfile(d)));
+					const st = onlineTag(resolveProfileOnlineState(d.last_seen_at, inferDeviceProfile(d)));
 					return <Tag color={st.color}>{st.text}</Tag>;
 				},
 			},
@@ -448,8 +448,8 @@ export default function DevicesPage() {
 					return (
 						<Space>
 							<Tag color={color}>{text}</Tag>
-							<Tooltip title={`温度（取最大）：${tA.tip}；氧气（取最小）：${oA.tip}`}>
-								<span style={{ color: "rgba(0,0,0,.45)" }}>ⓘ</span>
+                            <Tooltip title={`æ¸©åº¦ï¼åæå¤§ï¼ï¼${tA.tip}ï¼æ°§æ°ï¼åæå°ï¼ï¼${oA.tip}`}>
+                                <span style={{ color: "rgba(0,0,0,.45)" }}>i</span>
 							</Tooltip>
 						</Space>
 					);
@@ -576,7 +576,7 @@ export default function DevicesPage() {
 			{isMobile ? (
 				<Row gutter={[12, 12]}>
 					{displayDevices.map((d) => {
-						const st = onlineTag(getProfileOnlineState(d.last_seen_at, inferDeviceProfile(d)));
+						const st = onlineTag(resolveProfileOnlineState(d.last_seen_at, inferDeviceProfile(d)));
 						const profile = inferDeviceProfile(d);
 
 						const metricGroups = groupChannelsByMetric(d.channels || []);
@@ -598,8 +598,8 @@ export default function DevicesPage() {
 											<Tag color={st.color}>{st.text}</Tag>
 											<Tag color="blue">{d.code}</Tag>
 											<Tag color={getProfileColor(profile)}>{getProfileLabel(profile)}</Tag>
-											{d.mmcgs_points?.length ? <Tag color="purple">{`MMCGS · ${d.mmcgs_points.length} 点位`}</Tag> : null}
-											<Tag>{`${d.channels?.length || 0} 通道`}</Tag>
+                                            {d.mmcgs_points?.length ? <Tag color="purple">{`MMCGS ${d.mmcgs_points.length} ç¹ä½`}</Tag> : null}
+                                            <Tag>{`${d.channels?.length || 0} éé`}</Tag>
 										</Space>
 									</div>
 
@@ -626,7 +626,7 @@ export default function DevicesPage() {
 										<div style={{ marginTop: 8 }}>
 											<Space wrap size={6}>
 												{metricGroups.map((group) => (
-													<Tag key={group.key}>{`${metricLabel(group.key as MetricKey)} · ${group.channels.length}`}</Tag>
+													<Tag key={group.key}>{`${metricLabel(group.key as MetricKey)} 路 ${group.channels.length}`}</Tag>
 												))}
 											</Space>
 										</div>
@@ -642,7 +642,7 @@ export default function DevicesPage() {
 														openEdit(d);
 													}}
 												>
-													编辑
+                                                    ç¼è¾
 												</Button>
 												<Button
 													size="small"
@@ -652,7 +652,7 @@ export default function DevicesPage() {
 														confirmDelete(d);
 													}}
 												>
-													删除
+                                                    å é¤
 												</Button>
 											</Space>
 										</div>
@@ -703,8 +703,8 @@ export default function DevicesPage() {
 
 			<DeviceFormModal
 				open={modalOpen}
-				title={editing ? "编辑设备" : "新建设备"}
-				okText={editing ? "保存" : "创建"}
+                title={editing ? "ç¼è¾è®¾å¤" : "æ°å»ºè®¾å¤"}
+                okText={editing ? "ä¿å­" : "åå»º"}
 				initialValues={
 					editing
 						? {
