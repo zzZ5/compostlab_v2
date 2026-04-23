@@ -682,7 +682,7 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 	} satisfies React.CSSProperties;
 	const contentBlockStyle = {
 		width: "100%",
-		maxWidth: 324,
+		maxWidth: isMobile ? 360 : 324,
 		margin: "0 auto",
 	} satisfies React.CSSProperties;
 	const hoverContent = (
@@ -771,7 +771,8 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 		>
 			<Popover
 				content={hoverContent}
-				trigger="hover"
+				trigger={isMobile ? [] : "hover"}
+				open={isMobile ? false : undefined}
 				mouseEnterDelay={0.12}
 				placement="topLeft"
 				overlayStyle={{ maxWidth: isMobile ? 300 : 320 }}
@@ -780,7 +781,7 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 					style={{
 						cursor: "pointer",
 						borderRadius: 16,
-						padding: "18px 10px 14px",
+						padding: isMobile ? "14px 8px 12px" : "18px 10px 14px",
 						background: "radial-gradient(circle at 50% 18%, #ffffff 0%, #f7f9fb 58%, #f1f4f7 100%)",
 						border: "1px solid #e9edf2",
 						display: "flex",
@@ -800,7 +801,18 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 						event.currentTarget.style.transform = "translateY(0)";
 					}}
 				>
-					<svg viewBox="0 0 224 228" width="262" height="248" aria-hidden="true">
+					<svg
+						viewBox="0 0 224 228"
+						width="100%"
+						height="auto"
+						aria-hidden="true"
+						style={{
+							display: "block",
+							width: "100%",
+							maxWidth: isMobile ? 318 : 278,
+							aspectRatio: "224 / 228",
+						}}
+					>
 						<style>
 							{`
 								@keyframes cp500-flow-dash {
@@ -1320,7 +1332,8 @@ export default function DashboardPage() {
 													return (
 														<Popover
 															key={point.device_id}
-															trigger="hover"
+															trigger={isMobile ? [] : "hover"}
+															open={isMobile ? false : undefined}
 															mouseEnterDelay={0.12}
 															placement="topLeft"
 															overlayStyle={{ maxWidth: 320 }}
@@ -1580,7 +1593,7 @@ export default function DashboardPage() {
 					);
 
 					return (
-						<Col key={`${device.device_id}-${device.code || ""}`} xs={24} md={12} lg={6}>
+						<Col key={`${device.device_id}-${device.code || ""}`} xs={24} md={12} lg={device.dashboard_profile === "cp500-v3" ? 8 : 6} xl={device.dashboard_profile === "cp500-v3" ? 6 : 6}>
 							{device.dashboard_is_mmcgs_group ? (
 								cardBody
 							) : (
