@@ -1198,6 +1198,7 @@ export default function DashboardPage() {
 					const cardTone = overallTone(alerts.overall);
 					const profile = profileBadge(device.dashboard_profile);
 					const summaryItems = getDeviceSummaryItems(device, alerts);
+					const isCardClickable = !device.dashboard_is_mmcgs_group;
 
 					const cardBody = (
 						<Card
@@ -1208,6 +1209,7 @@ export default function DashboardPage() {
 								borderColor: cardTone.border,
 								boxShadow: cardTone.shadow,
 								background: "#ffffff",
+								cursor: isCardClickable ? "pointer" : undefined,
 							}}
 						>
 									<div style={{ marginBottom: 10 }}>
@@ -1579,7 +1581,13 @@ export default function DashboardPage() {
 
 					return (
 						<Col key={`${device.device_id}-${device.code || ""}`} xs={24} md={12} lg={6}>
-							{device.dashboard_is_mmcgs_group || device.dashboard_profile === "cp500-v3" ? cardBody : <Link href={`/devices/${device.device_id}`} style={{ display: "block" }}>{cardBody}</Link>}
+							{device.dashboard_is_mmcgs_group ? (
+								cardBody
+							) : (
+								<Link href={`/devices/${device.device_id}`} style={{ display: "block", height: "100%" }}>
+									{cardBody}
+								</Link>
+							)}
 						</Col>
 					);
 				})}
