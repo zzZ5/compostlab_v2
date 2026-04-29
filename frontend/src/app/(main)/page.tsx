@@ -515,11 +515,11 @@ function cp500TempTier(temp: number | null): Cp500TempTier {
 function cp500TempColor(temp: number | null) {
 	const tier = cp500TempTier(temp);
 	if (tier === "unknown") return "#d9d9d9";
-	if (tier === "cool") return "#9ad8a4";
-	if (tier === "mild") return "#4dbf71";
-	if (tier === "active") return "#8acb42";
-	if (tier === "warm") return "#e0b144";
-	return "#de6f5d";
+	if (tier === "cool") return "#a6dca0";
+	if (tier === "mild") return "#6dcc72";
+	if (tier === "active") return "#a8cd4c";
+	if (tier === "warm") return "#ddb25a";
+	return "#d68a78";
 }
 
 function cp500MixColor(hex: string, target: string, amount: number) {
@@ -553,16 +553,25 @@ function cp500PaletteFromTemp(temp: number | null) {
 			waterGlow: "#e8f5eb",
 		};
 	}
+	const tier = cp500TempTier(temp);
+	const bodyTopLighten = tier === "cool" ? 0.1 : tier === "mild" ? 0.14 : 0.18;
+	const bodyBottomDarken = tier === "cool" ? 0.18 : tier === "mild" ? 0.15 : 0.12;
+	const bodyCapLighten = tier === "cool" ? 0.2 : tier === "mild" ? 0.22 : 0.26;
+	const jacketTopLighten = tier === "cool" ? 0.54 : tier === "mild" ? 0.48 : 0.4;
+	const jacketBottomLighten = tier === "cool" ? 0.3 : tier === "mild" ? 0.24 : 0.18;
+	const waterFillLighten = tier === "cool" ? 0.34 : tier === "mild" ? 0.3 : 0.26;
+	const waterSurfaceLighten = tier === "cool" ? 0.48 : tier === "mild" ? 0.42 : 0.38;
+	const waterGlowLighten = tier === "cool" ? 0.62 : tier === "mild" ? 0.56 : 0.52;
 	return {
-		accent: cp500MixColor(base, "ffffff", 0.18),
-		bodyTop: cp500MixColor(base, "ffffff", 0.26),
-		bodyBottom: cp500MixColor(base, "000000", 0.14),
-		bodyCap: cp500MixColor(base, "ffffff", 0.4),
-		jacketTop: cp500MixColor(base, "ffffff", 0.72),
-		jacketBottom: cp500MixColor(base, "ffffff", 0.44),
-		waterFill: cp500MixColor(base, "ffffff", 0.22),
-		waterSurface: cp500MixColor(base, "ffffff", 0.46),
-		waterGlow: cp500MixColor(base, "ffffff", 0.72),
+		accent: cp500MixColor(base, "ffffff", 0.16),
+		bodyTop: cp500MixColor(base, "ffffff", bodyTopLighten),
+		bodyBottom: cp500MixColor(base, "000000", bodyBottomDarken),
+		bodyCap: cp500MixColor(base, "ffffff", bodyCapLighten),
+		jacketTop: cp500MixColor(base, "ffffff", jacketTopLighten),
+		jacketBottom: cp500MixColor(base, "ffffff", jacketBottomLighten),
+		waterFill: cp500MixColor(base, "ffffff", waterFillLighten),
+		waterSurface: cp500MixColor(base, "ffffff", waterSurfaceLighten),
+		waterGlow: cp500MixColor(base, "ffffff", waterGlowLighten),
 	};
 }
 
