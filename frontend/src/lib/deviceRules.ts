@@ -96,6 +96,14 @@ function findChannelsByCodes(channels: any[], codes: string[]): any[] {
 	return (channels || []).filter((channel) => wanted.has(String(channel?.code || "").toLowerCase()));
 }
 
+function averageLatest(channels: any[]): number | null {
+	const values = (channels || [])
+		.map((channel) => latestNumber(channel))
+		.filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
+	if (!values.length) return null;
+	return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 function severityRank(sev: Sev | "none") {
 	if (sev === "danger") return 3;
 	if (sev === "warn") return 2;
@@ -152,14 +160,26 @@ export function getDeviceAlertSummary(device: any) {
 	const maxTemp = maxLatest(tempChannels);
 	const minO2 = minLatest(o2Channels);
 	const profile = inferDeviceProfile(device);
+	const channels = device?.channels || [];
 	const hasTempSignal = tempChannels.length > 0;
 	const hasO2Signal = o2Channels.length > 0;
 	const tempAlert = hasTempSignal ? evalTemp(maxTemp) : { sev: "none" as const, tip: "无温度数据" };
 	const o2Alert = hasO2Signal ? evalO2(minO2) : { sev: "none" as const, tip: "无氧气数据" };
+	const shellTempChannels =
+		profile === "cp500-v3" ? findChannelsByCodes(channels, ["TempOut1", "TempOut2", "TempOut3"]) : [];
+	const tankTemp = profile === "cp500-v3" ? latestNumber(findChannelsByCodes(channels, ["TankTemp"])[0]) : null;
+	const shellAvgTemp = profile === "cp500-v3" ? averageLatest(shellTempChannels) : null;
+	const tankShellDelta = tankTemp === null || shellAvgTemp === null ? null : Math.abs(tankTemp - shellAvgTemp);
+	const deltaAlert =
+		profile === "cp500-v3" && tankShellDelta !== null
+			? tankShellDelta >= 20
+				? { sev: "danger" as const, tip: `水箱与外壁温差过大（${tankShellDelta.toFixed(1)}℃）` }
+				: { sev: "ok" as const, tip: `水箱与外壁温差 ${tankShellDelta.toFixed(1)}℃` }
+			: { sev: "none" as const, tip: "无温差数据" };
 
 	let overall: Sev | "none" = "none";
 	if (profile === "cp500-v3") {
-		overall = tempAlert.sev;
+		overall = combineSeverity(tempAlert.sev, deltaAlert.sev);
 	} else if (profile === "smart-compost" || profile === "mmcgs") {
 		overall = combineSeverity(tempAlert.sev, o2Alert.sev);
 	} else if (hasTempSignal || hasO2Signal) {
@@ -169,9 +189,13 @@ export function getDeviceAlertSummary(device: any) {
 	return {
 		tempAlert,
 		o2Alert,
+		deltaAlert,
 		overall,
 		maxTemp,
 		minO2,
+		tankTemp,
+		shellAvgTemp,
+		tankShellDelta,
 		tempChannels,
 		o2Channels,
 	};

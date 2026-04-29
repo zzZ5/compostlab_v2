@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Card, Col, Grid, Input, Popover, Row, Select, Space, Spin, Tag, Tooltip, Typography } from "antd";
 import { ExclamationCircleOutlined, InfoCircleOutlined } from "@ant-design/icons";
@@ -1020,6 +1021,7 @@ function matchesRunFilter(device: DashboardDevice, runFilter: string | undefined
 export default function DashboardPage() {
 	const screens = useBreakpoint();
 	const isMobile = !screens.md;
+	const router = useRouter();
 
 	const devicesQ = useDevicesTree(true);
 	const rawDevices = devicesQ.data?.data || [];
@@ -1221,8 +1223,9 @@ export default function DashboardPage() {
 								borderColor: cardTone.border,
 								boxShadow: cardTone.shadow,
 								background: "#ffffff",
-								cursor: isCardClickable ? "pointer" : undefined,
+								cursor: "pointer",
 							}}
+							onClick={device.dashboard_is_mmcgs_group ? () => router.push(`/devices/${device.device_id}`) : undefined}
 						>
 									<div style={{ marginBottom: 10 }}>
 										<div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
@@ -1441,7 +1444,11 @@ export default function DashboardPage() {
 																</div>
 															}
 														>
-															<Link href={`/devices/${point.device_id}`} style={{ display: "block" }}>
+															<Link
+																href={`/devices/${point.device_id}`}
+																style={{ display: "block" }}
+																onClick={(event) => event.stopPropagation()}
+															>
 																<div
 																	style={{
 																		border: "1px solid #e8edf3",
