@@ -633,7 +633,7 @@ function Cp500SiloMini({ device }: { device: DashboardDevice }) {
 	const pumpOn = channelSwitchState(device, ["Pump"]);
 	const bodyColor = cp500TempColor(reactorTemp);
 	const bodyPalette = cp500BodyPalette(reactorTemp);
-	const jacketPalette = cp500JacketPalette(tankTemp ?? shellAvgTemp);
+	const jacketPalette = cp500JacketPalette(shellAvgTemp ?? tankTemp);
 	const tankColor = cp500TempColor(tankTemp);
 	const tankWaterPalette = cp500WaterPalette(tankTemp);
 	const shellColor1 = cp500ShellColor(shellTemp1);

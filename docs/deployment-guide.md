@@ -28,6 +28,10 @@
 
 - `frontend/.env.production`
 
+Compose 变量：
+
+- 根目录 `.env` 或启动命令前的 shell 环境变量
+
 常见前端变量：
 
 ```text
@@ -37,7 +41,8 @@ NEXT_PUBLIC_SITE_URL=https://your-frontend.example.com
 
 注意：
 
-- 前端构建时会读取 `NEXT_PUBLIC_API_BASE`
+- 前端构建时会读取 `NEXT_PUBLIC_API_BASE`，如果要换域名，需要重新 `docker compose build frontend`
+- `docker-compose.yml` 中的 `${VAR:-default}` 变量来自根目录 `.env` 或当前 shell，不来自 `env_file`
 - 如果生产环境使用 HTTPS，API 地址也必须是 HTTPS
 - 不要把真实密码提交到公开仓库
 
@@ -48,11 +53,7 @@ docker compose build
 docker compose up -d
 ```
 
-执行迁移：
-
-```bash
-docker compose exec backend python manage.py migrate
-```
+`docker compose up -d` 会先启动 `db`，再运行一次性 `migrate`，迁移成功后再启动后端、前端和 worker。
 
 创建管理员：
 
@@ -73,8 +74,9 @@ docker compose ps
 ```bash
 docker compose build
 docker compose up -d
-docker compose exec backend python manage.py migrate
 ```
+
+当前 Compose 会自动运行 `migrate` 服务，后端会等待迁移成功后再启动。
 
 如果只改了前端环境变量，通常需要重新构建前端镜像：
 
@@ -108,16 +110,16 @@ Compose 中定义：
 
 ## 7. 迁移说明
 
-容器内迁移：
-
-```bash
-docker compose exec backend python manage.py migrate
-```
-
-也可以使用一次性迁移容器：
+推荐使用一次性迁移服务：
 
 ```bash
 docker compose up migrate
+```
+
+如果后端已经启动，也可以手动执行：
+
+```bash
+docker compose exec backend python manage.py migrate
 ```
 
 建议：
@@ -125,6 +127,7 @@ docker compose up migrate
 - 每次部署新版本后先执行迁移
 - 迁移前做数据库备份
 - 生产环境不要在不确认备份的情况下删除数据卷
+- 如果 `migrate` 失败，`backend` 和 worker 不会继续启动，先看 `docker compose logs migrate`
 
 ## 8. MQTT 配置
 
@@ -138,8 +141,9 @@ MQTT_PORT=1883
 如果更换 MQTT Broker，需要同步修改：
 
 - `.env.backend`
-- `docker-compose.yml`
 - 设备端 `config.json`
+
+通常不需要改 `docker-compose.yml`，worker 会从 `.env.backend` 读取 MQTT 配置。
 
 ## 9. 推荐上线检查
 
@@ -194,9 +198,17 @@ docker compose exec -T db psql -U compostlab compostlab < backup.sql
 优先检查：
 
 - 数据库是否 healthy
+- `migrate` 是否成功退出
 - 后端环境变量是否正确
-- 迁移是否执行成功
 - `/healthz` 是否能访问
+
+常用命令：
+
+```bash
+docker compose ps
+docker compose logs --tail=200 migrate
+docker compose logs --tail=200 backend
+```
 
 ### 前端无法请求后端
 

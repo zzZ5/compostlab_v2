@@ -1,18 +1,18 @@
 services:
   db:
-    image: timescale/timescaledb:latest-pg16
+    image: ${TIMESCALE_IMAGE:-timescale/timescaledb:latest-pg16}
     container_name: compostlab_tsdb
     environment:
-      POSTGRES_DB: compostlab
-      POSTGRES_USER: compostlab
-      POSTGRES_PASSWORD: compostlab
+      POSTGRES_DB: ${POSTGRES_DB:-compostlab}
+      POSTGRES_USER: ${POSTGRES_USER:-compostlab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-compostlab}
     ports:
       - "5432:5432"
     volumes:
       - tsdb_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U compostlab -d compostlab"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -25,10 +25,11 @@ services:
     container_name: compostlab_backend
     env_file:
       - .env.backend
-    environment: {}
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8001:8000"
     volumes:
@@ -36,10 +37,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
 
   migrate:
     build:
@@ -48,7 +49,6 @@ services:
     container_name: compostlab_migrate
     env_file:
       - .env.backend
-    environment: {}
     depends_on:
       db:
         condition: service_healthy
@@ -62,12 +62,11 @@ services:
     container_name: compostlab_mqtt_worker
     env_file:
       - .env.backend
-    environment:
-      MQTT_HOST: 118.25.108.254
-      MQTT_PORT: 1883
     depends_on:
-      backend:
+      db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: python manage.py mqtt_worker
     restart: unless-stopped
 
@@ -78,13 +77,11 @@ services:
     container_name: compostlab_mqtt_register_worker
     env_file:
       - .env.backend
-    environment:
-      MQTT_HOST: 118.25.108.254
-      MQTT_PORT: 1883
-      MQTT_REGISTER_TOPIC: compostlab/v2/+/register
     depends_on:
-      backend:
+      db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: python manage.py mqtt_register_worker
     restart: unless-stopped
 
@@ -96,12 +93,14 @@ services:
     env_file:
       - .env.backend
     environment:
-      AUTO_CONTROL_INTERVAL_SECONDS: 30
-      AUTO_CONTROL_ENABLE_THRESHOLDS: 1
-      AUTO_CONTROL_ENABLE_SCHEDULES: 1
+      AUTO_CONTROL_INTERVAL_SECONDS: ${AUTO_CONTROL_INTERVAL_SECONDS:-30}
+      AUTO_CONTROL_ENABLE_THRESHOLDS: ${AUTO_CONTROL_ENABLE_THRESHOLDS:-1}
+      AUTO_CONTROL_ENABLE_SCHEDULES: ${AUTO_CONTROL_ENABLE_SCHEDULES:-1}
     depends_on:
-      backend:
+      db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: python manage.py auto_control_worker
     restart: unless-stopped
 
@@ -110,15 +109,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_BASE: https://compostlab-backend-v2.cpolar.cn/api/v2
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-https://compostlab-backend-v2.cpolar.cn/api/v2}
     container_name: compostlab_frontend
     env_file:
       - ./frontend/.env.production
     environment:
-      NEXT_PUBLIC_API_BASE: https://compostlab-backend-v2.cpolar.cn/api/v2
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-https://compostlab-backend-v2.cpolar.cn/api/v2}
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "3000:3000"
     restart: unless-stopped

@@ -1,6 +1,6 @@
 # CompostLab V2 技术说明
 
-> 文档索引与分类入口请见：[docs/README.md](/d/PythonProject/backend_v2/docs/README.md)
+> 文档入口请见：[README.md](../README.md)
 
 ## 1. 项目概述
 

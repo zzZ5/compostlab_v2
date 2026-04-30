@@ -1,6 +1,6 @@
 # CompostLab V2 用户使用手册
 
-> 文档索引与分类入口请见：[docs/README.md](/d/PythonProject/backend_v2/docs/README.md)
+> 文档入口请见：[README.md](../README.md)
 
 ## 1. 这份手册适合谁
 
