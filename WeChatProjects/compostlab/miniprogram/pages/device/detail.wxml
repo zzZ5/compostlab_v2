@@ -1,0 +1,33 @@
+<view class="page">
+  <view wx:if="{{device}}" class="card device-head">
+    <view class="row between">
+      <view>
+        <view class="device-name">{{device.displayName}}</view>
+        <view class="device-code">{{device.code}}</view>
+      </view>
+      <view class="state {{device.stateClass}}">{{device.stateText}}</view>
+    </view>
+    <view class="meta">Last seen: {{device.lastSeenText}}</view>
+    <view class="meta">IP: {{device.ipText}}</view>
+    <button wx:if="{{canControl}}" class="primary-btn control-btn" bindtap="openControl">Control</button>
+  </view>
+
+  <view class="section-title">Channels</view>
+  <view wx:if="{{loading}}" class="card empty">Loading...</view>
+  <view wx:elif="{{channels.length === 0}}" class="card empty">No channels</view>
+  <view wx:else>
+    <view class="card channel-card" wx:for="{{channels}}" wx:key="channel_id">
+      <view class="row between">
+        <view>
+          <view class="channel-name">{{item.title}}</view>
+          <view class="channel-code">{{item.code}}</view>
+        </view>
+        <view class="channel-value">{{item.valueText}}</view>
+      </view>
+      <view class="row between channel-meta">
+        <text>{{item.metricText}}</text>
+        <text>{{item.tsText}}</text>
+      </view>
+    </view>
+  </view>
+</view>

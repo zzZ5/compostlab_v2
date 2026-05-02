@@ -1,0 +1,19 @@
+<view class="page login-page">
+  <view class="brand">
+    <view class="brand-mark">CL</view>
+    <view class="brand-title">CompostLab</view>
+    <view class="brand-subtitle">Compost experiment data platform</view>
+  </view>
+
+  <view class="card form-card">
+    <view class="field">
+      <text class="label">Account</text>
+      <input value="{{username}}" data-field="username" bindinput="onInput" placeholder="Username / email / phone" />
+    </view>
+    <view class="field">
+      <text class="label">Password</text>
+      <input password value="{{password}}" data-field="password" bindinput="onInput" placeholder="Password" />
+    </view>
+    <button class="primary-btn login-btn" loading="{{loading}}" bindtap="onLogin">Sign in</button>
+  </view>
+</view>

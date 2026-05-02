@@ -1,0 +1,47 @@
+.section-title {
+  margin-bottom: 22rpx;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.field {
+  margin-bottom: 22rpx;
+}
+
+.label {
+  display: block;
+  margin-bottom: 10rpx;
+  color: #6a7670;
+  font-size: 24rpx;
+}
+
+input,
+.picker-value {
+  height: 78rpx;
+  line-height: 78rpx;
+  padding: 0 20rpx;
+  border: 1rpx solid #dbe4df;
+  border-radius: 10rpx;
+  background: #fafcfb;
+  box-sizing: border-box;
+}
+
+.custom-card {
+  margin-top: 22rpx;
+}
+
+textarea {
+  width: 100%;
+  height: 360rpx;
+  padding: 18rpx;
+  border: 1rpx solid #dbe4df;
+  border-radius: 10rpx;
+  background: #fafcfb;
+  box-sizing: border-box;
+  font-family: monospace;
+  font-size: 24rpx;
+}
+
+button {
+  margin-top: 22rpx;
+}

@@ -1,0 +1,20 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/login/index",
+    "pages/dashboard/index",
+    "pages/device/detail",
+    "pages/device/control",
+    "pages/profile/index"
+  ],
+  "window": {
+    "backgroundColor": "#F4F6F5",
+    "backgroundTextStyle": "light",
+    "navigationBarBackgroundColor": "#F4F6F5",
+    "navigationBarTitleText": "CompostLab",
+    "navigationBarTextStyle": "black"
+  },
+  "sitemapLocation": "sitemap.json",
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents"
+}

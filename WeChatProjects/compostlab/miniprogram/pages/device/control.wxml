@@ -1,0 +1,28 @@
+<view class="page">
+  <view class="card">
+    <view class="section-title">Quick Command</view>
+    <view class="field">
+      <text class="label">Command</text>
+      <picker range="{{commandOptions}}" range-key="label" bindchange="onCommandChange">
+        <view class="picker-value">{{commandLabel}}</view>
+      </picker>
+    </view>
+    <view class="field">
+      <text class="label">Action</text>
+      <picker range="{{actionOptions}}" range-key="label" bindchange="onActionChange">
+        <view class="picker-value">{{actionLabel}}</view>
+      </picker>
+    </view>
+    <view class="field">
+      <text class="label">Duration ms</text>
+      <input type="number" value="{{duration}}" bindinput="onDurationInput" />
+    </view>
+    <button class="primary-btn" loading="{{loading}}" bindtap="sendQuickCommand">Send Quick Command</button>
+  </view>
+
+  <view class="card custom-card">
+    <view class="section-title">Custom JSON</view>
+    <textarea value="{{jsonText}}" bindinput="onJsonInput" maxlength="-1" />
+    <button class="primary-btn" loading="{{loading}}" bindtap="sendCustomCommand">Send Custom Command</button>
+  </view>
+</view>

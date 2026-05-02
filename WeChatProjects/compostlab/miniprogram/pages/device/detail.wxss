@@ -1,0 +1,63 @@
+.device-head {
+  margin-bottom: 28rpx;
+}
+
+.device-name {
+  font-size: 38rpx;
+  font-weight: 700;
+}
+
+.device-code,
+.meta {
+  margin-top: 8rpx;
+  color: #6a7670;
+  font-size: 24rpx;
+}
+
+.state {
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+}
+
+.state-online { color: #0b6b3f; background: #e6f6ed; }
+.state-idle { color: #8a5b00; background: #fff4d8; }
+.state-offline { color: #9b2c2c; background: #ffe5e5; }
+.state-unknown { color: #63716a; background: #edf1ef; }
+
+.control-btn {
+  margin-top: 24rpx;
+}
+
+.section-title {
+  margin: 10rpx 0 18rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.channel-card {
+  margin-bottom: 18rpx;
+}
+
+.channel-name {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.channel-code,
+.channel-meta {
+  color: #6a7670;
+  font-size: 23rpx;
+}
+
+.channel-value {
+  max-width: 280rpx;
+  text-align: right;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.empty {
+  text-align: center;
+  color: #6a7670;
+}

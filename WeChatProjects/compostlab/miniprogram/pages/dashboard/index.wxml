@@ -1,0 +1,38 @@
+<view class="page">
+  <view class="header row between">
+    <view>
+      <view class="title">Devices</view>
+      <view class="muted">Total {{total}}</view>
+    </view>
+    <button class="profile-btn" bindtap="openProfile">Me</button>
+  </view>
+
+  <view class="search card row">
+    <input value="{{q}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="onSearch" placeholder="Search code or name" />
+    <button bindtap="onSearch">Search</button>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty card">Loading...</view>
+  <view wx:elif="{{devices.length === 0}}" class="empty card">No devices</view>
+
+  <view wx:else>
+    <view class="device-card card" wx:for="{{devices}}" wx:key="device_id" data-id="{{item.device_id}}" bindtap="openDevice">
+      <view class="row between">
+        <view>
+          <view class="device-name">{{item.displayName}}</view>
+          <view class="device-code">{{item.code}}</view>
+        </view>
+        <view class="state {{item.stateClass}}">{{item.stateText}}</view>
+      </view>
+
+      <view class="latest-grid" wx:if="{{item.featured.length}}">
+        <view class="metric" wx:for="{{item.featured}}" wx:key="code" wx:for-item="metric">
+          <view class="metric-name">{{metric.name}}</view>
+          <view class="metric-value">{{metric.valueText}}</view>
+        </view>
+      </view>
+
+      <view class="muted last-seen">Last seen: {{item.lastSeenText}}</view>
+    </view>
+  </view>
+</view>

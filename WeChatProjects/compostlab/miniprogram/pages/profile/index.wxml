@@ -1,0 +1,16 @@
+<view class="page">
+  <view class="card" wx:if="{{user}}">
+    <view class="avatar">{{initial}}</view>
+    <view class="name">{{user.displayName}}</view>
+    <view class="muted">{{user.username}}</view>
+    <view class="info-row row between">
+      <text>Role</text>
+      <text>{{user.roleText}}</text>
+    </view>
+    <view class="info-row row between">
+      <text>Department</text>
+      <text>{{user.departmentText}}</text>
+    </view>
+  </view>
+  <button class="danger-btn logout" bindtap="logout">Log out</button>
+</view>

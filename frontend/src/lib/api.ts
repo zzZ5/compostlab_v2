@@ -2,43 +2,24 @@ import axios, { AxiosError, AxiosInstance } from "axios";
 import type { APIError } from "@/types/api";
 import { getAccessToken, getRefreshToken, setTokens, clearTokens } from "@/lib/auth";
 
-/**
- * 统一读取 API_BASE
- * - NEXT_PUBLIC_API_BASE 建议类似：http://127.0.0.1:8000/api/v2
- */
 function getApiBase(): string {
-	/**
-	 * ✅ 默认同域反代：/api/v2
-	 * - 你的后端 urls.py 已把 v2 API 挂载到 /api/v2/...
-	 * - 因此在绝大多数部署（Nginx/Next 同域反代）下无需额外配置
-	 * - 如果你需要指向其它域（例如本地独立后端），再配置 NEXT_PUBLIC_API_BASE
-	 */
 	const base = (process.env.NEXT_PUBLIC_API_BASE || "").trim() || "/api/v2";
-	return base.replace(/\/+$/, ""); // 去掉末尾 /
+	return base.replace(/\/+$/, "");
 }
 
-/**
- * Auth header（JWT Token 优先，兼容 Basic Auth）
- */
 function authHeader(): string | null {
 	if (typeof window === "undefined") return null;
-	
-	// 优先使用 JWT Token
+
 	const token = getAccessToken();
 	if (token) return `Bearer ${token}`;
-	
-	// 向后兼容 Basic Auth
+
 	const basicToken = localStorage.getItem("basic_auth");
 	if (basicToken) return `Basic ${basicToken}`;
-	
+
 	return null;
 }
 
-/**
- * query 序列化：过滤 undefined/null/""，数组按重复 key 形式
- * 例如：{ channels:["TEMP","O2"], from:"..." } -> channels=TEMP&channels=O2&from=...
- */
-export function buildQuery(params: Record<string, any>): string {
+export function buildQuery(params: Record<string, unknown>): string {
 	const usp = new URLSearchParams();
 
 	Object.entries(params || {}).forEach(([k, v]) => {
@@ -46,8 +27,7 @@ export function buildQuery(params: Record<string, any>): string {
 		if (typeof v === "string" && v.trim() === "") return;
 
 		if (Array.isArray(v)) {
-			// 后端对 channels 参数使用逗号分隔（request.GET.get("channels")），
-			// 若使用重复的 channels=... 会只取到第一个值，导致多通道无法生效。
+			// The backend expects a comma-separated channels parameter.
 			if (k === "channels") {
 				const s = v.filter((x) => x !== undefined && x !== null && String(x).trim() !== "").join(",");
 				if (s) usp.set(k, s);
@@ -67,21 +47,20 @@ export function buildQuery(params: Record<string, any>): string {
 	return qs ? `?${qs}` : "";
 }
 
-/**
- * 统一提取后端错误信息（detail / message / fallback）
- */
 export function getErrorMessage(err: unknown, fallback = "Request failed"): string {
 	if (!err) return fallback;
 
-	// Axios error
 	const ax = err as AxiosError<APIError>;
 	const status = ax?.response?.status;
-	const data: any = ax?.response?.data;
+	const data = ax?.response?.data as unknown;
 
 	if (data) {
 		if (typeof data === "string") return data;
-		if (typeof data?.detail === "string") return data.detail;
-		if (typeof data?.message === "string") return data.message;
+		if (typeof data === "object") {
+			const body = data as Record<string, unknown>;
+			if (typeof body.detail === "string") return body.detail;
+			if (typeof body.message === "string") return body.message;
+		}
 	}
 
 	if (typeof ax?.message === "string" && ax.message) {
@@ -91,9 +70,6 @@ export function getErrorMessage(err: unknown, fallback = "Request failed"): stri
 	return fallback;
 }
 
-/**
- * 下载工具：用于 export CSV 等（会自动带 Authorization）
- */
 export async function downloadBlob(
 	apiClient: AxiosInstance,
 	url: string,
@@ -115,10 +91,6 @@ export async function downloadBlob(
 	window.URL.revokeObjectURL(blobUrl);
 }
 
-/* =========================
- * axios instance
- * ========================= */
-
 export const api = axios.create({
 	baseURL: getApiBase(),
 	timeout: 20000,
@@ -129,7 +101,6 @@ export const api = axios.create({
 
 let refreshPromise: Promise<string | null> | null = null;
 
-// request: inject Authorization
 api.interceptors.request.use(async (config) => {
 	config.headers = config.headers ?? {};
 	const h = authHeader();
@@ -141,20 +112,18 @@ api.interceptors.request.use(async (config) => {
 	return config;
 });
 
-// response: handle 401 redirect and token refresh
 api.interceptors.response.use(
 	(res) => res,
 	async (err) => {
 		const status = err?.response?.status;
 		const originalRequest = err.config;
 
-		// Token 过期，尝试刷新
 		if (status === 401 && !originalRequest._retry && typeof window !== "undefined") {
 			const refreshToken = getRefreshToken();
-			
+
 			if (refreshToken) {
 				originalRequest._retry = true;
-				
+
 				try {
 					if (!refreshPromise) {
 						refreshPromise = axios
@@ -180,7 +149,6 @@ api.interceptors.response.use(
 						return api(originalRequest);
 					}
 				} catch (refreshError) {
-					// Refresh 失败，清除 token 并跳转登录
 					clearTokens();
 					if (!window.location.pathname.startsWith("/login")) {
 						const next = encodeURIComponent(window.location.pathname + window.location.search);
@@ -189,8 +157,7 @@ api.interceptors.response.use(
 					return Promise.reject(refreshError);
 				}
 			}
-			
-			// 没有 refresh token，直接跳转登录
+
 			if (!window.location.pathname.startsWith("/login")) {
 				const next = encodeURIComponent(window.location.pathname + window.location.search);
 				window.location.href = `/login?next=${next}`;

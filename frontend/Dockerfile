@@ -2,18 +2,17 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 接收构建时参数（用于 HTTPS 地址）
+# Build-time API base URL, usually an HTTPS endpoint in deployed builds.
 ARG NEXT_PUBLIC_API_BASE
 ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
 
 COPY package*.json ./
 RUN npm ci
 
-# 复制所有文件（包括 .env.production）
+# Copy the application source after dependencies for better layer caching.
 COPY . .
 
 RUN npm run build
 
 EXPOSE 3000
 CMD ["npm", "start"]
-

@@ -1,0 +1,101 @@
+.header {
+  margin-bottom: 24rpx;
+}
+
+.title {
+  font-size: 42rpx;
+  font-weight: 700;
+}
+
+.profile-btn {
+  width: 132rpx;
+  height: 64rpx;
+  line-height: 64rpx;
+  margin: 0;
+  padding: 0;
+  font-size: 26rpx;
+  background: #fff;
+  border: 1rpx solid #dbe4df;
+}
+
+.search {
+  gap: 16rpx;
+  padding: 18rpx;
+  margin-bottom: 22rpx;
+}
+
+.search input {
+  flex: 1;
+  height: 64rpx;
+}
+
+.search button {
+  width: 112rpx;
+  height: 64rpx;
+  line-height: 64rpx;
+  margin: 0;
+  padding: 0;
+  font-size: 26rpx;
+  background: #166b45;
+  color: #fff;
+}
+
+.device-card {
+  margin-bottom: 20rpx;
+}
+
+.device-name {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.device-code {
+  margin-top: 6rpx;
+  color: #6a7670;
+  font-size: 24rpx;
+}
+
+.state {
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+}
+
+.state-online { color: #0b6b3f; background: #e6f6ed; }
+.state-idle { color: #8a5b00; background: #fff4d8; }
+.state-offline { color: #9b2c2c; background: #ffe5e5; }
+.state-unknown { color: #63716a; background: #edf1ef; }
+
+.latest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14rpx;
+  margin-top: 22rpx;
+}
+
+.metric {
+  padding: 18rpx;
+  border-radius: 10rpx;
+  background: #f6faf8;
+}
+
+.metric-name {
+  color: #6a7670;
+  font-size: 23rpx;
+}
+
+.metric-value {
+  margin-top: 8rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.last-seen {
+  margin-top: 18rpx;
+  font-size: 24rpx;
+}
+
+.empty {
+  text-align: center;
+  color: #6a7670;
+}

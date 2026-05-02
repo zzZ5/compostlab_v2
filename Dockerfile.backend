@@ -8,23 +8,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 配置pip使用官方PyPI源（更稳定，更新及时）
+# Use the official PyPI index.
 RUN pip config set global.index-url https://pypi.org/simple
 
-# 依赖优先使用 Python binary wheels，避免新环境依赖 apt 源稳定性。
-
+# Prefer Python wheels so fresh environments do not depend on apt packages.
 COPY requirements.txt .
 
-# 分步升级和安装依赖，提高稳定性
+# Upgrade packaging tools first, then install application dependencies.
 RUN pip install --upgrade pip setuptools wheel || pip install --upgrade pip setuptools wheel --default-timeout=100
 
-# 尝试安装依赖，如果失败则重试
+# Retry once to handle transient PyPI/network failures.
 RUN pip install -r requirements.txt || \
     (echo "First attempt failed, retrying..." && \
      pip install -r requirements.txt --default-timeout=200 --retries 3)
 
 COPY . .
 
-# 使用 Gunicorn 作为生产 WSGI 服务
+# Use Gunicorn as the production WSGI server.
 CMD ["sh", "-c", "python manage.py collectstatic --noinput >/dev/null && gunicorn compostlab_v2.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"]
-
