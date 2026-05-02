@@ -53,3 +53,5 @@ frontend/.env.production
 .DS_Store
 Thumbs.db
 arduino_equipments/
+ArduinoEquipments/
+WeChatProjects/
