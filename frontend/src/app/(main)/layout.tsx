@@ -195,7 +195,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             { key: "/scripts", icon: <ControlOutlined />, label: <Link href="/scripts">控制脚本</Link> },
             { key: "/runs", icon: <ExperimentOutlined />, label: <Link href="/runs">运行批次</Link> },
             { key: "/telemetry", icon: <LineChartOutlined />, label: <Link href="/telemetry">数据探索</Link> },
-            { key: "/literature", icon: <ReadOutlined />, label: <Link href="/literature">文献分析</Link> },
+            { key: "/literature", icon: <ReadOutlined />, label: <Link href="/literature">文献分享</Link> },
             { type: "divider" },
             { key: "/announcements/history", icon: <BellOutlined />, label: <Link href="/announcements/history">公告历史</Link> },
             ...(currentUser?.role === "admin"

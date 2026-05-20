@@ -46,7 +46,7 @@ NEXT_PUBLIC_SITE_URL=https://your-frontend.example.com
 - 如果生产环境使用 HTTPS，API 地址也必须是 HTTPS
 - 不要把真实密码提交到公开仓库
 
-文献分析文章目录：
+文献分享文章目录：
 
 ```text
 LITERATURE_ARTICLE_ROOT=/app/media/literature/articles
@@ -129,7 +129,7 @@ Compose 中定义：
 - `tsdb_data`：数据库数据
 - `run_attachments`：批次附件和媒体文件
 
-每日文献分析文章默认放在 `media/literature/articles`，生产环境应随 `media` 或 `/app/media` 一起持久化。
+文献分享文章默认放在 `media/literature/articles`，生产环境应随 `media` 或 `/app/media` 一起持久化。
 
 这些卷不能随意删除，否则会丢数据。
 

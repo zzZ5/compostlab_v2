@@ -55,9 +55,9 @@ export default function LiteraturePage() {
 					<div>
 						<Space size={8} wrap style={{ marginBottom: 10 }}>
 							<Tag color="green">堆肥科研札记</Tag>
-							<Tag>文献分析</Tag>
+							<Tag>文献分享</Tag>
 						</Space>
-						<Title level={1} style={{ margin: 0, color: "#20372a", fontSize: 34 }}>文献分析</Title>
+						<Title level={1} style={{ margin: 0, color: "#20372a", fontSize: 34 }}>文献分享</Title>
 						<Paragraph style={{ marginTop: 10, marginBottom: 0, color: "#536157", maxWidth: 680, lineHeight: 1.8 }}>
 							面向堆肥、资源化利用与环境过程控制的文献导读。公众号可将“阅读原文”链接到这里的对应日期文章。
 						</Paragraph>
@@ -107,7 +107,7 @@ export default function LiteraturePage() {
 					</Row>
 				) : (
 					<Card style={{ borderRadius: 18 }}>
-						<Empty description="还没有已发布的文献分析文章" />
+						<Empty description="还没有已发布的文献分享文章" />
 					</Card>
 				)}
 			</div>

@@ -107,7 +107,7 @@ def serialize_digest(item: DigestFile, include_html: bool = False, request=None)
     payload = {
         "slug": item.slug,
         "date": item.date,
-        "title": extract_title(html, f"{item.date} 文献分析"),
+        "title": extract_title(html, f"{item.date} 文献分享"),
         "summary": extract_summary(html),
         "filename": item.path.name,
     }

@@ -107,7 +107,7 @@ export default function LiteratureDetailPage() {
 						/>
 					</>
 				) : (
-					<Alert type="warning" showIcon title="未找到该日期的文献分析" />
+					<Alert type="warning" showIcon title="未找到该日期的文献分享" />
 				)}
 			</div>
 		</main>
