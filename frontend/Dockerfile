@@ -1,13 +1,14 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
 # Build-time API base URL, usually an HTTPS endpoint in deployed builds.
 ARG NEXT_PUBLIC_API_BASE
-ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
+ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE} \
+    NEXT_TELEMETRY_DISABLED=1
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --include=optional
 
 # Copy the application source after dependencies for better layer caching.
 COPY . .
