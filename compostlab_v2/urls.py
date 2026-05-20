@@ -17,6 +17,7 @@ urlpatterns = [
     path("api/v2/", include("apps.runs.urls")),
     path("api/v2/", include("apps.telemetry.urls")),
     path("api/v2/announcements/", include("apps.announcements.urls")),
+    path("api/v2/literature/", include("apps.literature.urls")),
 ]
 
 # 静态文件服务（生产环境由 whitenoise 处理，这里仅用于开发）

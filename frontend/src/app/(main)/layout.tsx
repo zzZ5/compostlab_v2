@@ -19,6 +19,7 @@ import {
     BellOutlined,
     InfoCircleOutlined,
     FileTextOutlined,
+    ReadOutlined,
 } from "@ant-design/icons";
 import { hasBasicAuth, clearBasicAuth, hasToken, clearTokens, getUser, setUser } from "@/lib/auth";
 import { useMe } from "@/features/users/queries";
@@ -35,6 +36,7 @@ function getSelectedKey(pathname: string) {
     if (pathname.startsWith("/devices")) return "/devices";
     if (pathname.startsWith("/runs")) return "/runs";
     if (pathname.startsWith("/telemetry")) return "/telemetry";
+    if (pathname.startsWith("/literature")) return "/literature";
     if (pathname.startsWith("/scripts")) return "/scripts";
     if (pathname.startsWith("/linkages")) return "/scripts";
     if (pathname.startsWith("/announcements/history")) return "/announcements/history";
@@ -193,6 +195,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             { key: "/scripts", icon: <ControlOutlined />, label: <Link href="/scripts">控制脚本</Link> },
             { key: "/runs", icon: <ExperimentOutlined />, label: <Link href="/runs">运行批次</Link> },
             { key: "/telemetry", icon: <LineChartOutlined />, label: <Link href="/telemetry">数据探索</Link> },
+            { key: "/literature", icon: <ReadOutlined />, label: <Link href="/literature">文献分析</Link> },
             { type: "divider" },
             { key: "/announcements/history", icon: <BellOutlined />, label: <Link href="/announcements/history">公告历史</Link> },
             ...(currentUser?.role === "admin"

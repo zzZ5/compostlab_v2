@@ -46,6 +46,29 @@ NEXT_PUBLIC_SITE_URL=https://your-frontend.example.com
 - 如果生产环境使用 HTTPS，API 地址也必须是 HTTPS
 - 不要把真实密码提交到公开仓库
 
+文献分析文章目录：
+
+```text
+LITERATURE_ARTICLE_ROOT=/app/media/literature/articles
+LITERATURE_ASSET_ROOT=/app/media/literature/assets
+```
+
+默认正式发布目录是 `media/literature/articles`。文件命名使用 `YYYY-MM-DD_daily_digest.html`，例如：
+
+```text
+media/literature/articles/2026-05-20_daily_digest.html
+```
+
+系统只读取该正式发布目录。
+
+如果 HTML 中包含本地 `file:///...` 图片路径，部署前运行：
+
+```bash
+docker compose exec backend python manage.py import_literature_assets
+```
+
+该命令会把图片复制到 `media/literature/assets/<日期>/`，并把文章中的图片地址改为 `/media/literature/assets/<日期>/<文件名>`。
+
 ## 3. 首次部署
 
 ```bash
@@ -105,6 +128,8 @@ Compose 中定义：
 
 - `tsdb_data`：数据库数据
 - `run_attachments`：批次附件和媒体文件
+
+每日文献分析文章默认放在 `media/literature/articles`，生产环境应随 `media` 或 `/app/media` 一起持久化。
 
 这些卷不能随意删除，否则会丢数据。
 

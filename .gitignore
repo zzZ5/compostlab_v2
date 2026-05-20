@@ -16,7 +16,7 @@ db.sqlite3
 run_attachments/
 
 # Django 运行时文件（按需调整，如果你有持久化/media，请在服务器挂卷而不是进仓库）
-media/
+# media/
 staticfiles/
 
 # 注意：如果你已经有正式迁移文件，不要忽略整个 migrations 目录，

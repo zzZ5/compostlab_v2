@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "apps.runs",
     "apps.telemetry",
     "apps.announcements",
+    "apps.literature",
     "corsheaders",
 ]
 
@@ -137,32 +138,43 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+LITERATURE_ARTICLE_ROOT = env.path("LITERATURE_ARTICLE_ROOT", default=MEDIA_ROOT / "literature" / "articles")
+LITERATURE_ASSET_ROOT = env.path("LITERATURE_ASSET_ROOT", default=MEDIA_ROOT / "literature" / "assets")
+
 
 CORS_ALLOW_CREDENTIALS = True
 
-CORS_ALLOWED_ORIGINS = [
+DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://localhost:3000",
     "http://127.0.0.1:3000",
     "https://127.0.0.1:3000",
+    "http://localhost:3333",
+    "https://localhost:3333",
+    "http://127.0.0.1:3333",
+    "https://127.0.0.1:3333",
     "http://compostlab.cpolar.cn",
     "https://compostlab.cpolar.cn",
     "http://compostlab-backend-v2.cpolar.cn",
     "https://compostlab-backend-v2.cpolar.cn",
+]
+
+
+def comma_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+CORS_ALLOWED_ORIGINS = [
+    *DEFAULT_CORS_ALLOWED_ORIGINS,
+    *comma_list(env("CORS_ALLOWED_ORIGINS", default="")),
 ]
 CORS_ALLOW_HEADERS = list(default_headers) + ["authorization"]
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 # 添加以下配置
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "https://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://127.0.0.1:3000",
-    "http://compostlab.cpolar.cn",
-    "https://compostlab.cpolar.cn",
-    "http://compostlab-backend-v2.cpolar.cn",
-    "https://compostlab-backend-v2.cpolar.cn",
+    *DEFAULT_CORS_ALLOWED_ORIGINS,
+    *comma_list(env("CSRF_TRUSTED_ORIGINS", default="")),
 ]
 
 # JWT 配置
