@@ -34,6 +34,7 @@ services:
       - "8001:8000"
     volumes:
       - run_attachments:/app/media
+      - ./media/literature:/app/media/literature:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).read()\""]
@@ -53,6 +54,9 @@ services:
       db:
         condition: service_healthy
     command: python manage.py migrate
+    volumes:
+      - run_attachments:/app/media
+      - ./media/literature:/app/media/literature:ro
     restart: "no"
 
   mqtt_worker:
@@ -68,6 +72,8 @@ services:
       migrate:
         condition: service_completed_successfully
     command: python manage.py mqtt_worker
+    volumes:
+      - run_attachments:/app/media
     restart: unless-stopped
 
   mqtt_register_worker:
@@ -83,6 +89,8 @@ services:
       migrate:
         condition: service_completed_successfully
     command: python manage.py mqtt_register_worker
+    volumes:
+      - run_attachments:/app/media
     restart: unless-stopped
 
   auto_control_worker:
@@ -102,6 +110,8 @@ services:
       migrate:
         condition: service_completed_successfully
     command: python manage.py auto_control_worker
+    volumes:
+      - run_attachments:/app/media
     restart: unless-stopped
 
   frontend:

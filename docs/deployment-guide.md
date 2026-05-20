@@ -129,7 +129,7 @@ Compose 中定义：
 - `tsdb_data`：数据库数据
 - `run_attachments`：批次附件和媒体文件
 
-文献分享文章默认放在 `media/literature/articles`，生产环境应随 `media` 或 `/app/media` 一起持久化。
+文献分享文章默认放在宿主机 `media/literature/articles`，Compose 会把 `./media/literature` 只读挂载到后端容器的 `/app/media/literature`。
 
 这些卷不能随意删除，否则会丢数据。
 
